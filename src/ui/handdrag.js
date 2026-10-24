@@ -6,30 +6,48 @@
 // - マウス：押したまま 6px 以上動かしたら dragging（スクロールとの衝突がないため待ち時間なし）。
 // - dragging 中は、牌を浮かせて表示し、挿入位置に線を出す。手牌の帯の上で動かして離すと並び替え確定。
 //   帯の外で離す・動かさずに離す・pointercancel・回転・アプリ切替・スクロール・Esc・状態変化・再描画では中止。
-// - ドラッグに由来する click は、そのポインターの操作に対応付けて1回だけ抑止する（createClickGuard）。
+// - 「タップではなくなった操作」（押下中に 8px 以上動いた、またはドラッグになった）に由来する click は、
+//   そのポインターの操作に対応付けて1回だけ抑止する（createClickGuard）。ブラウザが click を作る移動量の閾値は
+//   アプリの 8px より大きいことがある（Chromium は 9〜12px 動いても click を送る）ため、閾値を合わせるのではなく、
+//   アプリがタップでないと判断した操作の click をすべて抑止する。
 
 import { insertionIndex, moveTo } from './handorder.js';
 
-// ドラッグに由来する click だけを抑止する（純粋なロジック。tests/handdrag.test.js で検証）。
-// - arm(pointerId)：ドラッグが終わったポインター（指を離した時点）で有効化。
-// - pointerDown()：新しい押下が始まったら必ず解除（別のタップを抑止しない）。
-// - shouldSuppress(ev)：有効化中の最初の click だけ true を返し、解除する。
-//   キーボード由来の click（detail === 0）や、別のポインター ID が分かっている click は抑止しない。
-//   iOS Safari の合成 click は pointerId を持たないことがあるため、ID 不明の click は「直前のドラッグ由来」とみなす
-//   （合成 click は指を離した直後、次の押下より前に届く。次の押下が来た時点で必ず解除される）。
+// 「タップとして無効になった操作」に由来する click だけを抑止する（純粋なロジック。tests/handorder.test.js で検証）。
+// 抑止の状態はこの1か所だけで持つ（同時に追跡するのは1つの操作だけ）。
+// - invalidate(pointerId)：その操作がタップではなくなった時点で呼ぶ（押下中に閾値以上動いた／ドラッグになった）。
+// - release(pointerId)：そのポインターの pointerup / pointercancel。期限（ttlMs）はここから数える
+//   （指を離すまでの時間に左右されない）。
+// - pointerDown(ev)：新しい「主ポインター」の押下で解除する（新しいタップを抑止しない）。
+//   2本目の指（isPrimary=false）の押下では解除しない（1本目の操作の click が後から届くため）。
+// - shouldSuppress(ev)：対象の click なら true を返して解除する。キーボード由来（detail === 0）と、
+//   ポインター ID が分かっていて別のポインターの click は抑止しない。iOS Safari の合成 click は pointerId を
+//   持たないことがあるので、ID 不明の click は無効になった操作の click とみなす（合成 click は指を離した直後、
+//   次の押下より前に届く）。
 export function createClickGuard({ ttlMs = 1000, now = () => Date.now() } = {}) {
-  let armed = null; // { pointerId, at }
+  let inv = null; // { pointerId, releasedAt: number | null }
+  const expired = () => inv && inv.releasedAt !== null && now() - inv.releasedAt > ttlMs;
   return {
-    arm(pointerId) { armed = { pointerId, at: now() }; },
-    pointerDown() { armed = null; },
-    isArmed() { return armed !== null && now() - armed.at <= ttlMs; },
+    invalidate(pointerId) {
+      if (!inv || inv.pointerId !== pointerId) inv = { pointerId, releasedAt: null };
+    },
+    release(pointerId) {
+      if (inv && inv.pointerId === pointerId && inv.releasedAt === null) inv.releasedAt = now();
+    },
+    pointerDown(ev) {
+      if (!ev || ev.isPrimary !== false) inv = null;
+    },
+    isArmed() {
+      if (expired()) inv = null;
+      return inv !== null;
+    },
     shouldSuppress(ev) {
-      if (!armed) return false;
-      if (now() - armed.at > ttlMs) { armed = null; return false; }
+      if (!inv) return false;
+      if (expired()) { inv = null; return false; }
       if (ev.detail === 0) return false; // キーボード等
       const pid = ev.pointerId;
-      if (typeof pid === 'number' && pid >= 0 && pid !== armed.pointerId) return false; // 別のポインター
-      armed = null;
+      if (typeof pid === 'number' && pid >= 0 && pid !== inv.pointerId) return false; // 別のポインター
+      inv = null;
       return true;
     },
   };
@@ -71,12 +89,11 @@ export function createHandDrag(root, hooks, options = {}) {
 
   // 中止（元の並びのまま）。reason === 'render' のときは呼び出し側が再描画中。
   function cancel(reason) {
-    if (st.phase === 'pressing') { toIdle(); return; }
+    // 押下中の中止（回転・Esc・アプリ切替など）も、タップとしては無効（指を離した後の click を別の牌に当てない）
+    if (st.phase === 'pressing') { guard.invalidate(st.pointerId); toIdle(); return; }
     if (st.phase !== 'dragging') return;
-    const pointerId = st.pointerId;
     cleanupDom();
-    toIdle();
-    guard.arm(pointerId);
+    toIdle(); // この操作は activate() で invalidate 済み。指を離した時点で guard.release される
     hooks.onDragEnd({ committed: false, order: null, reason });
   }
 
@@ -87,7 +104,11 @@ export function createHandDrag(root, hooks, options = {}) {
     const el = tileEl(s.id);
     if (!el || !el.isConnected || !hooks.canStart() || hooks.snapshot() !== s.snap) { toIdle(); return; }
     const r = el.getBoundingClientRect();
-    st = { ...s, phase: 'dragging', timer: null, w: r.width, h: r.height, moved: false, ax: s.x, ay: s.y, index: null };
+    // ドラッグになった時点で、この操作はタップではない（中止・確定のどちらでも、この操作の click は抑止）
+    guard.invalidate(s.pointerId);
+    // 移動は押した位置（x0, y0）から測る。マウスで閾値を超えてドラッグになった場合は、その移動自体が有効な移動。
+    const moved = s.pointerType === 'mouse' && Math.hypot(s.x - s.x0, s.y - s.y0) >= opt.mouseSlopPx;
+    st = { ...s, phase: 'dragging', timer: null, w: r.width, h: r.height, moved, index: null };
     el.classList.add('drag-src');
     el.classList.remove('selected');
     handEl().classList.add('dragging');
@@ -127,12 +148,14 @@ export function createHandDrag(root, hooks, options = {}) {
   }
 
   function finish(x, y) {
+    // 指を離した位置でも移動量と挿入位置を更新する（移動イベントの回数に結果が左右されない）
+    noteMove(x, y);
+    update(x, y);
+    if (st.phase !== 'dragging') return; // update の中で中止された
     const s = st;
-    const pointerId = s.pointerId;
     const valid = s.moved && s.index !== null && hooks.snapshot() === s.snap && hooks.canStart();
     cleanupDom();
     toIdle();
-    guard.arm(pointerId);
     if (!valid) {
       hooks.onDragEnd({ committed: false, order: null, reason: s.moved ? 'outside' : 'no-move' });
       return;
@@ -140,9 +163,14 @@ export function createHandDrag(root, hooks, options = {}) {
     hooks.onDragEnd({ committed: true, order: moveTo(hooks.getOrder(), s.id, s.index), reason: 'drop' });
   }
 
+  function slopFor(type) { return type === 'mouse' ? opt.mouseSlopPx : opt.slopPx; }
+  function noteMove(x, y) {
+    if (Math.hypot(x - st.x0, y - st.y0) >= slopFor(st.pointerType)) st.moved = true;
+  }
+
   // ---- イベント ----
   function onPointerDown(ev) {
-    guard.pointerDown();
+    guard.pointerDown(ev);
     if (!ev.isPrimary || (ev.pointerType === 'mouse' && ev.button !== 0)) return;
     if (st.phase === 'dragging') return; // 2本目の指などは無視
     const el = ev.target.closest && ev.target.closest('.hand .tile[data-id]');
@@ -165,22 +193,28 @@ export function createHandDrag(root, hooks, options = {}) {
     if (st.phase === 'pressing') {
       const d = Math.hypot(ev.clientX - st.x0, ev.clientY - st.y0);
       if (st.pointerType === 'mouse') { if (d >= opt.mouseSlopPx) activate(); }
-      else if (d >= opt.slopPx) toIdle(); // スクロール等：ドラッグにしない（タップでもない）
+      else if (d >= opt.slopPx) {
+        // スクロール等：ドラッグにしない。タップとしても無効（ブラウザが click を作っても抑止する）
+        guard.invalidate(st.pointerId);
+        toIdle();
+      }
       return;
     }
     if (hooks.snapshot() !== st.snap) { cancel('state'); return; }
-    if (Math.hypot(ev.clientX - st.ax, ev.clientY - st.ay) >= opt.slopPx) st.moved = true;
+    noteMove(ev.clientX, ev.clientY);
     ev.preventDefault();
     update(ev.clientX, ev.clientY);
   }
 
   function onPointerUp(ev) {
+    guard.release(ev.pointerId); // 無効になった操作なら、ここから抑止の期限を数える
     if (st.phase === 'idle' || ev.pointerId !== st.pointerId) return;
     if (st.phase === 'pressing') { toIdle(); return; } // 通常のタップ：click 処理に任せる
     finish(ev.clientX, ev.clientY);
   }
 
   function onPointerCancel(ev) {
+    guard.release(ev.pointerId);
     if (st.phase !== 'idle' && ev.pointerId === st.pointerId) cancel('pointercancel');
   }
 

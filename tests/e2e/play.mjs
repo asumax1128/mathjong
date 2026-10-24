@@ -1169,6 +1169,170 @@ async function handReorder(browser) {
   console.log('✓ Ver.0.2-D：手牌の並び替え（移動・同じ牌・ツモ牌・誤打牌ゼロ・中止・AI保留・結果不変・320〜430px）');
 }
 
+// ---- Ver.0.2-D 監査対応（PR #4）：P1 短い移動の誤打牌、P2 マウス1回の移動でのドロップ ----
+async function touchShortMove(page, cdp, id, dx, { cancel = false } = {}) {
+  const b = await tileBox(page, id);
+  const x = b.x + b.width / 2;
+  const y = b.y + b.height / 2;
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  await page.waitForTimeout(40);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + dx / 2, y }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + dx, y }] });
+  await page.waitForTimeout(40);
+  await cdp.send('Input.dispatchTouchEvent', { type: cancel ? 'touchCancel' : 'touchEnd', touchPoints: [] });
+  await page.waitForTimeout(60);
+}
+const clickCount = (page) => page.evaluate(() => window.__clicks);
+
+async function handReorderAuditFixes(browser) {
+  // P1：タッチで 8・9・12・16px 動かして離す（長押し前）→ 選択も打牌もされない
+  const realClicks = [];
+  for (const dx of [8, 9, 12, 16]) {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    const order = await shownOrder(page);
+    const A = order[2];
+    const B = order[6];
+    // 未選択の牌
+    let c0 = await clickCount(page);
+    await touchShortMove(page, cdp, A, dx);
+    let st = await engineState(page);
+    realClicks.push([dx, 'unselected', (await clickCount(page)) - c0]);
+    assert.equal(st.selected, null, `${dx}px（未選択）：選択されない`);
+    assert.equal(st.accepted, 0, `${dx}px（未選択）：打牌されない`);
+    assert.deepEqual(await shownOrder(page), order, `${dx}px：並びは変わらない`);
+    // 選択済みの牌
+    await page.locator(`.hand .tile[data-id="${A}"]`).tap();
+    assert.equal((await engineState(page)).selected, A);
+    c0 = await clickCount(page);
+    await touchShortMove(page, cdp, A, dx);
+    st = await engineState(page);
+    realClicks.push([dx, 'selected', (await clickCount(page)) - c0]);
+    assert.equal(st.selected, A, `${dx}px（選択済み）：選択状態は変わらない`);
+    assert.equal(st.accepted, 0, `${dx}px（選択済み）：打牌されない`);
+    assert.equal(st.myDiscards, 0);
+    // 無効になった操作の直後の新しい通常タップは機能する（別の牌を選択 → 2回目で打牌）
+    await page.locator(`.hand .tile[data-id="${B}"]`).tap();
+    assert.equal((await engineState(page)).selected, B, `${dx}px の後の通常タップで選択`);
+    await page.locator(`.hand .tile[data-id="${B}"]`).tap();
+    st = await engineState(page);
+    assert.equal(st.accepted, 1, `${dx}px の後の2回タップで打牌`);
+    assert.equal(st.failed, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // 前提の確認：Chromium は 8px 以上動いても実際に click を送ることがある（＝アプリとブラウザの閾値の差を再現できている）
+  assert.ok(realClicks.some(([, , n]) => n > 0), `ブラウザが click を送った移動量がない: ${JSON.stringify(realClicks)}`);
+
+  // P1：pointercancel の後も正常操作に復帰。pointerId 不明の合成 click・別ポインター・キーボードの扱い
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    const order = await shownOrder(page);
+    const A = order[1];
+    const B = order[4];
+    await touchShortMove(page, cdp, A, 12, { cancel: true }); // touchcancel → pointercancel
+    await page.locator(`.hand .tile[data-id="${B}"]`).tap();
+    assert.equal((await engineState(page)).selected, B, 'pointercancel の後の通常タップで選択');
+    await page.locator(`.hand .tile[data-id="${B}"]`).tap(); // 2回目は打牌
+    let st = await engineState(page);
+    assert.equal(st.accepted, 1, 'pointercancel の後の2回タップで打牌');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    const C = (await shownOrder(page))[0];
+    let st;
+    const dispatch = (id, init) => page.evaluate(([i, it]) => {
+      const el = document.querySelector(`.hand .tile[data-id="${i}"]`);
+      const ev = it.pointerId !== undefined ? new PointerEvent('click', { bubbles: true, cancelable: true, ...it }) : new MouseEvent('click', { bubbles: true, cancelable: true, ...it });
+      el.dispatchEvent(ev);
+    }, [id, init]);
+    // (a) 16px 動かした操作の後、pointerId 不明の合成 click（iOS 想定）→ 抑止
+    await touchShortMove(page, cdp, C, 16);
+    await dispatch(C, { detail: 1 });
+    assert.equal((await engineState(page)).selected, null, 'pointerId 不明の合成 click は抑止');
+    // (b) 無効になった操作の後でも、別のポインターの click は抑止しない
+    await touchShortMove(page, cdp, C, 16);
+    await dispatch(C, { detail: 1, pointerId: 99 });
+    assert.equal((await engineState(page)).selected, C, '別のポインターの click は有効');
+    await page.evaluate(() => { window.__mathjong.S.selected = null; window.__mathjong.render(); });
+    // (c) キーボード由来（detail 0）の click も抑止しない
+    await touchShortMove(page, cdp, C, 16);
+    await dispatch(C, { detail: 0 });
+    assert.equal((await engineState(page)).selected, C, 'キーボード由来の click は有効');
+    st = await engineState(page);
+    assert.equal(st.failed, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // P2：マウス。1回の mouse.move と6回の mouse.move で同じ結果。6px 未満は通常クリック。帯の外はキャンセル
+  async function mouseDragOnce(steps) {
+    const ctx = await newContext(browser, { viewport: { width: 1366, height: 768 } });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?seed=9&speed=slow`);
+    await page.waitForSelector('.hand .tile.tap');
+    const order = await shownOrder(page);
+    const first = await tileBox(page, order[0]);
+    const last = await tileBox(page, order[8]);
+    await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(last.x + last.width + 8, first.y + first.height / 2, { steps });
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    const result = await shownOrder(page);
+    const st = await engineState(page);
+    assert.equal(st.accepted, 0);
+    assert.equal(st.selected, null);
+    return { ctx, page, errors, order, result };
+  }
+  const one = await mouseDragOnce(1);
+  assert.deepEqual(one.result, moveExpected(one.order, one.order[0], 8), '1回の mouse.move で先頭から末尾へ');
+  const six = await mouseDragOnce(6);
+  assert.deepEqual(six.result, one.result, '6回の mouse.move でも同じ結果');
+  await six.ctx.close();
+  {
+    const { ctx, page, errors } = one;
+    // ドラッグ直後の通常クリック
+    const t = await tileBox(page, one.result[3]);
+    await page.mouse.click(t.x + t.width / 2, t.y + t.height / 2);
+    assert.equal((await engineState(page)).selected, one.result[3], 'ドラッグ直後の通常クリックで選択');
+    // 6px 未満の移動は通常クリック（2回目で打牌）
+    await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(t.x + t.width / 2 + 4, t.y + t.height / 2, { steps: 1 });
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    assert.equal((await engineState(page)).accepted, 1, '6px 未満の移動は通常クリック（2回目で打牌）');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  {
+    // 帯の外で離す → キャンセル（1回の移動）
+    const ctx = await newContext(browser, { viewport: { width: 1366, height: 768 } });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?seed=9&speed=slow`);
+    await page.waitForSelector('.hand .tile.tap');
+    const order = await shownOrder(page);
+    const b = await tileBox(page, order[2]);
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b.x + b.width / 2 + 40, b.y - 220, { steps: 1 });
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    assert.deepEqual(await shownOrder(page), order, '帯の外で離すとキャンセル');
+    const st = await engineState(page);
+    assert.equal(st.accepted, 0);
+    assert.equal(st.selected, null);
+    assert.equal(st.ghosts, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log(`✓ Ver.0.2-D 監査対応：短い移動（8/9/12/16px）で誤打牌なし・pointercancel 復帰・click の区別・マウス1回移動のドロップ（ブラウザの click: ${JSON.stringify(realClicks)}）`);
+}
+
 // 実機テスト用の固定 seed（docs/12）。「毎回右端のツモ牌を捨て、チー・ロンは見送る」と
 // 指定の手番で宣言ボタンが出ることを、公開サイト相当の画面で確認する。
 export const DEVICE_SEEDS = [
@@ -1229,6 +1393,7 @@ try {
   await v02aAuditFixes(browser);
   await guideFitsScreen(browser);
   await handReorder(browser);
+  await handReorderAuditFixes(browser);
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
     await playDevice(browser, dev, 4242 + i * 101, rounds, stats);

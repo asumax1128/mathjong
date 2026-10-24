@@ -108,45 +108,88 @@ test('チー後も残りの手牌の並び順を保つ（実際の Game）', () 
   assert.deepEqual(after, before.filter((id) => g.hands[1].includes(id)), 'チーで抜けた2枚以外は同じ順番');
 });
 
-// ---- ドラッグ由来 click の抑止 ----
+// ---- タップとして無効になった操作の click の抑止（createClickGuard） ----
 function clock() { let t = 0; return { now: () => t, tick: (ms) => { t += ms; } }; }
+const primary = { isPrimary: true };
 
-test('ドラッグしたポインターの click だけを1回抑止（Chrome：click に pointerId がある）', () => {
+test('無効になった操作の click を1回だけ抑止（Chrome：click に同じ pointerId）', () => {
   const c = clock();
   const g = createClickGuard({ now: c.now });
-  g.pointerDown(); // ドラッグ開始の押下
-  g.arm(7); // 指を離した
+  g.pointerDown(primary);
+  g.invalidate(7); // 閾値を超えて動いた、またはドラッグになった
+  g.release(7); // 指を離した
   assert.equal(g.shouldSuppress({ detail: 1, pointerId: 7 }), true);
   assert.equal(g.shouldSuppress({ detail: 1, pointerId: 7 }), false, '2回目は抑止しない');
 });
 
-test('iOS Safari：合成 click に pointerId がなくても、ドラッグ直後の click は抑止', () => {
+test('iOS Safari：pointerId のない合成 click・pointerId=-1 の click も抑止', () => {
   const c = clock();
   const g = createClickGuard({ now: c.now });
-  g.arm(3);
-  c.tick(5);
+  g.invalidate(3); g.release(3); c.tick(5);
   assert.equal(g.shouldSuppress({ detail: 1 }), true);
-  g.arm(3);
+  g.pointerDown(primary); g.invalidate(3); g.release(3);
   assert.equal(g.shouldSuppress({ detail: 1, pointerId: -1 }), true);
 });
 
-test('新しい押下から始まる通常タップは抑止しない（時間の窓に依存しない）', () => {
+test('新しい主ポインターの押下から始まる通常タップは抑止しない（時間の窓に依存しない）', () => {
   const c = clock();
   const g = createClickGuard({ now: c.now });
-  g.arm(3); // ドラッグ終了（click が来なかった）
+  g.invalidate(3); g.release(3); // click が来なかった（スクロールになった等）
   c.tick(50);
-  g.pointerDown(); // すぐに次のタップ
-  assert.equal(g.shouldSuppress({ detail: 1 }), false, 'ドラッグ直後の通常タップは有効');
-  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 4 }), false);
+  g.pointerDown(primary); // すぐに次のタップ
+  assert.equal(g.isArmed(), false);
+  assert.equal(g.shouldSuppress({ detail: 1 }), false, '次の通常タップは有効');
 });
 
-test('別のポインター・キーボードの click は抑止しない。期限切れも解除', () => {
+test('2本目の指の押下では解除しない（1本目の操作の click を後で抑止）', () => {
+  const c = clock();
+  const g = createClickGuard({ now: c.now });
+  g.invalidate(3);
+  g.pointerDown({ isPrimary: false }); // 2本目の指
+  g.release(3);
+  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 3 }), true);
+});
+
+test('別のポインター・キーボードの click は抑止しない', () => {
+  const c = clock();
+  const g = createClickGuard({ now: c.now });
+  g.invalidate(3); g.release(3);
+  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 9 }), false, '別のポインター');
+  assert.equal(g.shouldSuppress({ detail: 0 }), false, 'キーボード由来（detail 0）');
+  assert.equal(g.isArmed(), true, 'まだ対象の click を待っている');
+});
+
+test('期限は指を離した時点から数える（長く押していても抑止は有効）', () => {
   const c = clock();
   const g = createClickGuard({ now: c.now, ttlMs: 1000 });
-  g.arm(3);
-  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 9 }), false, '別のポインター');
-  assert.equal(g.shouldSuppress({ detail: 0 }), false, 'キーボード由来');
-  assert.equal(g.isArmed(), true);
+  g.invalidate(3);
+  c.tick(5000); // 5秒押したまま（ゆっくり動かした等）
+  assert.equal(g.isArmed(), true, '離すまでは期限切れにしない');
+  g.release(3);
+  c.tick(10);
+  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 3 }), true);
+  g.invalidate(4); g.release(4);
   c.tick(1001);
-  assert.equal(g.shouldSuppress({ detail: 1 }), false, '期限切れ');
+  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 4 }), false, '離してから期限切れ');
+  assert.equal(g.isArmed(), false);
+});
+
+test('pointercancel（release）後も、次の押下で正常に復帰', () => {
+  const c = clock();
+  const g = createClickGuard({ now: c.now });
+  g.pointerDown(primary); g.invalidate(5); g.release(5); // pointercancel
+  g.pointerDown(primary); // 次の操作
+  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 6 }), false);
+  assert.equal(g.isArmed(), false);
+});
+
+test('別のポインターの release では期限を始めない・同じ操作を二重に記録しない', () => {
+  const c = clock();
+  const g = createClickGuard({ now: c.now, ttlMs: 100 });
+  g.invalidate(3);
+  g.invalidate(3); // 同じ操作（閾値超え → ドラッグ）でも状態は1つ
+  g.release(9);
+  c.tick(500);
+  assert.equal(g.isArmed(), true);
+  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 3 }), true);
 });
