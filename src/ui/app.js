@@ -6,17 +6,14 @@ import { decide, applyAction, PERSONALITIES } from '../engine/ai.js';
 import { createRng } from '../engine/rng.js';
 import { trigExact } from '../engine/exact.js';
 import { tileHTML, formulaHTML, backHTML, valueHTML } from './render.js';
+import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, intParam } from './params.js';
 
 const params = new URLSearchParams(location.search);
 // テスト専用機能（山の指定・AI待ち時間0）はローカル開発環境でのみ有効。公開サイトでは無効。
-const IS_LOCAL = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+const IS_LOCAL = isLocalHost(location.hostname);
 // ?seed=（0〜999999999の整数）と ?round=（1〜999）だけを受け付ける。不正値は無視。
-const intParam = (name, max) => {
-  const v = params.get(name);
-  return v !== null && /^\d{1,9}$/.test(v) && Number(v) <= max ? Number(v) : null;
-};
-const seedParam = intParam('seed', 999999999);
-const roundParam = intParam('round', 999);
+const seedParam = intParam(params.get('seed'), 999999999);
+const roundParam = intParam(params.get('round'), 999);
 const rules = createRules(DEFAULT_CONFIG);
 const HUMAN = 0;
 const POS = ['自分', '下家', '対面', '上家'];
@@ -26,14 +23,6 @@ const PLAYERS = [
   { name: 'AI-B', kind: 'ai', personality: 'value' },
   { name: 'AI-C', kind: 'ai', personality: 'closed' },
 ];
-const SPEEDS = { fast: [250, 120], normal: [700, 350], slow: [1200, 600], ...(IS_LOCAL ? { test: [0, 0] } : {}) };
-const PUBLIC_SPEEDS = ['fast', 'normal', 'slow'];
-function initialSpeed() {
-  const q = params.get('speed');
-  if (q && SPEEDS[q]) return q;
-  const saved = store.get('mj-speed', 'normal');
-  return PUBLIC_SPEEDS.includes(saved) ? saved : 'normal';
-}
 
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -50,11 +39,15 @@ const S = {
   selected: null,
   hintsUsed: 0,
   modal: null,
-  speed: initialSpeed(),
+  speed: null, // 下で resolveSpeed により許可された値だけを設定する
   timer: null,
   aiRng: null,
   history: [],
 };
+
+S.speed = resolveSpeed(params.get('speed'), store.get('mj-speed', null), IS_LOCAL);
+// 人間の入力の処理回数（多重処理の検出用。accepted=打牌などが成立、ignored=手番外の入力）
+S.input = { accepted: 0, ignored: 0, failed: 0 };
 
 const app = document.getElementById('app');
 const T = (idx) => rules.types[idx];
@@ -81,7 +74,7 @@ function step() {
   const p = g.pending();
   if (!p) return finishRound();
   if (p.seat === HUMAN) return render();
-  const [turnDelay, claimDelay] = SPEEDS[S.speed] || SPEEDS.normal;
+  const [turnDelay, claimDelay] = speedDelays(S.speed, IS_LOCAL);
   S.timer = setTimeout(() => {
     const action = decide(g, p.seat, PLAYERS[p.seat].personality, S.aiRng);
     applyAction(g, p.seat, action);
@@ -104,13 +97,15 @@ function finishRound() {
 function humanAct(action) {
   const g = S.game;
   const p = g.pending();
-  if (!p || p.seat !== HUMAN) return;
+  if (!p || p.seat !== HUMAN) { S.input.ignored++; return; }
   try {
     applyAction(g, HUMAN, action);
   } catch (e) {
+    S.input.failed++;
     console.error(e);
     return;
   }
+  S.input.accepted++;
   S.selected = null;
   render();
   step();
@@ -355,9 +350,10 @@ function tableHTML() {
 }
 
 function settingsHTML() {
-  const opt = (v, l) => `<option value="${v}" ${S.speed === v ? 'selected' : ''}>${l}</option>`;
+  const labels = { fast: '速い', normal: '普通', slow: 'ゆっくり' };
+  const opt = (v) => `<option value="${v}" ${S.speed === v ? 'selected' : ''}>${labels[v]}</option>`;
   return `<h2>設定</h2>
-    <label class="setting">AIの速さ <select data-action="speed">${opt('fast', '速い')}${opt('normal', '普通')}${opt('slow', 'ゆっくり')}</select></label>
+    <label class="setting">AIの速さ <select data-action="speed">${publicSpeedNames().map(opt).join('')}</select></label>
     ${reportInfoHTML()}
     <div class="modal-actions"><button data-action="reset">新しい対局（得点リセット）</button></div>`;
 }
@@ -429,7 +425,7 @@ app.addEventListener('click', (ev) => {
 
 app.addEventListener('change', (ev) => {
   if (ev.target.dataset.action === 'speed') {
-    S.speed = ev.target.value;
+    S.speed = resolveSpeed(ev.target.value, null, false);
     store.set('mj-speed', S.speed);
   }
 });
