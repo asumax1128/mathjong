@@ -18,6 +18,9 @@ const args = process.argv.slice(2);
 const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
 const ROUNDS = Number(opt('--rounds', 6));
 const SHOTS = opt('--shots', null);
+// --channel chromium：Chromium の新しいヘッドレスモードで実行（既定はヘッドレスシェル）。
+// 新しいヘッドレスモードは横スワイプで「戻る」ナビゲーションが起きるなど、実ブラウザに近い挙動をする。
+const CHANNEL = opt('--channel', null);
 // GitHub Pages と同じサブパスで配信して相対パスを検証する
 const BASE = '/mathjong/';
 let PORT;
@@ -54,6 +57,8 @@ function watchErrors(page) {
   page.on('response', (r) => { if (r.status() >= 400) errors.push(`HTTP ${r.status()} ${r.url()}`); });
   page.on('requestfailed', (r) => errors.push(`failed ${r.url()} ${r.failure() && r.failure().errorText}`));
   page.on('request', (r) => { const u = new URL(r.url()); if (u.protocol.startsWith('http') && !u.pathname.startsWith(BASE) && u.pathname !== BASE.slice(0, -1)) errors.push(`outside base: ${r.url()}`); });
+  // ゲーム以外のページへの遷移（ブラウザの「戻る」スワイプなど）を検出
+  page.on('framenavigated', (f) => { if (f === page.mainFrame() && !/^https?:\/\//.test(f.url())) errors.push(`unexpected navigation: ${f.url()}`); });
   return errors;
 }
 
@@ -699,6 +704,891 @@ async function guideFitsScreen(browser) {
   console.log('✓ 牌一覧：320〜430px（縦・横）・WebKit想定でも132枚すべて画面内に表示');
 }
 
+// ---- Ver.0.2-D：手牌の並び替え（長押しドラッグ） ----
+// タッチの長押しドラッグは Chromium の CDP（Input.dispatchTouchEvent）で実際のタッチとして送る。
+const shownOrder = (page) => page.evaluate(() => [...document.querySelectorAll('.hand .tile[data-id]')].map((e) => Number(e.dataset.id)));
+const tileBox = (page, id) => page.locator(`.hand .tile[data-id="${id}"]`).boundingBox();
+const engineState = (page) => page.evaluate(() => {
+  const { S } = window.__mathjong;
+  S.game.checkInvariants();
+  return {
+    hand: S.game.hands[0].slice(), events: S.game.events.length, accepted: S.input.accepted, failed: S.input.failed,
+    selected: S.selected, myDiscards: S.game.events.filter((e) => e.type === 'discard' && e.seat === 0).length,
+    ghosts: document.querySelectorAll('.drag-ghost').length, phase: window.__mathjong.drag.phase(),
+  };
+});
+const moveExpected = (order, id, index) => { const r = order.filter((x) => x !== id); return [...r.slice(0, index), id, ...r.slice(index)]; };
+async function xForIndex(page, order, id, index) {
+  const others = order.filter((x) => x !== id);
+  if (index >= others.length) { const b = await tileBox(page, others[others.length - 1]); return b.x + b.width + 6; }
+  const b = await tileBox(page, others[index]);
+  return b.x + b.width * 0.25;
+}
+async function touchDrag(page, cdp, id, toX, toY = null, { hold = 450, steps = 6, release = true, before = null } = {}) {
+  const b = await tileBox(page, id);
+  const sx = b.x + b.width / 2;
+  const sy = b.y + b.height / 2;
+  const ty = toY === null ? sy : toY;
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: sx, y: sy }] });
+  await page.waitForTimeout(hold);
+  for (let i = 1; i <= steps; i++) {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: sx + ((toX - sx) * i) / steps, y: sy + ((ty - sy) * i) / steps }] });
+    await page.waitForTimeout(16);
+  }
+  if (before) await before();
+  if (release) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await page.waitForTimeout(30);
+}
+async function dragToIndex(page, cdp, id, index) {
+  const order = await shownOrder(page);
+  const b = await tileBox(page, id);
+  await touchDrag(page, cdp, id, await xForIndex(page, order, id, index), b.y + b.height / 2);
+  return moveExpected(order, id, index);
+}
+async function reorderPage(browser, query, viewport = { width: 390, height: 844 }) {
+  const ctx = await newContext(browser, { viewport, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  const errors = watchErrors(page);
+  await page.goto(`${LOCAL}${query}`);
+  await page.waitForSelector('.hand .tile[data-id]');
+  const cdp = await ctx.newCDPSession(page);
+  await page.evaluate(() => { window.__clicks = 0; window.addEventListener('click', () => { window.__clicks++; }, true); });
+  return { ctx, page, cdp, errors };
+}
+
+async function handReorder(browser) {
+  // (1) 先頭・中央・末尾、ツモ牌の移動。エンジンの手牌は変わらず、打牌・選択も起きない
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    const e0 = await engineState(page);
+    let order = await shownOrder(page);
+    assert.equal(order.length, 9);
+    const drawn = order[8];
+    assert.equal(await page.locator('.hand .drawn-gap').count(), 1, 'ツモ牌は右端に隙間');
+    let exp = await dragToIndex(page, cdp, drawn, 0); // ツモ牌を先頭へ
+    assert.deepEqual(await shownOrder(page), exp, 'ツモ牌を先頭へ');
+    assert.equal(await page.locator(`.hand .tile[data-id="${drawn}"].drawn-mark`).count(), 1, '移動したツモ牌は金色の点');
+    assert.equal(await page.locator('.hand .drawn-gap').count(), 0);
+    exp = await dragToIndex(page, cdp, exp[1], 4); // 中央へ
+    assert.deepEqual(await shownOrder(page), exp, '中央へ');
+    exp = await dragToIndex(page, cdp, exp[0], 8); // 末尾へ（ツモ牌を右端に戻す）
+    assert.deepEqual(await shownOrder(page), exp, '末尾へ');
+    assert.equal(await page.locator('.hand .drawn-gap').count(), 1, '右端に戻ると隙間で区別');
+    const e1 = await engineState(page);
+    assert.deepEqual(e1.hand, e0.hand, 'エンジンの手牌配列は変わらない');
+    assert.equal(e1.events, e0.events, 'ゲームは進まない（自分の手番）');
+    assert.equal(e1.accepted, e0.accepted, '打牌なし');
+    assert.equal(e1.selected, null, '選択なし');
+    assert.equal(e1.ghosts, 0);
+    // (2) 自動整列：表示順だけを種類順（ツモ牌は右端）に戻す
+    await page.locator('button[data-action="autosort"]').tap();
+    const sorted = await page.evaluate(() => {
+      const { S } = window.__mathjong; const g = S.game;
+      const rest = g.hands[0].filter((id) => id !== g.drawn).sort((a, b) => g.typeOf(a) - g.typeOf(b) || a - b);
+      return [...rest, g.drawn];
+    });
+    assert.deepEqual(await shownOrder(page), sorted, '自動整列');
+    assert.deepEqual((await engineState(page)).hand, e0.hand);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (3) 同じ表示の牌（sin が3枚）を別々に動かす
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=1&speed=slow');
+    await page.evaluate((w) => { const m = window.__mathjong; m.S.nextPresetWall = w; m.startRound(); },
+      presetWall(['sin', 'sin', 'sin', '30', '150', '=1/2', '=1/2', 'cos'], ['tan']));
+    await page.waitForSelector('.hand .tile.tap');
+    const order = await shownOrder(page);
+    const sins = await page.evaluate(() => { const g = window.__mathjong.S.game; return g.hands[0].filter((id) => g.typeOf(id) === 0).sort((a, b) => a - b); });
+    assert.equal(sins.length, 3);
+    let exp = await dragToIndex(page, cdp, sins[1], 8);
+    assert.deepEqual(await shownOrder(page), exp, '2枚目の sin を末尾へ');
+    exp = await dragToIndex(page, cdp, sins[2], 0);
+    assert.deepEqual(await shownOrder(page), exp, '3枚目の sin を先頭へ');
+    assert.notDeepEqual(exp, order);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (4) 誤打牌ゼロ：長押しして離すだけ／選択済みの牌の長押し／帯の外で離す／ドラッグ直後の通常タップ／2回タップの打牌
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    const order = await shownOrder(page);
+    const A = order[2];
+    const B = order[5];
+    // 長押しして離すだけ
+    let b = await tileBox(page, A);
+    await touchDrag(page, cdp, A, b.x + b.width / 2, null, { steps: 0 });
+    let st = await engineState(page);
+    assert.equal(st.selected, null, '長押しで選択されない');
+    assert.equal(st.accepted, 0, '長押しで打牌されない');
+    assert.deepEqual(await shownOrder(page), order);
+    // 先に A を選択 → A を長押しして離す → 打牌されない、選択も解除
+    await page.locator(`.hand .tile[data-id="${A}"]`).tap();
+    assert.equal((await engineState(page)).selected, A);
+    b = await tileBox(page, A);
+    await touchDrag(page, cdp, A, b.x + b.width / 2, null, { steps: 0 });
+    st = await engineState(page);
+    assert.equal(st.accepted, 0, '選択済みの牌を長押ししても打牌されない');
+    assert.equal(st.selected, null, 'ドラッグで選択は解除');
+    // A を選択 → B をドラッグして並び替え → 打牌されない
+    await page.locator(`.hand .tile[data-id="${A}"]`).tap();
+    await dragToIndex(page, cdp, B, 0);
+    st = await engineState(page);
+    assert.equal(st.accepted, 0);
+    assert.equal(st.selected, null);
+    // 手牌の帯の外（上へ200px）で離す → 取り消し
+    const before = await shownOrder(page);
+    b = await tileBox(page, A);
+    await touchDrag(page, cdp, A, b.x + b.width / 2, b.y - 200);
+    assert.deepEqual(await shownOrder(page), before, '帯の外で離すと取り消し');
+    // ドラッグ直後の通常タップは有効（1回目で選択、2回目で打牌）
+    await dragToIndex(page, cdp, A, 0);
+    const clicks0 = await page.evaluate(() => window.__clicks);
+    await page.locator(`.hand .tile[data-id="${B}"]`).tap();
+    st = await engineState(page);
+    assert.equal(st.selected, B, 'ドラッグ直後の通常タップで選択できる');
+    assert.ok((await page.evaluate(() => window.__clicks)) > clicks0, 'タップの click が届いている');
+    await page.locator(`.hand .tile[data-id="${B}"]`).tap();
+    st = await engineState(page);
+    assert.equal(st.accepted, 1, '2回タップで通常どおり打牌');
+    assert.equal(st.myDiscards, 1);
+    assert.equal(st.failed, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (5a) iOS Safari 想定：ドロップ直後、指の位置にある（再描画後の）牌へ合成 click（pointerId なし）が届いても抑止。
+  //      その次の新しいタップは抑止されない（時間ではなく、ドラッグしたポインターの操作に対応付けて抑止）。
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    const order = await shownOrder(page);
+    const A = order[3];
+    const b = await tileBox(page, A);
+    // (i) 長押しして離す：Chromium は同じポインターの click を実際に送る → 抑止されて選択にならない
+    const c0 = await page.evaluate(() => window.__clicks);
+    await touchDrag(page, cdp, A, b.x + b.width / 2 + 2, b.y + b.height / 2, { steps: 0 });
+    let st = await engineState(page);
+    assert.ok((await page.evaluate(() => window.__clicks)) > c0, '長押しの後に実際の click が発生');
+    assert.equal(st.selected, null, 'ドラッグしたポインターの click は抑止');
+    assert.equal(st.accepted, 0);
+    // (ii) 並び替えのドロップ：Chromium は click を送らないが、iOS は再描画後の指の位置の牌に合成 click
+    //      （pointerId なし）を送ることがある。それを再現して、抑止されることを確認。
+    const c1 = await page.evaluate(() => window.__clicks);
+    const exp = await dragToIndex(page, cdp, order[0], 5);
+    assert.equal(await page.evaluate(() => window.__clicks), c1, 'Chromium はドロップ後に click を送らない（前提の確認）');
+    const box5 = await tileBox(page, exp[5]);
+    const hit = await page.evaluate(([x, y]) => {
+      const el = document.elementFromPoint(x, y).closest('.tile');
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1, clientX: x, clientY: y }));
+      return Number(el.dataset.id);
+    }, [box5.x + box5.width / 2, box5.y + box5.height / 2]);
+    st = await engineState(page);
+    assert.ok(hit >= 0);
+    assert.equal(st.selected, null, 'ドロップ直後の合成 click は抑止');
+    // 次の新しいタップは通常どおり
+    await page.locator(`.hand .tile[data-id="${A}"]`).tap();
+    assert.equal((await engineState(page)).selected, A, '次の通常タップで選択');
+    await page.locator(`.hand .tile[data-id="${A}"]`).tap();
+    assert.equal((await engineState(page)).accepted, 1, '2回タップで打牌');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (5b) マウス（PC）：ドラッグで選択・打牌は起きず、次の通常クリックは有効
+  {
+    const ctx = await newContext(browser, { viewport: { width: 1366, height: 768 } });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?seed=9&speed=slow`);
+    await page.waitForSelector('.hand .tile.tap');
+    const order = await shownOrder(page);
+    const A = order[3];
+    const b = await tileBox(page, A);
+    const cx = b.x + b.width / 2;
+    const cy = b.y + b.height / 2;
+    // 右端へドラッグ
+    const last = await tileBox(page, order[8]);
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(last.x + last.width + 8, cy, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    assert.deepEqual(await shownOrder(page), moveExpected(order, A, 8), 'マウスで並び替え');
+    // その場で動かさずに離す（取り消し）
+    const b2 = await tileBox(page, order[0]);
+    await page.mouse.move(b2.x + b2.width / 2, b2.y + b2.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b2.x + b2.width / 2 + 10, b2.y + b2.height / 2, { steps: 2 });
+    await page.mouse.move(b2.x + b2.width / 2, b2.y + b2.height / 2, { steps: 2 });
+    await page.mouse.up();
+    let st = await engineState(page);
+    assert.equal(st.selected, null);
+    assert.equal(st.accepted, 0);
+    const c = await tileBox(page, A);
+    await page.mouse.click(c.x + c.width / 2, c.y + c.height / 2);
+    assert.equal((await engineState(page)).selected, A, '次の通常クリックで選択');
+    await page.mouse.click(c.x + c.width / 2, c.y + c.height / 2);
+    assert.equal((await engineState(page)).accepted, 1, 'もう一度クリックで打牌');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (6) 連続ドラッグ5回：誤打牌なし・順番は期待どおり
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=12&speed=slow');
+    let exp = await shownOrder(page);
+    for (let k = 0; k < 5; k++) {
+      const id = exp[(k * 3) % exp.length];
+      exp = await dragToIndex(page, cdp, id, (k * 5 + 2) % exp.length);
+      assert.deepEqual(await shownOrder(page), exp, `${k + 1}回目`);
+    }
+    const st = await engineState(page);
+    assert.equal(st.accepted, 0);
+    assert.equal(st.selected, null);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (7) 打牌・ツモ・チーの後も順番を保つ（AI の打牌はテストから実行）
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=1&speed=slow');
+    await page.evaluate((w) => { const m = window.__mathjong; m.S.nextPresetWall = w; m.startRound(); },
+      presetWall(['sin', '30', 'cos', 'cos', '180', '180', '=√3', '=√3'], ['=-1/√3', '=-1/√3', '=-1/√3', '=1/√3', '=1/√2'],
+        [['sin', 'sin', 'sin', '0', '0', '90', '=-√3', '=-√3'], ['tan', 'tan', 'tan', '360', '360', '90', '=-1/√2', '=-1/√2'], ['=1/2', 'tan', 'tan', '360', '360', '90', '=-1/√2', '=-1/√2']]));
+    await page.waitForSelector('.hand .tile.tap');
+    // 並び替え
+    let order = await dragToIndex(page, cdp, (await shownOrder(page))[8], 2);
+    order = await dragToIndex(page, cdp, order[0], 8);
+    // 打牌（右から2番目の牌をタップ2回）
+    const discard = order[7];
+    await page.locator(`.hand .tile[data-id="${discard}"]`).tap();
+    await page.locator(`.hand .tile[data-id="${discard}"]`).tap();
+    order = order.filter((id) => id !== discard);
+    assert.deepEqual(await shownOrder(page), order, '打牌後も順番を保つ');
+    // 他家の打牌（seat1, seat2 はツモ切り、seat3 は =1/2）→ 自分にチーの判断
+    const force = (seat, key) => page.evaluate(([s, k]) => {
+      const { S, render, rules } = window.__mathjong;
+      clearTimeout(S.timer);
+      const g = S.game;
+      const id = k ? g.hands[s].find((x) => rules.types[g.typeOf(x)].key === k) : g.drawn;
+      g.discard(s, id);
+      render();
+    }, [seat, key]);
+    await force(1, null);
+    await force(2, null);
+    assert.deepEqual(await shownOrder(page), order, '他家の手番中も順番を保つ');
+    await force(3, 'v:1/2');
+    await page.waitForSelector('button[data-action="chi"]');
+    // 宣言待ちの間は並び替えできない。長押しして牌1.5枚分動かす（並び替えが有効なら必ず順番が変わる操作）。
+    // 大きな横スワイプ（約240px 以上）は、並び替えが無効な状態ではブラウザの「戻る」ナビゲーションを起こすことがある
+    // （Chromium の新しいヘッドレスモードで確認）ため、テストの操作はその手前にとどめる。
+    const urlBefore = page.url();
+    const b = await tileBox(page, order[0]);
+    await touchDrag(page, cdp, order[0], b.x + b.width * 2, b.y + b.height / 2);
+    assert.equal(page.url(), urlBefore, 'ページは遷移していない');
+    assert.deepEqual(await shownOrder(page), order, '宣言待ちは並び替え不可');
+    assert.equal((await engineState(page)).ghosts, 0);
+    const used = await page.evaluate(() => { const { S } = window.__mathjong; const p = S.game.pending(); return p.chi[0].use; });
+    await page.locator('button[data-action="chi"]').first().tap();
+    order = order.filter((id) => !used.includes(id));
+    assert.deepEqual(await shownOrder(page), order, 'チー後も残りの順番を保つ');
+    // 打牌して、次のツモは右端
+    await page.locator(`.hand .tile[data-id="${order[0]}"]`).tap();
+    await page.locator(`.hand .tile[data-id="${order[0]}"]`).tap();
+    order = order.slice(1);
+    await force(0 + 1, null);
+    await force(2, null);
+    await force(3, null);
+    await page.evaluate(() => window.__mathjong.step());
+    await page.waitForSelector('.hand .tile.tap');
+    const now = await shownOrder(page);
+    assert.deepEqual(now.slice(0, order.length), order, '次のツモまで順番を保つ');
+    assert.equal(now.length, order.length + 1);
+    assert.equal(await page.locator('.hand .drawn-gap').count(), 1, '新しいツモ牌は右端');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (8) ドラッグ中の中止：Esc・回転（画面サイズ変更）・再描画・モーダル・局切替。宣言待ち中は開始不可
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    const order = await shownOrder(page);
+    const cases = [
+      ['Esc', () => page.keyboard.press('Escape')],
+      ['回転', async () => { await page.setViewportSize({ width: 844, height: 390 }); await page.waitForTimeout(50); await page.setViewportSize({ width: 390, height: 844 }); }],
+      ['再描画', () => page.evaluate(() => window.__mathjong.render())],
+      ['モーダル', () => page.evaluate(() => { const m = window.__mathjong; m.S.modal = 'settings'; m.render(); })],
+      // アプリ切替：Chromium では実際に非表示にできないため、visibilityState を hidden にして実際のイベントを送る
+      ['アプリ切替', () => page.evaluate(() => {
+        Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+        Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+      })],
+    ];
+    for (const [name, act] of cases) {
+      const id = order[1];
+      const b = await tileBox(page, id);
+      let midPhase = null;
+      await touchDrag(page, cdp, id, b.x + b.width * 5, b.y + b.height / 2, {
+        before: async () => { midPhase = await page.evaluate(() => window.__mathjong.drag.phase()); await act(); },
+      });
+      assert.equal(midPhase, 'dragging', `${name}: ドラッグ中だった`);
+      const st = await engineState(page);
+      assert.deepEqual(await shownOrder(page), order, `${name}: 元の並びに戻る`);
+      assert.equal(st.ghosts, 0, `${name}: 浮いた牌が残らない`);
+      assert.equal(st.phase, 'idle', `${name}: 操作状態が残らない`);
+      assert.equal(st.accepted, 0, `${name}: 打牌なし`);
+      if (name === 'モーダル') {
+        // モーダル表示中は開始できない（重なった画面の下の牌は押せない）
+        assert.equal(await page.evaluate(() => window.__mathjong.S.modal), 'settings');
+        await page.locator('button[data-action="close"]').tap();
+      }
+    }
+    // 局切替：ドラッグ中に新しい局 → 中止され、表示順は初期化
+    {
+      const id = order[2];
+      const b = await tileBox(page, id);
+      await touchDrag(page, cdp, id, b.x + b.width * 4, b.y + b.height / 2, {
+        before: () => page.evaluate(() => { const m = window.__mathjong; m.S.round++; m.S.dealer = (m.S.dealer + 1) % 4; m.startRound(); }),
+      });
+      const st = await engineState(page);
+      assert.equal(st.ghosts, 0);
+      assert.equal(st.phase, 'idle');
+      assert.equal(await page.evaluate(() => window.__mathjong.S.handOrder === null || window.__mathjong.S.handOrder.length > 0), true);
+      const def = await page.evaluate(() => {
+        const g = window.__mathjong.S.game; const p = g.pending();
+        const d = p && p.seat === 0 && p.type === 'turn' ? g.drawn : null;
+        const rest = g.hands[0].filter((x) => x !== d).sort((a, b2) => g.typeOf(a) - g.typeOf(b2) || a - b2);
+        return d === null ? rest : [...rest, d];
+      });
+      assert.deepEqual(await shownOrder(page), def, '新しい局では表示順を初期化');
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (9) AI の進行中のドラッグ：dragging の間だけ AI を保留し、離したら1回だけ再開（手番が飛ばない）
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=fast');
+    // 自分の打牌 → AI の手番へ
+    const d = (await shownOrder(page))[8];
+    await page.locator(`.hand .tile[data-id="${d}"]`).tap();
+    await page.locator(`.hand .tile[data-id="${d}"]`).tap();
+    const order = await shownOrder(page);
+    const id = order[0];
+    const b = await tileBox(page, id);
+    let during = null;
+    await touchDrag(page, cdp, id, b.x + b.width * 4, b.y + b.height / 2, {
+      hold: 450, // 押している間（pressing）は AI は進む（fast = 250ms）。長押しの途中で AI が打っても開始できる
+      before: async () => {
+        const a = await page.evaluate(() => window.__mathjong.S.game.events.length);
+        await page.waitForTimeout(1500); // dragging 中は AI を保留
+        const z = await page.evaluate(() => ({ n: window.__mathjong.S.game.events.length, deferred: window.__mathjong.S.stepDeferred, timer: window.__mathjong.S.timer, phase: window.__mathjong.drag.phase() }));
+        during = { a, ...z };
+      },
+    });
+    assert.equal(during.phase, 'dragging');
+    assert.equal(during.n, during.a, 'dragging 中はゲームが進まない');
+    assert.equal(during.timer, null, '保留中に AI のタイマーは予約されていない');
+    // 離した後に AI が再開し、手番どおりに進む
+    await page.waitForFunction((n) => window.__mathjong.S.game.events.length > n, during.n, { timeout: 5000 });
+    await page.waitForTimeout(1500);
+    const seq = await page.evaluate(() => {
+      const ev = window.__mathjong.S.game.events;
+      window.__mathjong.S.game.checkInvariants();
+      // 打牌の次の「ツモ」は、チーがなければ打牌者の下家
+      const bad = [];
+      for (let i = 0; i < ev.length; i++) {
+        if (ev[i].type !== 'discard') continue;
+        const nxt = ev.slice(i + 1).find((e) => e.type === 'draw' || e.type === 'chi' || e.type === 'win');
+        if (nxt && nxt.type === 'draw' && nxt.seat !== (ev[i].seat + 1) % 4) bad.push(i);
+      }
+      return bad;
+    });
+    assert.deepEqual(seq, [], '手番が飛ばない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (10) ドラッグで AI を待たせても、局の結果（打牌・和了・得点）は同じ（seed 固定）
+  {
+    async function playRound(withDrags) {
+      const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=31&speed=fast');
+      let drags = 0;
+      for (let i = 0; i < 400; i++) {
+        if (await page.locator('.overlay .result').count()) break;
+        const p = await page.evaluate(() => { const q = window.__mathjong.S.game.pending(); return q && { seat: q.seat, type: q.type }; });
+        if (!p) { await page.waitForTimeout(50); continue; }
+        if (p.seat === 0 && p.type === 'claim') { await page.locator('button[data-action="pass"]').tap(); continue; }
+        if (p.seat === 0 && p.type === 'turn') {
+          if (await page.locator('button[data-action="tsumo"]').count()) { await page.locator('button[data-action="tsumo"]').tap(); continue; }
+          const o = await shownOrder(page);
+          const drawn = await page.evaluate(() => window.__mathjong.S.game.drawn);
+          await page.locator(`.hand .tile[data-id="${drawn}"]`).tap();
+          await page.locator(`.hand .tile[data-id="${drawn}"]`).tap();
+          if (withDrags && drags < 4 && o.length > 1) {
+            // 直後の AI の手番中に、長くドラッグして AI を待たせる
+            const cur = await shownOrder(page);
+            const b = await tileBox(page, cur[0]);
+            await touchDrag(page, cdp, cur[0], b.x + b.width * 3, b.y + b.height / 2, { before: () => page.waitForTimeout(900) });
+            drags++;
+          }
+          continue;
+        }
+        await page.waitForTimeout(40);
+      }
+      await page.waitForSelector('.overlay .result', { timeout: 30000 });
+      const out = await page.evaluate(() => {
+        const { S } = window.__mathjong;
+        return { events: S.game.events.map((e) => [e.type, e.seat, e.tile ?? null, e.meld ?? null].join(':')), result: { ...S.game.result, analysis: undefined }, scores: S.scores };
+      });
+      assert.deepEqual(errors, []);
+      await ctx.close();
+      return { ...out, drags };
+    }
+    const a = await playRound(false);
+    const bRun = await playRound(true);
+    assert.ok(bRun.drags >= 1, 'AI の手番中にドラッグした');
+    assert.deepEqual(bRun.events, a.events, '同じ seed なら打牌・ツモの列が同じ');
+    assert.deepEqual(bRun.result, a.result);
+    assert.deepEqual(bRun.scores, a.scores);
+  }
+
+  // (11) 320・375・390・430px の縦・横で並び替えでき、画面からはみ出さない
+  for (const [w, h] of [[320, 568], [375, 667], [390, 844], [430, 932], [568, 320], [667, 375], [844, 390], [932, 430]]) {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow', { width: w, height: h });
+    // 横画面では下端の操作バーが手牌に重なるので、利用者と同じくページの一番下までスクロールしてから操作する
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await page.waitForTimeout(50);
+    const hitOk = await page.evaluate(() => {
+      const t = document.querySelector('.hand .tile').getBoundingClientRect();
+      return !!document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2).closest('.hand .tile');
+    });
+    assert.ok(hitOk, `${w}x${h}: スクロール後は手牌を押せる`);
+    const o = await shownOrder(page);
+    const exp = await dragToIndex(page, cdp, o[0], 8);
+    assert.deepEqual(await shownOrder(page), exp, `${w}x${h}: 並び替え`);
+    const fit = await page.evaluate(() => ({
+      doc: document.documentElement.scrollWidth - innerWidth,
+      hand: Math.max(...[...document.querySelectorAll('.hand .tile')].map((t) => t.getBoundingClientRect().right)) - innerWidth,
+      help: !!document.querySelector('.hand-help button[data-action="autosort"]'),
+    }));
+    assert.ok(fit.doc <= 0 && fit.hand <= 0, `${w}x${h}: はみ出し`);
+    assert.ok(fit.help, '操作説明と自動整列');
+    assert.equal((await engineState(page)).accepted, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.2-D：手牌の並び替え（移動・同じ牌・ツモ牌・誤打牌ゼロ・中止・AI保留・結果不変・320〜430px）');
+}
+
+// ---- Ver.0.2-D 監査対応（PR #4）：P1 短い移動の誤打牌、P2 マウス1回の移動でのドロップ ----
+async function touchShortMove(page, cdp, id, dx, { cancel = false } = {}) {
+  const b = await tileBox(page, id);
+  const x = b.x + b.width / 2;
+  const y = b.y + b.height / 2;
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+  await page.waitForTimeout(40);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + dx / 2, y }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + dx, y }] });
+  await page.waitForTimeout(40);
+  await cdp.send('Input.dispatchTouchEvent', { type: cancel ? 'touchCancel' : 'touchEnd', touchPoints: [] });
+  await page.waitForTimeout(60);
+}
+const clickCount = (page) => page.evaluate(() => window.__clicks);
+
+async function handReorderAuditFixes(browser) {
+  // P1：タッチで 8・9・12・16px 動かして離す（長押し前）→ 選択も打牌もされない
+  const realClicks = [];
+  for (const dx of [8, 9, 12, 16]) {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    const order = await shownOrder(page);
+    const A = order[2];
+    const B = order[6];
+    // 未選択の牌
+    let c0 = await clickCount(page);
+    await touchShortMove(page, cdp, A, dx);
+    let st = await engineState(page);
+    realClicks.push([dx, 'unselected', (await clickCount(page)) - c0]);
+    assert.equal(st.selected, null, `${dx}px（未選択）：選択されない`);
+    assert.equal(st.accepted, 0, `${dx}px（未選択）：打牌されない`);
+    assert.deepEqual(await shownOrder(page), order, `${dx}px：並びは変わらない`);
+    // 選択済みの牌
+    await page.locator(`.hand .tile[data-id="${A}"]`).tap();
+    assert.equal((await engineState(page)).selected, A);
+    c0 = await clickCount(page);
+    await touchShortMove(page, cdp, A, dx);
+    st = await engineState(page);
+    realClicks.push([dx, 'selected', (await clickCount(page)) - c0]);
+    assert.equal(st.selected, A, `${dx}px（選択済み）：選択状態は変わらない`);
+    assert.equal(st.accepted, 0, `${dx}px（選択済み）：打牌されない`);
+    assert.equal(st.myDiscards, 0);
+    // 無効になった操作の直後の新しい通常タップは機能する（別の牌を選択 → 2回目で打牌）
+    await page.locator(`.hand .tile[data-id="${B}"]`).tap();
+    assert.equal((await engineState(page)).selected, B, `${dx}px の後の通常タップで選択`);
+    await page.locator(`.hand .tile[data-id="${B}"]`).tap();
+    st = await engineState(page);
+    assert.equal(st.accepted, 1, `${dx}px の後の2回タップで打牌`);
+    assert.equal(st.failed, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // 前提の確認：Chromium は 8px 以上動いても実際に click を送ることがある（＝アプリとブラウザの閾値の差を再現できている）
+  assert.ok(realClicks.some(([, , n]) => n > 0), `ブラウザが click を送った移動量がない: ${JSON.stringify(realClicks)}`);
+
+  // P1：pointercancel の後も正常操作に復帰。pointerId 不明の合成 click・別ポインター・キーボードの扱い
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    const order = await shownOrder(page);
+    const A = order[1];
+    const B = order[4];
+    await touchShortMove(page, cdp, A, 12, { cancel: true }); // touchcancel → pointercancel
+    await page.locator(`.hand .tile[data-id="${B}"]`).tap();
+    assert.equal((await engineState(page)).selected, B, 'pointercancel の後の通常タップで選択');
+    await page.locator(`.hand .tile[data-id="${B}"]`).tap(); // 2回目は打牌
+    let st = await engineState(page);
+    assert.equal(st.accepted, 1, 'pointercancel の後の2回タップで打牌');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    const C = (await shownOrder(page))[0];
+    let st;
+    const dispatch = (id, init) => page.evaluate(([i, it]) => {
+      const el = document.querySelector(`.hand .tile[data-id="${i}"]`);
+      const ev = it.pointerId !== undefined ? new PointerEvent('click', { bubbles: true, cancelable: true, ...it }) : new MouseEvent('click', { bubbles: true, cancelable: true, ...it });
+      el.dispatchEvent(ev);
+    }, [id, init]);
+    // (a) 16px 動かした操作の後、pointerId 不明の合成 click（iOS 想定）→ 抑止
+    await touchShortMove(page, cdp, C, 16);
+    await dispatch(C, { detail: 1 });
+    assert.equal((await engineState(page)).selected, null, 'pointerId 不明の合成 click は抑止');
+    // (b) 無効になった操作の後でも、別のポインターの click は抑止しない
+    await touchShortMove(page, cdp, C, 16);
+    await dispatch(C, { detail: 1, pointerId: 99 });
+    assert.equal((await engineState(page)).selected, C, '別のポインターの click は有効');
+    await page.evaluate(() => { window.__mathjong.S.selected = null; window.__mathjong.render(); });
+    // (c) キーボード由来（detail 0）の click も抑止しない
+    await touchShortMove(page, cdp, C, 16);
+    await dispatch(C, { detail: 0 });
+    assert.equal((await engineState(page)).selected, C, 'キーボード由来の click は有効');
+    st = await engineState(page);
+    assert.equal(st.failed, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // P2：マウス。1回の mouse.move と6回の mouse.move で同じ結果。6px 未満は通常クリック。帯の外はキャンセル
+  async function mouseDragOnce(steps) {
+    const ctx = await newContext(browser, { viewport: { width: 1366, height: 768 } });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?seed=9&speed=slow`);
+    await page.waitForSelector('.hand .tile.tap');
+    const order = await shownOrder(page);
+    const first = await tileBox(page, order[0]);
+    const last = await tileBox(page, order[8]);
+    await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(last.x + last.width + 8, first.y + first.height / 2, { steps });
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    const result = await shownOrder(page);
+    const st = await engineState(page);
+    assert.equal(st.accepted, 0);
+    assert.equal(st.selected, null);
+    return { ctx, page, errors, order, result };
+  }
+  const one = await mouseDragOnce(1);
+  assert.deepEqual(one.result, moveExpected(one.order, one.order[0], 8), '1回の mouse.move で先頭から末尾へ');
+  const six = await mouseDragOnce(6);
+  assert.deepEqual(six.result, one.result, '6回の mouse.move でも同じ結果');
+  await six.ctx.close();
+  {
+    const { ctx, page, errors } = one;
+    // ドラッグ直後の通常クリック
+    const t = await tileBox(page, one.result[3]);
+    await page.mouse.click(t.x + t.width / 2, t.y + t.height / 2);
+    assert.equal((await engineState(page)).selected, one.result[3], 'ドラッグ直後の通常クリックで選択');
+    // 6px 未満の移動は通常クリック（2回目で打牌）
+    await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(t.x + t.width / 2 + 4, t.y + t.height / 2, { steps: 1 });
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    assert.equal((await engineState(page)).accepted, 1, '6px 未満の移動は通常クリック（2回目で打牌）');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  {
+    // 帯の外で離す → キャンセル（1回の移動）
+    const ctx = await newContext(browser, { viewport: { width: 1366, height: 768 } });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?seed=9&speed=slow`);
+    await page.waitForSelector('.hand .tile.tap');
+    const order = await shownOrder(page);
+    const b = await tileBox(page, order[2]);
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b.x + b.width / 2 + 40, b.y - 220, { steps: 1 });
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    assert.deepEqual(await shownOrder(page), order, '帯の外で離すとキャンセル');
+    const st = await engineState(page);
+    assert.equal(st.accepted, 0);
+    assert.equal(st.selected, null);
+    assert.equal(st.ghosts, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log(`✓ Ver.0.2-D 監査対応：短い移動（8/9/12/16px）で誤打牌なし・pointercancel 復帰・click の区別・マウス1回移動のドロップ（ブラウザの click: ${JSON.stringify(realClicks)}）`);
+}
+
+// ---- Ver.0.2-D 第2回監査対応：遅れて届く古い click（新P2）・pointercancel と後始末（新P3） ----
+async function touchStartAt(cdp, x, y) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }); }
+async function touchEndAll(cdp) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); }
+async function trackPointerIds(page) {
+  await page.evaluate(() => { window.__pids = []; window.addEventListener('pointerdown', (e) => window.__pids.push(e.pointerId), true); });
+}
+async function injectClick(page, id, init) {
+  return page.evaluate(([i, it]) => {
+    const el = document.querySelector(`.hand .tile[data-id="${i}"]`);
+    const ev = it.pointerId !== undefined ? new PointerEvent('click', { bubbles: true, cancelable: true, ...it }) : new MouseEvent('click', { bubbles: true, cancelable: true, ...it });
+    el.dispatchEvent(ev);
+  }, [id, init]);
+}
+
+async function handReorderAudit2(browser) {
+  // 新P2：無効操作 A（16px 移動）→ 新しい主ポインター B で同じ牌を押す → B を離す前に A 由来の古い click を注入
+  for (const kind of ['pointerId', 'unknown']) {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    await trackPointerIds(page);
+    const X = (await shownOrder(page))[3];
+    await page.locator(`.hand .tile[data-id="${X}"]`).tap(); // X を選択（古い click が通ると打牌される状態）
+    assert.equal((await engineState(page)).selected, X);
+    await touchShortMove(page, cdp, X, 16); // 操作 A：タップとして無効
+    const pidA = await page.evaluate(() => window.__pids[window.__pids.length - 1]);
+    const bx = await tileBox(page, X);
+    await touchStartAt(cdp, bx.x + bx.width / 2, bx.y + bx.height / 2); // 操作 B：押している最中
+    await page.waitForTimeout(40);
+    const pidB = await page.evaluate(() => window.__pids[window.__pids.length - 1]);
+    assert.notEqual(pidA, pidB);
+    await injectClick(page, X, kind === 'pointerId' ? { detail: 1, pointerId: pidA } : { detail: 1 });
+    let st = await engineState(page);
+    assert.equal(st.selected, X, `${kind}：古い click で選択が変わらない`);
+    assert.equal(st.accepted, 0, `${kind}：古い click で打牌されない`);
+    await touchEndAll(cdp); // B を正常に終了 → B 由来の click（実際の Chromium の click）は受理される＝選択済みの X を打牌
+    await page.waitForTimeout(80);
+    st = await engineState(page);
+    assert.equal(st.accepted, 1, `${kind}：B 由来の click は受理（打牌）`);
+    assert.equal(st.myDiscards, 1);
+    assert.equal(st.failed, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // 新P3：移動前の touchCancel・ドラッグ開始後の touchCancel・期限・2本指の cancel・pointerup が届かない場合
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    const order = await shownOrder(page);
+    const guardArmed = () => page.evaluate(() => window.__mathjong.drag.guard.isArmed());
+    // (a) 移動前に touchCancel → 押下中の取り消しとして無効化され、期限が始まり 1 秒後に解除
+    const a = await tileBox(page, order[1]);
+    await touchStartAt(cdp, a.x + a.width / 2, a.y + a.height / 2);
+    await page.waitForTimeout(60);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+    await page.waitForTimeout(30);
+    let st = await engineState(page);
+    assert.equal(st.phase, 'idle');
+    assert.equal(await guardArmed(), true, '移動前の cancel：抑止は有効（期限内）');
+    await page.waitForTimeout(1100);
+    assert.equal(await guardArmed(), false, '移動前の cancel：離した時点から1秒で解除（期限が始まっている）');
+    await page.locator(`.hand .tile[data-id="${order[1]}"]`).tap();
+    assert.equal((await engineState(page)).selected, order[1], 'cancel の後の通常タップ');
+    await page.evaluate(() => { window.__mathjong.S.selected = null; window.__mathjong.render(); });
+    // (b) ドラッグ開始後に touchCancel → 取り消し、AI の保留も解除
+    const b = await tileBox(page, order[2]);
+    await touchStartAt(cdp, b.x + b.width / 2, b.y + b.height / 2);
+    await page.waitForTimeout(450);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: b.x + b.width * 2, y: b.y + b.height / 2 }] });
+    await page.waitForTimeout(30);
+    assert.equal((await engineState(page)).phase, 'dragging');
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+    await page.waitForTimeout(50);
+    st = await engineState(page);
+    assert.equal(st.phase, 'idle');
+    assert.equal(st.ghosts, 0);
+    assert.deepEqual(await shownOrder(page), order, 'ドラッグ後の cancel は元の並び');
+    assert.equal(await guardArmed(), true);
+    await page.waitForTimeout(1100);
+    assert.equal(await guardArmed(), false, 'ドラッグ後の cancel も期限で解除');
+    // (c) 2本指で押して cancel → 選択・打牌なし、状態が残らない
+    const t1 = await tileBox(page, order[0]);
+    const t2 = await tileBox(page, order[5]);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: t1.x + t1.width / 2, y: t1.y + t1.height / 2, id: 1 }, { x: t2.x + t2.width / 2, y: t2.y + t2.height / 2, id: 2 }] });
+    await page.waitForTimeout(60);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+    await page.waitForTimeout(50);
+    st = await engineState(page);
+    assert.equal(st.phase, 'idle');
+    assert.equal(st.selected, null);
+    assert.equal(st.accepted, 0);
+    // (d) pointerup が届かない操作（押下だけ）：次の正常なタップで後始末され、タップは有効
+    await page.evaluate((id) => {
+      const el = document.querySelector(`.hand .tile[data-id="${id}"]`);
+      const r = el.getBoundingClientRect();
+      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 901, isPrimary: true, pointerType: 'touch', clientX: r.left + 5, clientY: r.top + 5 }));
+    }, order[3]);
+    assert.equal((await engineState(page)).phase, 'pressing');
+    await page.waitForTimeout(450); // 長押しが成立 → dragging（pointerup は来ない）
+    assert.equal((await engineState(page)).phase, 'dragging');
+    await page.locator(`.hand .tile[data-id="${order[6]}"]`).tap(); // 新しい主ポインター
+    st = await engineState(page);
+    assert.equal(st.phase, 'idle', 'pointerup が届かないドラッグは、次の押下で後始末');
+    assert.equal(st.ghosts, 0);
+    assert.equal(st.selected, order[6], '次のタップは有効');
+    assert.equal(st.accepted, 0);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.stepDeferred), false);
+    // (e) DOM 再生成の後も不整合がない
+    await page.evaluate(() => window.__mathjong.render());
+    await page.locator(`.hand .tile[data-id="${order[6]}"]`).tap();
+    st = await engineState(page);
+    assert.equal(st.accepted, 1, '再描画の後の2回目のタップで打牌');
+    assert.equal(st.failed, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.2-D 第2回監査対応：遅れた古い click（pointerId あり・なし）を抑止し新しいタップは受理・cancel の期限・2本指・pointerup 欠落・再描画');
+}
+
+// ---- Ver.0.2-D P2-2：pointerup がドラッグ処理に届かなかった後の新しいマウス操作（同じ／異なる pointerId） ----
+// pointerup を「ドラッグ処理に届かない」状態にする：window の捕捉段階で1回だけ伝播を止める
+// （click 抑止の記録はそれより先に登録された捕捉リスナーで行われるので、release は記録される）。
+async function blockNextPointerUp(page) {
+  await page.evaluate(() => {
+    window.__blockUp = true;
+    window.addEventListener('pointerup', (e) => { if (window.__blockUp) { window.__blockUp = false; window.__blockedUp = (window.__blockedUp || 0) + 1; e.stopImmediatePropagation(); } }, true);
+  });
+}
+const dragState = (page) => page.evaluate(() => {
+  const { S, drag } = window.__mathjong;
+  S.game.checkInvariants();
+  return {
+    phase: drag.phase(), ghosts: document.querySelectorAll('.drag-ghost').length, markers: document.querySelectorAll('.drop-marker').length,
+    deferred: !!S.stepDeferred, timer: S.timer !== null && S.timer !== undefined, events: S.game.events.length,
+    appClicks: window.__appClicks || 0, selected: S.selected, accepted: S.input.accepted, failed: S.input.failed,
+  };
+});
+
+async function handReorderP22(browser) {
+  for (const variant of ['same-pointerId (mouse→mouse)', 'different-pointerId (touch→mouse)']) {
+    const ctx = await newContext(browser, { viewport: { width: 1366, height: 768 }, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?seed=9&speed=fast`);
+    await page.waitForSelector('.hand .tile.tap');
+    // アプリが受理した click（捕捉段階の抑止を通過したもの）を数える
+    await page.evaluate(() => { window.__appClicks = 0; document.getElementById('app').addEventListener('click', () => { window.__appClicks++; }); });
+    // 自分の打牌 → AI の手番
+    const drawn = await page.evaluate(() => window.__mathjong.S.game.drawn);
+    const db = await tileBox(page, drawn);
+    await page.mouse.click(db.x + db.width / 2, db.y + db.height / 2);
+    await page.mouse.click(db.x + db.width / 2, db.y + db.height / 2);
+    assert.equal((await dragState(page)).accepted, 1);
+    // 1. AI の手番中にドラッグを開始し、2. AI の保留を成立させる
+    const order = await shownOrder(page);
+    const b = await tileBox(page, order[2]);
+    const cx = b.x + b.width / 2;
+    const cy = b.y + b.height / 2;
+    let cdp = null;
+    if (variant.startsWith('same')) {
+      await page.mouse.move(cx, cy);
+      await page.mouse.down();
+      await page.mouse.move(cx + 40, cy, { steps: 1 });
+    } else {
+      cdp = await ctx.newCDPSession(page);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cx, y: cy }] });
+      await page.waitForTimeout(450);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: cx + 40, y: cy }] });
+    }
+    await page.waitForTimeout(700); // fast = 250ms：保留中に AI のタイマーが来て stepDeferred になる
+    let st = await dragState(page);
+    assert.equal(st.phase, 'dragging', `${variant}：ドラッグ中`);
+    assert.equal(st.deferred, true, `${variant}：AI の保留が成立`);
+    const eventsHeld = st.events;
+    // 3. pointerup がドラッグ処理に届かない
+    await blockNextPointerUp(page);
+    if (cdp) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    else await page.mouse.up();
+    await page.waitForTimeout(100);
+    st = await dragState(page);
+    assert.equal(await page.evaluate(() => window.__blockedUp), 1, `${variant}：pointerup がドラッグ処理に届かない状態を再現`);
+    assert.equal(st.phase, 'dragging', `${variant}：（再現）ドラッグ状態が残る`);
+    assert.equal(st.ghosts, 1);
+    assert.equal(st.events, eventsHeld, `${variant}：（再現）AI は止まったまま`);
+    // 4. 新しいマウス操作（マウスの pointerId は常に同じ）
+    const c0 = st.appClicks;
+    const t = await tileBox(page, order[5]);
+    await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
+    await page.mouse.down();
+    st = await dragState(page);
+    assert.equal(st.ghosts, 0, `${variant}：浮いた牌が消える`);
+    assert.equal(st.markers, 0, `${variant}：挿入位置の線が消える`);
+    assert.notEqual(st.phase, 'dragging', `${variant}：古いドラッグは終了`);
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    // 5. 状態の確認
+    st = await dragState(page);
+    assert.equal(st.phase, 'idle', `${variant}：idle に復帰`);
+    assert.equal(st.deferred, false, `${variant}：AI の保留が解除`);
+    assert.equal(st.appClicks, c0 + 1, `${variant}：新しいクリックは受理（抑止されない）`);
+    await page.waitForFunction((n) => window.__mathjong.S.game.events.length > n, eventsHeld, { timeout: 5000 });
+    // AI が正常に進み、自分の手番が来る（手番が飛ばず、タイマーが二重にならない）。途中の宣言（チー・ロン）は見送る
+    for (let i = 0; i < 60; i++) {
+      await page.waitForSelector('.hand .tile.tap, button[data-action="pass"], .overlay .result', { timeout: 15000 });
+      if (await page.locator('.hand .tile.tap').count()) break;
+      if (await page.locator('.overlay .result').count()) throw new Error(`${variant}：自分の手番の前に終局（seed を変更して再検討）`);
+      await page.locator('button[data-action="pass"]').click();
+    }
+    await page.waitForSelector('.hand .tile.tap');
+    const seq = await page.evaluate(() => {
+      const ev = window.__mathjong.S.game.events;
+      const bad = [];
+      for (let i = 0; i < ev.length; i++) {
+        if (ev[i].type !== 'discard') continue;
+        const nxt = ev.slice(i + 1).find((e) => e.type === 'draw' || e.type === 'chi' || e.type === 'win');
+        if (nxt && nxt.type === 'draw' && nxt.seat !== (ev[i].seat + 1) % 4) bad.push(i);
+      }
+      return bad;
+    });
+    assert.deepEqual(seq, [], `${variant}：手番が飛ばない`);
+    // 自分の手番で、通常のクリック（選択 → 打牌）とドラッグが成立
+    const o2 = await shownOrder(page);
+    const u = await tileBox(page, o2[1]);
+    await page.mouse.click(u.x + u.width / 2, u.y + u.height / 2);
+    assert.equal((await dragState(page)).selected, o2[1], `${variant}：自分の手番の通常クリックで選択`);
+    const last = await tileBox(page, o2[o2.length - 1]);
+    const f = await tileBox(page, o2[0]);
+    await page.mouse.move(f.x + f.width / 2, f.y + f.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(last.x + last.width + 8, f.y + f.height / 2, { steps: 1 });
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    assert.deepEqual(await shownOrder(page), moveExpected(o2, o2[0], o2.length - 1), `${variant}：次のドラッグも成立`);
+    st = await dragState(page);
+    assert.equal(st.phase, 'idle');
+    assert.equal(st.ghosts, 0);
+    assert.equal(st.failed, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.2-D P2-2：pointerup が届かなかったドラッグを、同じ／異なる pointerId の新しいマウス操作で後始末（浮いた牌・線・AI 保留を解除、クリック受理）');
+}
+
 // 実機テスト用の固定 seed（docs/12）。「毎回右端のツモ牌を捨て、チー・ロンは見送る」と
 // 指定の手番で宣言ボタンが出ることを、公開サイト相当の画面で確認する。
 export const DEVICE_SEEDS = [
@@ -740,7 +1630,8 @@ let browser;
 const stats = { rounds: 0, wins: [0, 0, 0, 0], draws: 0, tsumo: 0, ron: 0, ronDeclined: 0, chi: 0, chiPassed: 0, chiOverriddenByRon: 0, discards: 0, yaku: {} };
 const t0 = Date.now();
 try {
-  browser = await chromium.launch({ args: ['--no-proxy-server'] });
+  browser = await chromium.launch({ args: ['--no-proxy-server'], ...(CHANNEL ? { channel: CHANNEL } : {}) });
+  console.log(`ブラウザ：${CHANNEL ? `channel=${CHANNEL}` : 'headless shell（既定）'} ${browser.version()}`);
   await scenario(browser, 'tsumo', presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['=1']), (text) => {
     assert.match(text, /あなた の和了 ツモ/);
     assert.match(text, /三関制覇/);
@@ -758,6 +1649,10 @@ try {
   await v02aFeatures(browser);
   await v02aAuditFixes(browser);
   await guideFitsScreen(browser);
+  await handReorder(browser);
+  await handReorderAuditFixes(browser);
+  await handReorderAudit2(browser);
+  await handReorderP22(browser);
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
     await playDevice(browser, dev, 4242 + i * 101, rounds, stats);

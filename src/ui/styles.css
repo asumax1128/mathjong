@@ -95,7 +95,18 @@ button:focus-visible, .tile.tap:focus-visible { outline: 3px solid var(--accent)
 
 .self .river.mine { min-height: 26px; }
 .melds.mine { margin-top: 4px; }
-.hand { display: flex; gap: 3px; justify-content: center; align-items: flex-end; margin-top: 8px; padding-top: 10px; }
+.hand { position: relative; display: flex; gap: 3px; justify-content: center; align-items: flex-end; margin-top: 8px; padding-top: 10px;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+/* ---- 手牌の並び替え（Ver.0.2-D） ---- */
+.hand-help { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 6px; font-size: 11.5px; color: var(--ink-dim); flex-wrap: wrap; }
+.hand-help button.small { min-height: 30px; font-size: 12px; padding: 0 10px; }
+.tile.drawn-mark::after { content: ''; position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--gold); box-shadow: 0 0 0 1px #7a5a12; }
+.tile.drag-src { opacity: 0.32; transform: none; }
+.drag-ghost { position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none; margin: 0; transition: none;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.45), 0 0 0 2px var(--gold); will-change: transform; }
+.drag-ghost.drag-cancel { opacity: 0.55; box-shadow: 0 10px 22px rgba(0, 0, 0, 0.45), 0 0 0 2px var(--win); }
+.drop-marker { position: absolute; width: 4px; border-radius: 2px; background: var(--gold); box-shadow: 0 0 6px var(--gold); pointer-events: none; }
 .drawn-gap { width: 8px; }
 .hint-box { margin-top: 6px; font-size: 13px; color: var(--ink-dim); text-align: center; }
 .hint-box b { color: var(--ink); }

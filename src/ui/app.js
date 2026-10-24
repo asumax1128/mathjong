@@ -8,11 +8,13 @@ import { trigExact } from '../engine/exact.js';
 import { tileHTML, formulaHTML, backHTML, valueHTML } from './render.js';
 import { yakuCandidates, warmUp, claimForSeat } from '../engine/yakuhint.js';
 import { hintKey } from './hintstate.js';
+import { reconcileOrder, defaultOrder } from './handorder.js';
+import { createHandDrag } from './handdrag.js';
 import { YAKU_GUIDE, GUIDE_NOTES } from './guide.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, intParam } from './params.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
-const APP_VERSION = '0.2.0-a';
+const APP_VERSION = '0.2.0-d';
 const params = new URLSearchParams(location.search);
 // テスト専用機能（山の指定・AI待ち時間0）はローカル開発環境でのみ有効。公開サイトでは無効。
 const IS_LOCAL = isLocalHost(location.hostname);
@@ -60,6 +62,10 @@ const nameOf = (s) => (s === HUMAN ? 'あなた' : `${PLAYERS[s].name}`);
 
 function startRound() {
   clearTimeout(S.timer);
+  S.timer = null;
+  S.stepDeferred = false;
+  S.gameSerial = (S.gameSerial || 0) + 1;
+  S.handOrder = null; // 手牌の表示順は局ごとに初期化（従来の種類順から始まる）
   const seed = S.seedBase + S.round * 7919;
   const presetWall = IS_LOCAL ? S.nextPresetWall || null : null; // テスト用：山の並びを指定（ローカルのみ）
   S.nextPresetWall = null;
@@ -81,12 +87,19 @@ function startRound() {
 
 function step() {
   clearTimeout(S.timer);
+  S.timer = null;
+  // 手牌の並び替え（dragging）中は AI を進めない。指を離すか中止した時点で step() を1回だけ呼び直す。
+  // AI の判断・乱数は局面だけで決まるので、待つ時間は結果に影響しない。
+  if (drag && drag.isDragging()) { S.stepDeferred = true; return; }
   const g = S.game;
   const p = g.pending();
   if (!p) return finishRound();
   if (p.seat === HUMAN) return render();
   const [turnDelay, claimDelay] = speedDelays(S.speed, IS_LOCAL);
   S.timer = setTimeout(() => {
+    S.timer = null;
+    if (g !== S.game) return;
+    if (drag && drag.isDragging()) { S.stepDeferred = true; return; }
     const action = decide(g, p.seat, PLAYERS[p.seat].personality, S.aiRng);
     applyAction(g, p.seat, action);
     render();
@@ -172,19 +185,36 @@ function panelHTML(seat) {
   </section>`;
 }
 
+// 手牌の表示順（画面だけの状態）をエンジンの手牌と突き合わせて返す。エンジンには反映しない。
+function currentDrawn() {
+  const g = S.game;
+  const p = g.pending();
+  return p && p.seat === HUMAN && p.type === 'turn' && g.drawn !== null && g.drawn !== undefined ? g.drawn : null;
+}
+function currentOrder() {
+  const g = S.game;
+  S.handOrder = reconcileOrder(S.handOrder, g.hands[HUMAN], (id) => g.typeOf(id), currentDrawn());
+  return S.handOrder;
+}
+
 function handHTML() {
   const g = S.game;
   const p = g.pending();
   const myTurn = p && p.seat === HUMAN && p.type === 'turn';
-  const drawn = myTurn ? g.drawn : null;
-  const sorted = g.hands[HUMAN].filter((id) => id !== drawn).sort((a, b) => g.typeOf(a) - g.typeOf(b) || a - b);
+  const drawn = currentDrawn();
+  const order = currentOrder();
+  // ツモ牌：右端にあれば従来どおり隙間で区別、並び替えで移動したら金色の点で示す
+  const drawnAtEnd = drawn !== null && order[order.length - 1] === drawn;
   const hl = S.hintHighlight || new Set();
   const tile = (id) => tileHTML(T(g.typeOf(id)), {
     size: 'l', id,
-    cls: [myTurn ? 'tap' : '', S.selected === id ? 'selected' : '', hl.has(id) ? 'hint' : ''].join(' '),
+    cls: [myTurn ? 'tap' : '', S.selected === id ? 'selected' : '', hl.has(id) ? 'hint' : '',
+      id === drawn ? (drawnAtEnd ? 'drawn' : 'drawn drawn-mark') : ''].join(' '),
     attrs: myTurn ? `data-action="tile" tabindex="0"` : '',
   });
-  return `<div class="hand">${sorted.map(tile).join('')}${drawn !== null && drawn !== undefined ? `<span class="drawn-gap"></span>${tile(drawn)}` : ''}</div>`;
+  const body = order.map((id) => (drawnAtEnd && id === drawn ? `<span class="drawn-gap"></span>${tile(id)}` : tile(id))).join('');
+  return `<div class="hand">${body}</div>
+    <div class="hand-help"><span>長押しで並び替え・タップ2回で捨てる</span><button data-action="autosort" class="small">自動整列</button></div>`;
 }
 
 function actionsHTML() {
@@ -232,6 +262,8 @@ function headerHTML() {
 
 function render() {
   if (!S.game) return;
+  // 並び替え中に再描画が必要になったら、並び替えを中止してから描画する（DOM が作り直されるため）
+  if (drag && drag.isDragging()) drag.cancel('render');
   const g = S.game;
   // ヒント表示中は、役候補が参照する公開情報（手牌・河・公開面子・宣言状態）が変わったときだけ再計算する。
   // 自動更新ではヒント使用回数を加算しない。
@@ -385,6 +417,7 @@ function rulesHTML() {
     <li><b>ロン</b>：他の3人の捨て牌で和了。ロンはチーより優先、複数ならアタマハネ（打牌者に近い人）。</li>
     <li><b>門前</b>（チーなし）なら役なしでも和了できます。</li>
     <li>フリテンは Ver.0.1 では未実装。流局は山が尽きたとき。</li>
+    <li><b>手牌の並び替え</b>：牌を長押し（約0.35秒）して左右に動かし、指を離した位置に入れます。手牌の外で離すと取り消し。表示の順番だけが変わり、ゲームには影響しません。「自動整列」で種類順に戻ります。新しいツモ牌は右端に入ります。</li>
   </ul>
   <h3>役と仮得点</h3><ul class="yaku"><li><span>通常和了</span><b>${c.scoring.base}</b></li>${yaku}${sp}</ul>
   <p class="note">役満成立時は通常和了点・通常役を加算せず、役満の点のみ（複数役満は加算）。<br>エンジン ${ENGINE_VERSION} / 牌 ${rules.deckSize}枚 / 面子 ${rules.melds.length}種類</p>`;
@@ -469,6 +502,13 @@ app.addEventListener('click', (ev) => {
       else { S.selected = id; render(); }
       break;
     }
+    case 'autosort': {
+      // 表示順だけを従来の種類順へ戻す（ツモ牌は右端）。エンジンの手牌は変えない。
+      const gg = S.game;
+      S.handOrder = defaultOrder(gg.hands[HUMAN], (id) => gg.typeOf(id), currentDrawn());
+      render();
+      break;
+    }
     case 'discard':
       if (S.selected !== null) humanAct({ type: 'discard', tile: S.selected });
       break;
@@ -514,7 +554,35 @@ app.addEventListener('change', (ev) => {
   }
 });
 
+// ---------- 手牌の並び替え（長押しドラッグ） ----------
+function humanClaimPending() {
+  const p = S.game && S.game.pending();
+  return !!(p && p.seat === HUMAN && p.type === 'claim');
+}
+const drag = createHandDrag(app, {
+  // 宣言待ち・モーダル表示中・終局中は並び替え不可
+  canStart: () => !!(S.game && !S.modal && S.game.pending() && !humanClaimPending()),
+  // これが変わったら並び替えを中止：局・モーダル・手牌 ID・宣言状態・終局
+  snapshot: () => {
+    const g = S.game;
+    if (!g) return '';
+    return [S.gameSerial, S.modal || '', g.hands[HUMAN].slice().sort((a, b) => a - b).join(','), humanClaimPending(), !g.pending()].join('|');
+  },
+  getOrder: () => currentOrder(),
+  onDragStart: () => { S.selected = null; S.dragCount = (S.dragCount || 0) + 1; },
+  onDragEnd: ({ committed, order, reason }) => {
+    if (committed) S.handOrder = order;
+    S.lastDragEnd = { committed, reason };
+    if (reason !== 'render') render();
+    if (S.stepDeferred) {
+      S.stepDeferred = false;
+      // render() の途中で中止された場合も、描画が終わってから AI を再開する
+      setTimeout(() => { if (!drag.isDragging() && !S.timer) step(); }, 0);
+    }
+  },
+});
+
 // テスト・デバッグ用（E2E テストが盤面を確認するため）
-if (IS_LOCAL) window.__mathjong = { S, rules, decide, startRound, render, step };
+if (IS_LOCAL) window.__mathjong = { S, rules, decide, startRound, render, step, drag };
 
 startRound();
