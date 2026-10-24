@@ -9,13 +9,14 @@
 人間1人＋AI3人で1局ずつ遊べる Web 版を実装しました（依存ライブラリ・ビルド不要）。
 
 ```bash
-node tools/serve.mjs          # → http://localhost:8080/ を開く
+node tools/serve.mjs          # → http://localhost:8080/ を開く（このPCからのみ）
 npm test                      # 単体・対局テスト
 node tests/e2e/play.mjs       # ブラウザ実操作テスト（Playwright が必要）
 node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 ```
 
-スマホでは、同じ Wi-Fi の PC で起動して `http://<PCのIP>:8080/` を開くか、GitHub Pages（main のルート）で公開してください。
+スマホ向けには GitHub Pages での公開を予定しています。**公開予定URL：https://asumax1128.github.io/mathjong/**（2026-10-24 時点で未公開・動作未確認。公開設定と確認手順は [iPhone 実機テスト手順](docs/12-iphone-test-guide.md)）。
+公開前に iPhone で試す場合は、同じ Wi-Fi の PC で `node tools/serve.mjs 8080 --lan` を実行し、表示される `http://<PCのIP>:8080/` を開きます（`--lan` を付けたときだけ LAN に公開。テスト後は Ctrl+C で停止）。`--base /mathjong/` を付けると Pages と同じサブパスを再現できます。
 実装仕様・暫定ルール・テスト結果は [Ver.0.1 実装記録](docs/10-ver0.1-implementation.md)。
 
 ## ゲームの核
@@ -43,6 +44,7 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 | [Ver.0.1 実装記録](docs/10-ver0.1-implementation.md) | Web 試作版の仕様・暫定採用・テスト結果・既知の問題 |
 | [実機テストと独立監査](docs/11-audit-and-device-testing.md) | iPhoneでのテスト手順、Claude→CodexのPR監査フロー |
 | [Codex監査ガイド](AGENTS.md) | 独立監査の重点項目と報告形式 |
+| [iPhone 実機テスト手順](docs/12-iphone-test-guide.md) | テストURL、Pages 設定、固定seed、報告方法 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |
 

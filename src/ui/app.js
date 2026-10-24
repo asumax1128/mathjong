@@ -6,8 +6,14 @@ import { decide, applyAction, PERSONALITIES } from '../engine/ai.js';
 import { createRng } from '../engine/rng.js';
 import { trigExact } from '../engine/exact.js';
 import { tileHTML, formulaHTML, backHTML, valueHTML } from './render.js';
+import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, intParam } from './params.js';
 
 const params = new URLSearchParams(location.search);
+// テスト専用機能（山の指定・AI待ち時間0）はローカル開発環境でのみ有効。公開サイトでは無効。
+const IS_LOCAL = isLocalHost(location.hostname);
+// ?seed=（0〜999999999の整数）と ?round=（1〜999）だけを受け付ける。不正値は無視。
+const seedParam = intParam(params.get('seed'), 999999999);
+const roundParam = intParam(params.get('round'), 999);
 const rules = createRules(DEFAULT_CONFIG);
 const HUMAN = 0;
 const POS = ['自分', '下家', '対面', '上家'];
@@ -17,7 +23,6 @@ const PLAYERS = [
   { name: 'AI-B', kind: 'ai', personality: 'value' },
   { name: 'AI-C', kind: 'ai', personality: 'closed' },
 ];
-const SPEEDS = { fast: [250, 120], normal: [700, 350], slow: [1200, 600], test: [0, 0] };
 
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -25,19 +30,24 @@ const store = {
 };
 
 const S = {
-  round: 1,
-  dealer: 0,
+  // 第n局の山と親は seed と n だけで決まる（親は局ごとに1つずつ移動）。?round=n で直接その局から始められる。
+  round: roundParam && roundParam > 0 ? roundParam : 1,
+  dealer: roundParam && roundParam > 0 ? (roundParam - 1) % 4 : 0,
   scores: [0, 0, 0, 0],
-  seedBase: params.has('seed') ? Number(params.get('seed')) : Math.floor(Math.random() * 1e9),
+  seedBase: seedParam ?? Math.floor(Math.random() * 1e9),
   game: null,
   selected: null,
   hintsUsed: 0,
   modal: null,
-  speed: params.get('speed') || store.get('mj-speed', 'normal'),
+  speed: null, // 下で resolveSpeed により許可された値だけを設定する
   timer: null,
   aiRng: null,
   history: [],
 };
+
+S.speed = resolveSpeed(params.get('speed'), store.get('mj-speed', null), IS_LOCAL);
+// 人間の入力の処理回数（多重処理の検出用。accepted=打牌などが成立、ignored=手番外の入力）
+S.input = { accepted: 0, ignored: 0, failed: 0 };
 
 const app = document.getElementById('app');
 const T = (idx) => rules.types[idx];
@@ -46,7 +56,7 @@ const nameOf = (s) => (s === HUMAN ? 'あなた' : `${PLAYERS[s].name}`);
 function startRound() {
   clearTimeout(S.timer);
   const seed = S.seedBase + S.round * 7919;
-  const presetWall = S.nextPresetWall || null; // テスト用：山の並びを指定
+  const presetWall = IS_LOCAL ? S.nextPresetWall || null : null; // テスト用：山の並びを指定（ローカルのみ）
   S.nextPresetWall = null;
   S.game = new Game({ rules, seed, dealer: S.dealer, players: PLAYERS, round: S.round, presetWall });
   S.aiRng = createRng(seed ^ 0x5bd1e995);
@@ -64,7 +74,7 @@ function step() {
   const p = g.pending();
   if (!p) return finishRound();
   if (p.seat === HUMAN) return render();
-  const [turnDelay, claimDelay] = SPEEDS[S.speed] || SPEEDS.normal;
+  const [turnDelay, claimDelay] = speedDelays(S.speed, IS_LOCAL);
   S.timer = setTimeout(() => {
     const action = decide(g, p.seat, PLAYERS[p.seat].personality, S.aiRng);
     applyAction(g, p.seat, action);
@@ -87,13 +97,15 @@ function finishRound() {
 function humanAct(action) {
   const g = S.game;
   const p = g.pending();
-  if (!p || p.seat !== HUMAN) return;
+  if (!p || p.seat !== HUMAN) { S.input.ignored++; return; }
   try {
     applyAction(g, HUMAN, action);
   } catch (e) {
+    S.input.failed++;
     console.error(e);
     return;
   }
+  S.input.accepted++;
   S.selected = null;
   render();
   step();
@@ -297,8 +309,15 @@ function resultHTML() {
   return `<div class="result">${head}${detail}
     <h3>累計得点（仮）</h3>${scores}${hints}
     <details><summary>全員の手牌を見る</summary>${[0, 1, 2, 3].map(revealHTML).join('')}</details>
+    ${reportInfoHTML()}
     <div class="modal-actions"><button data-action="next" class="primary">次の局へ</button>
     <button data-action="close-result">盤面を見る</button></div></div>`;
+}
+
+// 不具合報告用の再現情報（seed と局番号があれば同じ山・同じ親から再現できる）
+function reportInfoHTML() {
+  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ 第<b>${S.round}</b>局 ／ v${ENGINE_VERSION}<br>
+    この局から再現：URL の末尾に <code>?seed=${S.seedBase}&amp;round=${S.round}</code></p>`;
 }
 
 function rulesHTML() {
@@ -331,10 +350,11 @@ function tableHTML() {
 }
 
 function settingsHTML() {
-  const opt = (v, l) => `<option value="${v}" ${S.speed === v ? 'selected' : ''}>${l}</option>`;
+  const labels = { fast: '速い', normal: '普通', slow: 'ゆっくり' };
+  const opt = (v) => `<option value="${v}" ${S.speed === v ? 'selected' : ''}>${labels[v]}</option>`;
   return `<h2>設定</h2>
-    <label class="setting">AIの速さ <select data-action="speed">${opt('fast', '速い')}${opt('normal', '普通')}${opt('slow', 'ゆっくり')}</select></label>
-    <p class="note">シード：${S.seedBase}（同じ URL に ?seed=${S.seedBase} を付けると同じ配牌を再現できます）</p>
+    <label class="setting">AIの速さ <select data-action="speed">${publicSpeedNames().map(opt).join('')}</select></label>
+    ${reportInfoHTML()}
     <div class="modal-actions"><button data-action="reset">新しい対局（得点リセット）</button></div>`;
 }
 
@@ -405,12 +425,12 @@ app.addEventListener('click', (ev) => {
 
 app.addEventListener('change', (ev) => {
   if (ev.target.dataset.action === 'speed') {
-    S.speed = ev.target.value;
+    S.speed = resolveSpeed(ev.target.value, null, false);
     store.set('mj-speed', S.speed);
   }
 });
 
 // テスト・デバッグ用（E2E テストが盤面を確認するため）
-window.__mathjong = { S, rules, decide, startRound };
+if (IS_LOCAL) window.__mathjong = { S, rules, decide, startRound };
 
 startRound();
