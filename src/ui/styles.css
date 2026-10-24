@@ -176,6 +176,7 @@ button.chi { display: inline-flex; align-items: center; gap: 6px; background: #2
   z-index: 10; padding: 10px;
 }
 .modal {
+  overscroll-behavior: contain; /* 一覧のスクロールが背景の盤面に伝わらないようにする */
   background: #f8f5ec; color: #1c2a23; width: min(560px, 100%); max-height: 90dvh; overflow: auto;
   border-radius: 14px; padding: 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
 }
@@ -252,9 +253,11 @@ table.values td.undef { color: #999; font-size: 12px; }
 .gy-ex { margin: 0; padding-left: 1.4em; font-size: 16px; }
 .gy-ex li { padding: 2px 0; }
 .gy-tiles { display: flex; gap: 2px; flex-wrap: wrap; }
-.gallery { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
-.gallery .gl { width: 4.5em; flex: 0 0 auto; font-size: 11px; color: #5a6b62; }
-.gallery .gtiles { display: flex; flex-wrap: wrap; gap: 2px; }
+/* 牌一覧：各行はブロック（見出しの下に牌を並べる）。牌の並びは幅が確定したブロックの中で折り返すので、
+   入れ子の flex の最小幅計算（WebKit で折り返さず横にはみ出す原因）に依存しない。 */
+.gallery { display: block; margin: 4px 0 8px; }
+.gallery .gl { display: block; font-size: 11px; color: #5a6b62; margin-bottom: 2px; }
+.gallery .gtiles { display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; max-width: 100%; }
 .gallery .tile.sz-l { --hand-w: 40px; }
 
 /* ---- 横長画面（タブレット横・PC・Chromebook） ---- */
