@@ -10,11 +10,14 @@ import { yakuCandidates, warmUp, claimForSeat } from '../engine/yakuhint.js';
 import { hintKey } from './hintstate.js';
 import { reconcileOrder, defaultOrder } from './handorder.js';
 import { createHandDrag } from './handdrag.js';
+import { CHI_AUTOPASS_KEY, parseChiAutoPass, visibleClaimActions, claimPendingForHint, claimPolicy, autoPassDue } from './autopass.js';
 import { YAKU_GUIDE, GUIDE_NOTES } from './guide.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, intParam } from './params.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
-const APP_VERSION = '0.2.0-d';
+// ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
+const APP_VERSION = '0.2.1';
+document.title = `MATHJONG 数式麻雀 Ver.${APP_VERSION}`;
 const params = new URLSearchParams(location.search);
 // テスト専用機能（山の指定・AI待ち時間0）はローカル開発環境でのみ有効。公開サイトでは無効。
 const IS_LOCAL = isLocalHost(location.hostname);
@@ -53,6 +56,10 @@ const S = {
 };
 
 S.speed = resolveSpeed(params.get('speed'), store.get('mj-speed', null), IS_LOCAL);
+// チーのオートパス（Ver.0.2-B）。保存値 '1' だけが ON、それ以外・保存不可は OFF。
+S.chiAutoPass = parseChiAutoPass(store.get(CHI_AUTOPASS_KEY, null));
+// 自動パスの回数（手動操作の S.input とは別に数える）と、次の自分の手番に出す通知
+S.autoPass = { count: 0, failed: 0, noticePending: false, noticeKey: null };
 // 人間の入力の処理回数（多重処理の検出用。accepted=打牌などが成立、ignored=手番外の入力）
 S.input = { accepted: 0, ignored: 0, failed: 0 };
 
@@ -81,11 +88,30 @@ function startRound() {
   S.hintHighlight = null;
   S.modal = null;
   S.scored = false;
+  S.claimPolicy = null; // 宣言ごとの表示方針（局ごとに初期化）
+  S.autoPass.noticePending = false;
+  S.autoPass.noticeKey = null;
   render();
   step();
 }
 
-function step() {
+// 局面の識別子：局の通し番号＋エンジンの記録数。打牌のたびに増えるので、
+// 宣言待ち（打牌直後）と自分の手番（ツモ直後）をそれぞれ1件ずつ区別できる。
+function stateKey() {
+  return `${S.gameSerial}:${S.game.events.length}`;
+}
+
+// いま表示中の自分の宣言待ちの方針（step() が宣言の発生時に決めたもの）。読むだけで変更しない。
+function currentClaimPolicy() {
+  const p = S.game && S.game.pending();
+  if (!p || p.seat !== HUMAN || p.type !== 'claim') return null;
+  return S.claimPolicy && S.claimPolicy.key === stateKey() ? S.claimPolicy : null;
+}
+const claimAutoPassOn = () => { const c = currentClaimPolicy(); return !!(c && c.autoPass); };
+
+// changed：直前にゲーム状態を変えた（AI の行動・自動パスの直後）。このときだけ AI の手番でも描画する。
+// それ以外（ドラッグ後の再開など）では従来どおり AI の手番で再描画しない（操作中のタップを妨げない）。
+function step(changed = false) {
   clearTimeout(S.timer);
   S.timer = null;
   // 手牌の並び替え（dragging）中は AI を進めない。指を離すか中止した時点で step() を1回だけ呼び直す。
@@ -93,8 +119,32 @@ function step() {
   if (drag && drag.isDragging()) { S.stepDeferred = true; return; }
   const g = S.game;
   const p = g.pending();
-  if (!p) return finishRound();
-  if (p.seat === HUMAN) return render();
+  if (!p) {
+    S.autoPass.noticePending = false; // 他家のロン・流局で終わったら通知は持ち越さない
+    return finishRound();
+  }
+  if (p.seat === HUMAN) {
+    if (p.type === 'claim') {
+      // 宣言の方針は、その宣言が発生した時点の設定で決め、同じ宣言の間は変えない（表示中の選択肢を途中で変えない）
+      const policy = S.claimPolicy = claimPolicy(S.claimPolicy, stateKey(), S.chiAutoPass);
+      // チーのオートパス：ON・ロン不可・チー候補ありのときだけ、宣言ボタンを描画する前に1回だけ見送る
+      if (autoPassDue(policy, p, HUMAN)) {
+        policy.tried = true;
+        if (applyHumanAction({ type: 'pass' }) === 'ok') {
+          S.autoPass.count++;
+          S.autoPass.noticePending = true;
+          return step(true); // 次の判断番へ（後続のロン判断か、自分のツモ番）
+        }
+        S.autoPass.failed++; // 失敗したら通常の宣言 UI を表示（手動で選べる）
+      }
+    } else if (S.autoPass.noticePending) {
+      // 自動パス後の最初の自分の手番：この手番の間だけ状態欄に通知を出す
+      S.autoPass.noticePending = false;
+      S.autoPass.noticeKey = stateKey();
+    }
+    return render();
+  }
+  if (changed) render();
   const [turnDelay, claimDelay] = speedDelays(S.speed, IS_LOCAL);
   S.timer = setTimeout(() => {
     S.timer = null;
@@ -102,8 +152,8 @@ function step() {
     if (drag && drag.isDragging()) { S.stepDeferred = true; return; }
     const action = decide(g, p.seat, PLAYERS[p.seat].personality, S.aiRng);
     applyAction(g, p.seat, action);
-    render();
-    step();
+    // 描画は step() が行う（自分の宣言を自動で見送る場合は、宣言ボタンを一度も描画しない）
+    step(true);
   }, p.type === 'turn' ? turnDelay : claimDelay);
 }
 
@@ -118,17 +168,25 @@ function finishRound() {
   render();
 }
 
-function humanAct(action) {
+// 人間の行動をエンジンに適用する（状態の変更だけ。描画・進行は呼び出し元が行う）。
+// 戻り値：'ok'＝成立／'ignored'＝自分の判断番ではない／'failed'＝エンジンが拒否。
+function applyHumanAction(action) {
   const g = S.game;
   const p = g.pending();
-  if (!p || p.seat !== HUMAN) { S.input.ignored++; return; }
+  if (!p || p.seat !== HUMAN) return 'ignored';
   try {
     applyAction(g, HUMAN, action);
   } catch (e) {
-    S.input.failed++;
     console.error(e);
-    return;
+    return 'failed';
   }
+  return 'ok';
+}
+
+// 画面からの手動操作（S.input に数える）
+function humanAct(action) {
+  const r = applyHumanAction(action);
+  if (r !== 'ok') { S.input[r]++; return; }
   S.input.accepted++;
   S.selected = null;
   render();
@@ -228,29 +286,38 @@ function actionsHTML() {
   if (p.type === 'turn') {
     const tsumo = p.canTsumo ? '<button data-action="tsumo" class="win">ツモ</button>' : '';
     const sel = S.selected !== null;
+    // チーを自動で見送った後の最初の手番だけ、通常の案内の代わりに通知を出す（状態欄の大きさは変えない）
+    const notice = S.autoPass.noticeKey === stateKey() ? 'チーを自動で見送りました' : null;
+    const text = p.canTsumo ? (notice ? `${notice}・和了できます！` : '和了できます！')
+      : notice || (g.justDrew ? 'あなたの番：捨てる牌を選択' : 'チー後：捨てる牌を選択');
     return `<div class="actions">
-      <span class="status">${p.canTsumo ? '和了できます！' : g.justDrew ? 'あなたの番：捨てる牌を選択' : 'チー後：捨てる牌を選択'}</span>
+      <span class="status${notice ? ' autopass-notice' : ''}">${text}</span>
       ${tsumo}
       <button data-action="discard" class="primary" ${sel ? '' : 'disabled'}>捨てる</button>
     </div>`;
   }
   const tile = tileHTML(T(g.typeOf(p.tile)), { size: 'm' });
-  const ron = p.ron ? '<button data-action="ron" class="win">ロン</button>' : '';
-  const chi = p.chi.map((o, i) => {
+  // 表示する選択肢はこの宣言の方針で決める（OFF なら従来どおり全部。ON でロン＋チーならチーを出さない）
+  const v = visibleClaimActions(p, claimAutoPassOn());
+  const ron = v.ron ? '<button data-action="ron" class="win">ロン</button>' : '';
+  const chi = v.chi.map((o) => {
     const m = rules.melds[o.meld];
-    return `<button data-action="chi" data-opt="${i}" class="chi">チー ${formulaHTML(rules, m.idx)}</button>`;
+    return `<button data-action="chi" data-opt="${o.index}" class="chi">チー ${formulaHTML(rules, m.idx)}</button>`;
   }).join('');
+  const pass = v.passNote
+    ? `<button data-action="pass" class="pass-with-note">${v.passLabel}<small class="pass-note">${v.passNote}</small></button>`
+    : `<button data-action="pass">${v.passLabel}</button>`;
   return `<div class="actions claim">
     <span class="status">${POS[p.from]} ${nameOf(p.from)} の打牌 ${tile}</span>
     ${ron}${chi}
-    <button data-action="pass">${p.ron ? 'ロンしない' : '見送る'}</button>
+    ${pass}
   </div>`;
 }
 
 function headerHTML() {
   const g = S.game;
   return `<header class="top">
-    <span class="logo">MATHJONG <small>Ver.0.1</small></span>
+    <span class="logo">MATHJONG <small>Ver.${APP_VERSION}</small></span>
     <span class="info">第${S.round}局 <span class="wall" aria-label="山の残り">山 <b>${g.wall.length}</b></span></span>
     <span class="tools">
       <button data-action="hint" class="small">ヒント</button>
@@ -418,6 +485,7 @@ function rulesHTML() {
     <li><b>門前</b>（チーなし）なら役なしでも和了できます。</li>
     <li>フリテンは Ver.0.1 では未実装。流局は山が尽きたとき。</li>
     <li><b>手牌の並び替え</b>：牌を長押し（約0.35秒）して左右に動かし、指を離した位置に入れます。手牌の外で離すと取り消し。表示の順番だけが変わり、ゲームには影響しません。「自動整列」で種類順に戻ります。新しいツモ牌は右端に入ります。</li>
+    <li><b>チーのオートパス</b>（設定・初期値 OFF）：ON にすると、チーだけできる場面を自動で見送ります。ロン・ツモは自動で見送りません。ロンとチーが両方できるときは「ロン」「ロンしない」だけを表示し、「ロンしない」でチーも見送ります。</li>
   </ul>
   <h3>役と仮得点</h3><ul class="yaku"><li><span>通常和了</span><b>${c.scoring.base}</b></li>${yaku}${sp}</ul>
   <p class="note">役満成立時は通常和了点・通常役を加算せず、役満の点のみ（複数役満は加算）。<br>エンジン ${ENGINE_VERSION} / 牌 ${rules.deckSize}枚 / 面子 ${rules.melds.length}種類</p>`;
@@ -440,6 +508,8 @@ function settingsHTML() {
   const opt = (v) => `<option value="${v}" ${S.speed === v ? 'selected' : ''}>${labels[v]}</option>`;
   return `<h2>設定</h2>
     <label class="setting">AIの速さ <select data-action="speed">${publicSpeedNames().map(opt).join('')}</select></label>
+    <label class="setting toggle"><input type="checkbox" data-action="chi-autopass" ${S.chiAutoPass ? 'checked' : ''}><span>チーのオートパス</span></label>
+    <p class="note setting-note">チーだけできる場面を自動で見送ります。ロン・ツモは自動で見送りません。</p>
     ${reportInfoHTML()}
     <div class="modal-actions"><button data-action="reset">新しい対局（得点リセット）</button></div>`;
 }
@@ -448,7 +518,8 @@ function settingsHTML() {
 function hintInputs() {
   const g = S.game;
   const view = g.viewFor(HUMAN);
-  const claim = claimForSeat(g.pending(), HUMAN, (id) => g.typeOf(id));
+  // 画面に出している宣言の選択肢と同じ経路だけを渡す（ON でロン＋チーのときチーの経路は含めない）
+  const claim = claimForSeat(claimPendingForHint(g.pending(), claimAutoPassOn()), HUMAN, (id) => g.typeOf(id));
   return { view, claim };
 }
 
@@ -551,6 +622,11 @@ app.addEventListener('change', (ev) => {
   if (ev.target.dataset.action === 'speed') {
     S.speed = resolveSpeed(ev.target.value, null, false);
     store.set('mj-speed', S.speed);
+  }
+  if (ev.target.dataset.action === 'chi-autopass') {
+    // 値の保存だけ。次に発生する宣言から反映し、表示中の宣言の選択肢は変えない（ゲームは進めない）
+    S.chiAutoPass = ev.target.checked === true;
+    store.set(CHI_AUTOPASS_KEY, S.chiAutoPass ? '1' : '0');
   }
 });
 

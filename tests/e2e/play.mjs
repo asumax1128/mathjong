@@ -77,8 +77,10 @@ async function invariants(page) {
   });
 }
 
-async function playDevice(browser, dev, seed, rounds, stats) {
+async function playDevice(browser, dev, seed, rounds, stats, { autopass = false } = {}) {
   const ctx = await newContext(browser, { viewport: dev.viewport, isMobile: dev.isMobile, hasTouch: dev.hasTouch, deviceScaleFactor: 2 });
+  // Ver.0.2-B：チーのオートパス ON で通しプレイ（チーのみの宣言は画面に出ない）
+  if (autopass) await ctx.addInitScript(() => { try { localStorage.setItem('mj-chi-autopass', '1'); } catch { /* */ } });
   const page = await ctx.newPage();
   const errors = watchErrors(page);
   await page.goto(`${LOCAL}?seed=${seed}&speed=test`);
@@ -185,6 +187,11 @@ async function playDevice(browser, dev, seed, rounds, stats) {
     stats.rounds++;
     await tap(page.locator('button[data-action="next"]'));
     await page.waitForFunction((rr) => window.__mathjong.S.round === rr + 2, r);
+  }
+  if (autopass) {
+    const ap = await page.evaluate(() => ({ ...window.__mathjong.S.autoPass, on: window.__mathjong.S.chiAutoPass }));
+    assert.ok(ap.on && ap.failed === 0, `${dev.name}: オートパス ${JSON.stringify(ap)}`);
+    stats.autoPassed = (stats.autoPassed || 0) + ap.count;
   }
   assert.deepEqual(errors, [], `${dev.name}: console errors`);
   await ctx.close();
@@ -1623,6 +1630,541 @@ async function fixedSeeds(browser) {
   }
 }
 
+// ---- Ver.0.2-B：チーのオートパス ----
+// 自分（親）の上家 = seat 3 は値の牌だけを持ち（面子を作れない）、何を捨てても自分がチーできる。
+// 他家の打牌はテストから実行し（AI の判断に依存しない）、AI と同じく打牌の直後に step() を呼ぶ。
+const AP_CHI_ONLY = ['sin', '30', 'tan', '45', 'cos', '180', '0', '270']; // 値の牌がないのでロンはできない
+const AP_RON_CHI = ['cos', '180', '=-1', 'tan', '45', '=1', 'sin', '30']; // 1/2 でロン（sin 30° のチーも可能）
+const AP_SEAT3 = ['=1/2', '=1/2', '=1', '=1', '=-1', '=-1', '=0', '=0'];
+const AP_JUNK1 = ['sin', 'sin', 'sin', '0', '0', '90', '=-√3', '=-√3'];
+const AP_JUNK2 = ['cos', 'cos', 'cos', '180', '270', '270', '=√3', '=√3'];
+function apWall(myHand, { seat1Draws = null, seat1Hand = null, seat3Draws = null } = {}) {
+  const mine = ['120', '135', '150', '210'];
+  const s1 = seat1Draws || ['=-1/√3', '=-1/√3', '=-1/√3', '=-1/√3'];
+  const s3 = seat3Draws || ['=1/2', '=0', '=1/2', '=0'];
+  const draws = [];
+  for (let i = 0; i < 4; i++) draws.push(mine[i], s1[i], '=-√3/2', s3[i]);
+  return presetWall(myHand, draws, [seat1Hand || AP_JUNK1, AP_JUNK2, AP_SEAT3]);
+}
+async function apPage(browser, { viewport = { width: 390, height: 844 }, init = null, query = '?seed=1&speed=slow' } = {}) {
+  const ctx = await newContext(browser, { viewport, isMobile: true, hasTouch: true });
+  if (init) await ctx.addInitScript(init.fn, init.arg);
+  const page = await ctx.newPage();
+  const errors = watchErrors(page);
+  await page.goto(`${LOCAL}${query}`);
+  await page.waitForSelector('.hand .tile');
+  return { ctx, page, errors };
+}
+async function apScene(page, wall) {
+  await page.evaluate((w) => {
+    const m = window.__mathjong; m.S.nextPresetWall = w; m.startRound();
+    // 宣言ボタンの描画を記録（同じ処理の中で消えたものも数える）
+    window.__chiSeen = 0;
+    if (!window.__chiObs) {
+      window.__chiObs = new MutationObserver((recs) => {
+        for (const r of recs) for (const n of r.addedNodes) {
+          if (n.nodeType === 1 && (n.matches('button[data-action="chi"]') || n.querySelector('button[data-action="chi"]'))) window.__chiSeen++;
+        }
+      });
+      window.__chiObs.observe(document.getElementById('app'), { childList: true, subtree: true });
+    }
+  }, wall);
+  await page.waitForSelector('.hand .tile.tap');
+}
+const apState = (page) => page.evaluate(() => {
+  const { S } = window.__mathjong;
+  const g = S.game;
+  g.checkInvariants();
+  const p = g.pending();
+  const pass = document.querySelector('button[data-action="pass"]');
+  return {
+    count: S.autoPass.count, failed: S.autoPass.failed, accepted: S.input.accepted, on: S.chiAutoPass,
+    p: p && { seat: p.seat, type: p.type, ron: p.ron ?? null, chi: p.chi ? p.chi.length : null },
+    melds0: g.melds[0].length, events: g.events.length, modal: S.modal, timer: S.timer !== null, ended: !p,
+    status: (document.querySelector('.bar .actions .status') || {}).textContent?.trim() || '',
+    chiBtn: document.querySelectorAll('.bar button[data-action="chi"]').length,
+    ronBtn: document.querySelectorAll('.bar button[data-action="ron"]').length,
+    passText: pass ? pass.textContent.trim() : null, note: document.querySelectorAll('.bar .pass-note').length,
+    chiSeen: window.__chiSeen || 0, seat3Discards: g.events.filter((e) => e.type === 'discard' && e.seat === 3).length,
+    stored: (() => { try { return localStorage.getItem('mj-chi-autopass'); } catch { return 'ERR'; } })(),
+  };
+});
+async function apForce(page, seat, key = null) {
+  await page.waitForFunction((s) => { const p = window.__mathjong.S.game.pending(); return p && p.seat === s && p.type === 'turn'; }, seat, { timeout: 5000 });
+  await page.evaluate(([s, k]) => {
+    const { S, rules, step } = window.__mathjong;
+    const g = S.game;
+    clearTimeout(S.timer); S.timer = null;
+    const id = k === null ? g.drawn : g.hands[s].find((x) => rules.types[g.typeOf(x)].key === k);
+    if (id === undefined || id === null) throw new Error(`seat ${s} has no ${k}`);
+    g.discard(s, id);
+    step(true); // AI のタイマーと同じ（打牌 → step）
+  }, [seat, key]);
+}
+async function apDiscardDrawn(page) {
+  await page.waitForSelector('.hand .tile.tap.drawn');
+  const t = page.locator('.hand .tile.tap.drawn');
+  if (!(await t.evaluate((e) => e.classList.contains('selected')))) await t.tap(); // 1回目で選択、2回目で打牌
+  await t.tap();
+  await page.waitForFunction(() => { const p = window.__mathjong.S.game.pending(); return !p || p.seat !== 0; });
+}
+// 自分の打牌 → 下家・対面の打牌（ツモ牌）まで進め、上家の手番にする
+async function apToSeat3(page) {
+  await apDiscardDrawn(page);
+  await apForce(page, 1);
+  await apForce(page, 2);
+}
+async function apSetting(page, on, { close = true } = {}) {
+  if (!(await page.locator('input[data-action="chi-autopass"]').count())) await page.locator('button[data-action="settings"]').tap();
+  const box = page.locator('input[data-action="chi-autopass"]');
+  if ((await box.isChecked()) !== on) await page.locator('label.setting.toggle').tap();
+  assert.equal(await box.isChecked(), on);
+  if (close) await page.locator('.modal-actions button[data-action="close"]').tap();
+}
+async function apHint(page) {
+  return page.evaluate(async (base) => {
+    const { yakuCandidates, claimForSeat } = await import(`${base}src/engine/yakuhint.js`);
+    const { claimPendingForHint } = await import(`${base}src/ui/autopass.js`);
+    const { S, rules } = window.__mathjong;
+    const g = S.game;
+    const p = g.pending();
+    const typeOf = (id) => g.typeOf(id);
+    const fmt = (c) => `${c.name}|${c.missing === 0 ? '完成！' : `あと${c.missing}枚`}`;
+    const filtered = yakuCandidates(rules, g.viewFor(0), { claim: claimForSeat(claimPendingForHint(p, true), 0, typeOf) });
+    const all = yakuCandidates(rules, g.viewFor(0), { claim: claimForSeat(p, 0, typeOf) });
+    const shown = [...document.querySelectorAll('.yaku-cands li')].map((li) => `${li.querySelector('b').textContent}|${li.querySelector('.yc-miss').textContent}`);
+    return { shown, filtered: filtered.map(fmt), all: all.map(fmt), filteredVia: filtered.map((c) => c.via), allVia: all.map((c) => c.via), used: S.hintsUsed };
+  }, BASE);
+}
+const NOTICE = 'チーを自動で見送りました';
+const evList = (page) => page.evaluate(() => window.__mathjong.S.game.events.map((e) => `${e.type}:${e.seat}:${e.tile ?? ''}`));
+
+async function chiAutoPass(browser) {
+  // (1) 初期 OFF：保存値なし → スイッチ OFF、チーのみの宣言は従来どおり表示され、チーできる
+  {
+    const { ctx, page, errors } = await apPage(browser);
+    let st = await apState(page);
+    assert.equal(st.on, false, '初期値 OFF');
+    assert.equal(st.stored, null);
+    await page.locator('button[data-action="settings"]').tap();
+    assert.equal(await page.locator('input[data-action="chi-autopass"]').isChecked(), false);
+    assert.match(await page.locator('.setting-note').innerText(), /チーだけできる場面を自動で見送ります。ロン・ツモは自動で見送りません。/);
+    await page.locator('.modal-actions button[data-action="close"]').tap();
+    await apScene(page, apWall(AP_CHI_ONLY));
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    st = await apState(page);
+    assert.deepEqual(st.p, { seat: 0, type: 'claim', ron: false, chi: 1 });
+    assert.equal(st.chiBtn, 1, 'OFF：チーを表示');
+    assert.ok(st.chiSeen >= 1, '（検査の前提）チーのボタンの描画を記録できている');
+    assert.equal(st.passText, '見送る');
+    assert.equal(st.count, 0);
+    await page.locator('button[data-action="chi"]').tap();
+    st = await apState(page);
+    assert.equal(st.melds0, 1, 'チーが成立');
+    assert.deepEqual(st.p, { seat: 0, type: 'turn', ron: null, chi: null });
+    assert.match(st.status, /チー後/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (2) ON・チーのみ：宣言ボタンを一度も描画せず自動パス。手動操作の数は増えない。通知は次の自分の手番だけ。
+  //     連続するチー機会（3回）は各1回ずつ。OFF＋手動の見送りと同じ局の記録になる。
+  let manualEvents;
+  {
+    const { ctx, page, errors } = await apPage(browser);
+    await apScene(page, apWall(AP_CHI_ONLY));
+    const normalStatus = (await apState(page)).status;
+    assert.ok(!normalStatus.includes(NOTICE), '自動パス前の手番に通知はない');
+    for (const key of ['v:1/2', 'v:1', 'v:-1']) {
+      await apToSeat3(page);
+      await apForce(page, 3, key);
+      await page.locator('button[data-action="pass"]').tap();
+    }
+    manualEvents = await evList(page);
+    assert.equal((await apState(page)).count, 0);
+    await ctx.close();
+    assert.deepEqual(errors, []);
+  }
+  {
+    const { ctx, page, errors } = await apPage(browser);
+    await apSetting(page, true);
+    await apScene(page, apWall(AP_CHI_ONLY));
+    const before = await apState(page);
+    const barNormal = (await page.locator('.bar').boundingBox()).height;
+    for (const [i, key] of ['v:1/2', 'v:1', 'v:-1'].entries()) {
+      await apToSeat3(page);
+      const acc = (await apState(page)).accepted;
+      await apForce(page, 3, key);
+      const st = await apState(page);
+      assert.equal(st.count, i + 1, `${i + 1}回目の自動パス`);
+      assert.equal(st.chiSeen, 0, 'チーのボタンは一度も描画されない');
+      assert.equal(st.accepted, acc, '手動操作の数（S.input.accepted）は増えない');
+      assert.deepEqual(st.p, { seat: 0, type: 'turn', ron: null, chi: null }, '自分のツモ番まで進む');
+      assert.equal(st.melds0, 0);
+      assert.equal(st.status, NOTICE, '次の自分の手番に通知');
+      assert.equal(st.timer, false, 'AI のタイマーは残らない');
+      assert.ok(Math.abs((await page.locator('.bar').boundingBox()).height - barNormal) < 1, '通知で操作バーの高さは変わらない');
+      // 同じ手番の再描画（牌の選択）では通知は1件のまま
+      await page.locator('.hand .tile.tap.drawn').tap();
+      assert.equal(await page.locator('.bar .actions .status', { hasText: NOTICE }).count(), 1);
+    }
+    const st = await apState(page);
+    assert.equal(st.failed, 0);
+    assert.equal(before.count, 0);
+    // OFF＋手動の見送りと同じ局の記録（3回分）
+    assert.deepEqual(await evList(page), manualEvents, 'ON の自動パスと OFF の手動見送りで局の記録が一致');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (3) ON・ロン＋チー：ロンと「ロンしない（チーも見送ります）」のみ。自動パスしない。ロンできる。
+  //     役候補ヒントは、表示している選択肢（チーなし）と一致する。
+  {
+    const { ctx, page, errors } = await apPage(browser);
+    await apSetting(page, true);
+    await apScene(page, apWall(AP_RON_CHI));
+    await page.locator('button[data-action="hint"]').tap();
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    const st = await apState(page);
+    assert.deepEqual(st.p, { seat: 0, type: 'claim', ron: true, chi: 1 });
+    assert.equal(st.count, 0, 'ロン可能なら自動パスしない');
+    assert.equal(st.ronBtn, 1);
+    assert.equal(st.chiBtn, 0, 'チーは表示しない');
+    assert.equal(st.passText, 'ロンしないチーも見送ります');
+    assert.equal(st.note, 1);
+    const h = await apHint(page);
+    assert.deepEqual(h.shown, h.filtered, 'ヒントは表示中の選択肢（ロン・見送り）と一致');
+    assert.ok(!h.filteredVia.includes('chi'), 'チー後の役候補を出さない');
+    assert.ok(h.allVia.includes('chi'), '（比較）チーを含めると、チー後の役候補が出る局面である');
+    assert.equal(h.used, 1);
+    await page.locator('button[data-action="ron"]').tap();
+    await page.waitForSelector('.overlay .result');
+    assert.match(await page.locator('.overlay .result').innerText(), /あなた の和了 ロン/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (3b) 同じ局面で「ロンしない」：チーも見送られ、自分のツモ番。自動パスではないので通知は出ない。
+  //      OFF なら従来どおりロン・チー・ロンしないを表示し、ヒントはチーの経路も含む。
+  {
+    const { ctx, page, errors } = await apPage(browser);
+    await apSetting(page, true);
+    await apScene(page, apWall(AP_RON_CHI));
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    await page.locator('button[data-action="pass"]').tap();
+    let st = await apState(page);
+    assert.equal(st.melds0, 0, 'チーも見送った');
+    assert.deepEqual(st.p, { seat: 0, type: 'turn', ron: null, chi: null });
+    assert.equal(st.count, 0);
+    assert.ok(!st.status.includes(NOTICE));
+    await apSetting(page, false);
+    await page.locator('button[data-action="hint"]').tap();
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    st = await apState(page);
+    assert.deepEqual(st.p, { seat: 0, type: 'claim', ron: true, chi: 1 });
+    assert.equal(st.chiBtn, 1, 'OFF：チーを表示');
+    assert.equal(st.passText, 'ロンしない');
+    const h = await apHint(page);
+    assert.deepEqual(h.shown, h.all, 'OFF：ヒントはチーの経路も含む（従来どおり）');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (4) ON・ロンのみ（下家の打牌）：ロン・ロンしないを表示し、自動パスしない
+  {
+    const { ctx, page, errors } = await apPage(browser);
+    await apSetting(page, true);
+    await apScene(page, apWall(AP_RON_CHI, { seat1Draws: ['=1/2', '=-1/√3', '=-1/√3', '=-1/√3'], seat3Draws: ['=0', '=0', '=-1/2', '=-1/2'] }));
+    await apDiscardDrawn(page);
+    await apForce(page, 1, 'v:1/2');
+    const st = await apState(page);
+    assert.deepEqual(st.p, { seat: 0, type: 'claim', ron: true, chi: 0 });
+    assert.equal(st.count, 0);
+    assert.equal(st.ronBtn, 1);
+    assert.equal(st.chiBtn, 0);
+    assert.equal(st.passText, 'ロンしない');
+    assert.equal(st.note, 0, 'チーの候補がないので注記なし');
+    await page.locator('button[data-action="ron"]').tap();
+    await page.waitForSelector('.overlay .result');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (5) ON・ツモ可能：ツモは自動で見送らない
+  {
+    const { ctx, page, errors } = await apPage(browser, { init: { fn: () => { try { localStorage.setItem('mj-chi-autopass', '1'); } catch { /* */ } } } });
+    await page.evaluate((w) => { const m = window.__mathjong; m.S.nextPresetWall = w; m.startRound(); },
+      presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['=1']));
+    await page.locator('button[data-action="tsumo"]').waitFor({ timeout: 5000 });
+    const st = await apState(page);
+    assert.equal(st.on, true);
+    assert.equal(st.count, 0);
+    assert.deepEqual(st.p, { seat: 0, type: 'turn', ron: null, chi: null });
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.waitForSelector('.overlay .result');
+    assert.match(await page.locator('.overlay .result').innerText(), /あなた の和了 ツモ/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (6) 宣言の表示中に設定を変えても、表示中の選択肢・ヒントは変わらない（次の宣言から反映）
+  {
+    const { ctx, page, errors } = await apPage(browser);
+    await apScene(page, apWall(AP_CHI_ONLY));
+    await page.locator('button[data-action="hint"]').tap();
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    const hintBefore = await apHint(page);
+    await apSetting(page, true); // OFF → ON（チーのみの宣言を表示中）
+    let st = await apState(page);
+    assert.equal(st.count, 0, '表示中の宣言は自動パスしない');
+    assert.equal(st.chiBtn, 1, '表示中のチーは消えない');
+    assert.equal(st.stored, '1');
+    assert.deepEqual((await apHint(page)).shown, hintBefore.shown, 'ヒントも変わらない');
+    await page.locator('button[data-action="pass"]').tap();
+    st = await apState(page);
+    assert.equal(st.chiBtn, 0);
+    assert.ok(!st.status.includes(NOTICE), '手動の見送りでは通知を出さない');
+    const seen = st.chiSeen;
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1');
+    st = await apState(page);
+    assert.equal(st.count, 1, '次の宣言から自動パス');
+    assert.equal(st.chiSeen, seen, '次の宣言ではチーのボタンを描画しない');
+    // ON → OFF：次の宣言は通常の表示
+    await apSetting(page, false);
+    assert.equal((await apState(page)).stored, '0');
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:-1');
+    st = await apState(page);
+    assert.equal(st.count, 1);
+    assert.ok(st.chiBtn >= 1 && st.chiBtn === st.p.chi, 'OFF に戻した後の宣言は通常の表示（チーの候補すべて）');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (6b) ON でロン＋チーを表示中に OFF：表示中の選択肢は変えない（チーは出さないまま）
+  {
+    const { ctx, page, errors } = await apPage(browser);
+    await apSetting(page, true);
+    await apScene(page, apWall(AP_RON_CHI));
+    await page.locator('button[data-action="hint"]').tap();
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    await apSetting(page, false);
+    const st = await apState(page);
+    assert.equal(st.chiBtn, 0, '表示中の宣言の選択肢は変えない');
+    assert.equal(st.note, 1);
+    const h = await apHint(page);
+    assert.deepEqual(h.shown, h.filtered, 'ヒントは固定された選択肢と一致');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (7) モーダル表示中に裏で宣言待ちが発生：ON なら自動パス（モーダルは閉じない）、OFF なら宣言ボタンを裏に表示
+  for (const on of [true, false]) {
+    const { ctx, page, errors } = await apPage(browser);
+    if (on) await apSetting(page, true);
+    await apScene(page, apWall(AP_CHI_ONLY));
+    await apToSeat3(page);
+    await page.locator('button[data-action="settings"]').tap();
+    await apForce(page, 3, 'v:1/2');
+    const st = await apState(page);
+    assert.equal(st.modal, 'settings', 'モーダルは開いたまま');
+    assert.equal(await page.locator('input[data-action="chi-autopass"]').isChecked(), on);
+    if (on) {
+      assert.equal(st.count, 1);
+      assert.deepEqual(st.p, { seat: 0, type: 'turn', ron: null, chi: null });
+      await page.locator('.modal-actions button[data-action="close"]').tap();
+      assert.equal((await apState(page)).status, NOTICE);
+    } else {
+      assert.equal(st.count, 0);
+      assert.deepEqual(st.p, { seat: 0, type: 'claim', ron: false, chi: 1 });
+      assert.equal(st.chiBtn, 1);
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (8) 自動パスの直後に他家がロンして終局：通知を持ち越さない（次の局の最初の手番に出ない）
+  {
+    const { ctx, page, errors } = await apPage(browser);
+    await apSetting(page, true);
+    await apScene(page, apWall(AP_CHI_ONLY, { seat1Hand: AP_RON_CHI }));
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    await page.waitForSelector('.overlay .result', { timeout: 8000 }); // 下家（AI）のロン
+    let st = await apState(page);
+    assert.equal(st.count, 1);
+    assert.equal(st.ended, true);
+    const res = await page.evaluate(() => window.__mathjong.S.game.result);
+    assert.deepEqual([res.winner, res.how], [1, 'ron'], '自動パス後も後続のロンが優先される');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.autoPass.noticePending), false);
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForFunction(() => window.__mathjong.S.round === 2);
+    for (let i = 0; i < 40; i++) {
+      st = await apState(page);
+      if (st.p && st.p.seat === 0 && st.p.type === 'turn') break;
+      await page.waitForTimeout(200);
+    }
+    assert.ok(!st.status.includes(NOTICE), '次の局に通知を持ち越さない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (9) 保存・復元：ON → 再読み込みで ON（局の切替でも維持）、OFF → 再読み込みで OFF
+  {
+    const { ctx, page, errors } = await apPage(browser);
+    await apSetting(page, true);
+    assert.equal((await apState(page)).stored, '1');
+    await page.reload();
+    await page.waitForSelector('.hand .tile');
+    assert.equal((await apState(page)).on, true, '再読み込み後も ON');
+    await page.locator('button[data-action="settings"]').tap();
+    assert.equal(await page.locator('input[data-action="chi-autopass"]').isChecked(), true);
+    await page.locator('button[data-action="reset"]').tap();
+    assert.equal((await apState(page)).on, true, '新しい対局でも ON');
+    // 再読み込み後に実際に自動パスする
+    await apScene(page, apWall(AP_CHI_ONLY));
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    assert.equal((await apState(page)).count, 1);
+    await apSetting(page, false);
+    await page.reload();
+    await page.waitForSelector('.hand .tile');
+    const st = await apState(page);
+    assert.equal(st.on, false, '再読み込み後も OFF');
+    assert.equal(st.stored, '0');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (10) 保存値の異常・保存不可：OFF で起動。保存できない環境でも、その場の ON は有効でエラーにならない
+  for (const saved of ['true', '1 ', 'on', '', '0', '2', 'null']) {
+    const { ctx, page, errors } = await apPage(browser, { init: { fn: (v) => { try { localStorage.setItem('mj-chi-autopass', v); } catch { /* */ } }, arg: saved } });
+    assert.equal((await apState(page)).on, false, `保存値 ${JSON.stringify(saved)} は OFF`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  {
+    const block = () => {
+      const deny = () => { throw new DOMException('denied', 'SecurityError'); };
+      Storage.prototype.getItem = deny; Storage.prototype.setItem = deny;
+    };
+    const { ctx, page, errors } = await apPage(browser, { init: { fn: block } });
+    let st = await apState(page);
+    assert.equal(st.on, false, '保存不可なら OFF');
+    assert.equal(st.stored, 'ERR');
+    await apSetting(page, true);
+    await apScene(page, apWall(AP_CHI_ONLY));
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    st = await apState(page);
+    assert.equal(st.count, 1, '保存できなくてもその場の ON は有効');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (11) ドラッグとの競合：dragging 中は上家の AI が打牌しない（宣言待ちも自動パスも起きない）。
+  //      離した後、AI が1回だけ打牌し、自動パスも1回だけ。並び替えは確定し、自動整列も使える。
+  {
+    const { ctx, page, errors } = await apPage(browser);
+    const cdp = await ctx.newCDPSession(page);
+    await apSetting(page, true);
+    await apScene(page, apWall(AP_CHI_ONLY));
+    await apToSeat3(page); // 上家の AI のタイマー（ゆっくり：1.2秒）が予約された状態
+    const before = await apState(page);
+    assert.deepEqual(before.p, { seat: 3, type: 'turn', ron: null, chi: null });
+    const order = await shownOrder(page);
+    const id = order[0];
+    await touchDrag(page, cdp, id, await xForIndex(page, order, id, 4), null, { release: false });
+    assert.equal(await page.evaluate(() => window.__mathjong.drag.phase()), 'dragging');
+    await page.waitForTimeout(1600); // AI のタイマーが発火しても保留される
+    let st = await apState(page);
+    assert.equal(st.events, before.events, 'ドラッグ中は進行しない');
+    assert.equal(st.count, 0);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.stepDeferred), true);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForFunction(() => { const p = window.__mathjong.S.game.pending(); return p && p.seat === 0 && p.type === 'turn'; }, null, { timeout: 5000 });
+    st = await apState(page);
+    assert.equal(st.seat3Discards, before.seat3Discards + 1, '上家の打牌は1回だけ');
+    assert.equal(st.count, 1, '自動パスは1回だけ');
+    assert.equal(st.chiSeen, 0);
+    assert.equal(st.accepted, before.accepted, 'ドラッグで打牌しない');
+    assert.equal(st.status, NOTICE);
+    const shown = await shownOrder(page);
+    assert.deepEqual(shown.slice(0, order.length), moveExpected(order, id, 4), '並び替えは確定（新しいツモ牌は右端）');
+    await page.locator('button[data-action="autosort"]').tap();
+    const sorted = await page.evaluate(async (base) => {
+      const { defaultOrder } = await import(`${base}src/ui/handorder.js`);
+      const g = window.__mathjong.S.game;
+      return defaultOrder(g.hands[0], (x) => g.typeOf(x), g.drawn);
+    }, BASE);
+    assert.deepEqual(await shownOrder(page), sorted, '自動整列');
+    await page.waitForTimeout(300);
+    assert.equal((await apState(page)).events, st.events, '自分の手番で AI が勝手に進まない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (12) バージョン表示：ヘッダー・ページタイトル・再現情報
+  {
+    const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
+    assert.equal(await page.title(), 'MATHJONG 数式麻雀 Ver.0.2.1');
+    assert.equal(await page.locator('.logo').innerText(), 'MATHJONG Ver.0.2.1');
+    await page.locator('button[data-action="settings"]').tap();
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.2\.1 ・ エンジン v0\.1\.0/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.2-B：チーのオートパス（初期OFF・自動パス・連続3回・ロン＋チー・ロンのみ・ツモ・表示中の設定変更・モーダル裏・後続ロン・保存/復元/異常値/保存不可・ドラッグ・版表示）');
+}
+
+// Ver.0.2-B：設定スイッチ・通知・宣言ボタンが、横画面を含む各サイズで画面に収まる
+async function chiAutoPassLayouts(browser) {
+  const sizes = [[320, 568], [375, 667], [390, 844], [430, 932], [568, 320], [667, 375], [932, 430], [768, 1024], [1366, 768]];
+  for (const [w, h] of sizes) {
+    const { ctx, page, errors } = await apPage(browser, { viewport: { width: w, height: h } });
+    const where = `${w}×${h}`;
+    await page.locator('button[data-action="settings"]').tap();
+    const label = page.locator('label.setting.toggle');
+    await label.scrollIntoViewIfNeeded();
+    const lb = await label.boundingBox();
+    assert.ok(lb.height >= 44 && lb.width >= 44, `${where}: スイッチのタップ領域 ${lb.width}×${lb.height}`);
+    await apSetting(page, true);
+    await apScene(page, apWall(AP_CHI_ONLY));
+    const barNormal = (await page.locator('.bar').boundingBox()).height;
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    assert.equal((await apState(page)).status, NOTICE, where);
+    const bar = await page.locator('.bar').boundingBox();
+    assert.ok(Math.abs(bar.height - barNormal) < 1, `${where}: 通知で操作バーの高さが変わらない ${barNormal}→${bar.height}`);
+    const fit = await page.evaluate(() => {
+      const s = document.querySelector('.bar .actions .status');
+      return { over: document.documentElement.scrollWidth - window.innerWidth, clipped: s.scrollWidth - s.clientWidth };
+    });
+    assert.ok(fit.over <= 0, `${where}: 横スクロール ${fit.over}px`);
+    assert.ok(fit.clipped <= 0, `${where}: 通知が切れている`);
+    // ロン＋チー：ロン・ロンしない（注記）が画面内
+    await apScene(page, apWall(AP_RON_CHI));
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    for (const sel of ['button[data-action="ron"]', 'button[data-action="pass"]']) {
+      const loc = page.locator(sel);
+      await loc.scrollIntoViewIfNeeded();
+      const b = await loc.boundingBox();
+      assert.ok(b && b.x >= 0 && b.x + b.width <= w + 0.5 && b.height >= 44, `${where}: ${sel} ${JSON.stringify(b)}`);
+    }
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 0, `${where}: 横スクロール`);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/autopass-ronchi-${w}x${h}.png` });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log(`✓ Ver.0.2-B：設定スイッチ（44px以上）・通知・ロン＋チーの表示（縦横 ${sizes.length}サイズ）`);
+}
+
 const server = await startServer(0, { base: BASE, host: '127.0.0.1' });
 PORT = server.address().port;
 LOCAL = `http://localhost:${PORT}${BASE}`;
@@ -1653,10 +2195,16 @@ try {
   await handReorderAuditFixes(browser);
   await handReorderAudit2(browser);
   await handReorderP22(browser);
+  await chiAutoPass(browser);
+  await chiAutoPassLayouts(browser);
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
     await playDevice(browser, dev, 4242 + i * 101, rounds, stats);
     console.log(`✓ ${dev.name}: ${rounds}局 完走`);
+  }
+  for (const [i, dev] of [DEVICES[0], { ...DEVICES[1], name: 'Android 横 (915×412)', viewport: { width: 915, height: 412 } }].entries()) {
+    await playDevice(browser, dev, 5151 + i * 37, 3, stats, { autopass: true });
+    console.log(`✓ ${dev.name}: チーのオートパス ON で3局 完走`);
   }
   console.log(JSON.stringify({ ...stats, seconds: (Date.now() - t0) / 1000 }));
   console.log('E2E OK');
