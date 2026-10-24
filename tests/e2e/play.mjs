@@ -643,6 +643,62 @@ async function v02aAuditFixes(browser) {
   console.log('✓ Ver.0.2-A 監査対応：ヒント自動更新・九角無双のロン/見送り・連続操作・連続局切替');
 }
 
+// ---- 牌一覧が iPhone の画面幅に収まる（Ver.0.2-A 実機テストの不具合の再発防止） ----
+// WebKit では、入れ子の折り返し flex の最小幅が「1行に並べた幅」になり、牌が横にはみ出すことがある。
+// Chromium で同じ状態を再現するため、牌の並びが縮まない指定（flex-shrink: 0）を加えた「WebKit 想定」でも検査する。
+const WEBKIT_EMULATION = '.gallery .gtiles { flex-shrink: 0 !important; }';
+async function guideFitsScreen(browser) {
+  const sizes = [[320, 568], [375, 667], [390, 844], [430, 932], [568, 320], [667, 375], [844, 390], [932, 430]];
+  for (const [w, h] of sizes) {
+    for (const emulateWebKit of [false, true]) {
+      const ctx = await newContext(browser, { viewport: { width: w, height: h }, isMobile: true, hasTouch: true });
+      const page = await ctx.newPage();
+      const errors = watchErrors(page);
+      await page.goto(`${PUBLIC}?seed=9`);
+      await page.waitForSelector('.hand .tile');
+      if (emulateWebKit) await page.addStyleTag({ content: WEBKIT_EMULATION });
+      await page.locator('button[data-action="guide"]').first().tap();
+      // 全タブを切り替え、どのタブも横にはみ出さない
+      for (const tab of ['yaku', 'rules', 'tiles']) {
+        await page.locator(`[data-action="guide-tab"][data-tab="${tab}"]`).tap();
+        const o = await page.evaluate(() => {
+          const m = document.querySelector('.modal');
+          return { sw: m.scrollWidth, cw: m.clientWidth, doc: document.documentElement.scrollWidth - innerWidth, mr: m.getBoundingClientRect().right };
+        });
+        const where = `${w}x${h} ${emulateWebKit ? 'WebKit想定' : '通常'} ${tab}`;
+        assert.ok(o.sw <= o.cw, `${where}: モーダルが横スクロールする（${o.sw} > ${o.cw}）`);
+        assert.ok(o.doc <= 0, `${where}: ページが横スクロールする`);
+        assert.ok(o.mr <= w + 0.5, `${where}: モーダルが画面外`);
+      }
+      // 牌一覧：33種×4サイズ＝132枚が、縦スクロールで1枚ずつ全体を表示でき、左右に切れない
+      const n = await page.locator('.gallery .tile').count();
+      assert.equal(n, 132);
+      const bad = await page.evaluate(() => {
+        const m = document.querySelector('.modal');
+        const cs = getComputedStyle(m);
+        const out = [];
+        for (const t of document.querySelectorAll('.gallery .tile')) {
+          t.scrollIntoView({ block: 'center' });
+          const mr = m.getBoundingClientRect();
+          const left = mr.left + parseFloat(cs.paddingLeft);
+          const right = mr.right - parseFloat(cs.paddingRight);
+          const q = t.getBoundingClientRect();
+          const visible = q.left >= left - 0.5 && q.right <= right + 0.5 && q.top >= mr.top - 0.5 && q.bottom <= mr.bottom + 0.5 && q.right <= innerWidth;
+          if (!visible) out.push(`${t.getAttribute('aria-label')}/${[...t.classList].find((c) => c.startsWith('sz-'))}`);
+        }
+        return out;
+      });
+      assert.deepEqual(bad, [], `${w}x${h} ${emulateWebKit ? 'WebKit想定' : '通常'}: 全体を表示できない牌`);
+      // 役一覧に戻しても正常
+      await page.locator('[data-action="guide-tab"][data-tab="yaku"]').tap();
+      assert.ok(await page.locator('.gy').count() >= 13);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  }
+  console.log('✓ 牌一覧：320〜430px（縦・横）・WebKit想定でも132枚すべて画面内に表示');
+}
+
 // 実機テスト用の固定 seed（docs/12）。「毎回右端のツモ牌を捨て、チー・ロンは見送る」と
 // 指定の手番で宣言ボタンが出ることを、公開サイト相当の画面で確認する。
 export const DEVICE_SEEDS = [
@@ -701,6 +757,7 @@ try {
   await rapidTapGuard(browser);
   await v02aFeatures(browser);
   await v02aAuditFixes(browser);
+  await guideFitsScreen(browser);
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
     await playDevice(browser, dev, 4242 + i * 101, rounds, stats);
