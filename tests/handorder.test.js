@@ -247,3 +247,15 @@ test('キーボード由来（detail 0）の click は抑止せず、記録も�
   c.tick(1001);
   assert.equal(click(g, { pointerId: 3 }), false, '期限切れ後に届いた click は記録がないため抑止できない');
 });
+
+test('P2-2：同じ pointerId（マウス）の pointerup が届かなかった操作は、次の主ポインターの押下で終了扱い。新しい操作の click は受理', () => {
+  const c = clock();
+  const g = createClickGuard({ now: c.now, ttlMs: 1000 });
+  down(g, 1); g.invalidate(1); // マウスのドラッグ（pointerup が届かない）
+  c.tick(300);
+  down(g, 1); // 同じ pointerId の新しい押下 → 前の記録は終了扱い（期限が始まる）
+  g.release(1);
+  assert.equal(click(g, { pointerId: 1 }), false, '新しい操作の click は受理');
+  c.tick(1001);
+  assert.equal(g.size(), 0, '前の記録も期限で削除（未終了のまま残らない）');
+});

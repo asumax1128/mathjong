@@ -39,8 +39,9 @@ export function createClickGuard({ ttlMs = 1000, maxAgeMs = 10000, maxRecords = 
       prune();
       const t = now();
       if (ev.isPrimary !== false) {
-        // 新しい主ポインターの押下 = それ以前の押下はすべて終わっている（pointerup が届かなかった操作も終了扱い）
-        for (const r of recs) if (r.upAt === null && r.pointerId !== ev.pointerId) r.upAt = t;
+        // 新しい主ポインターの押下 = それ以前の押下はすべて終わっている（pointerup が届かなかった操作も終了扱い）。
+        // マウスのように同じ pointerId が再利用される場合も、前の押下は終わっている（新しい記録はこの後に追加）。
+        for (const r of recs) if (r.upAt === null) r.upAt = t;
       }
       recs.push({ pointerId: ev.pointerId, downAt: t, upAt: null, invalid: false, clicked: false });
       prune();
@@ -115,14 +116,17 @@ export function createHandDrag(root, hooks, options = {}) {
     st = { phase: 'idle' };
   }
 
-  // 中止（元の並びのまま）。reason === 'render' のときは呼び出し側が再描画中。
-  function cancel(reason) {
+  // 中止（元の並びのまま）。すべての中止はここを通る（浮いた牌・挿入位置の線の削除、idle への復帰、
+  // onDragEnd による AI の再開）。reason === 'render' は「呼び出し側で再描画しない」意味（app.js の onDragEnd）。
+  // opts.invalidatePress：押下中の中止をタップとして無効にするか。
+  // opts.rerender：false なら再描画を求めない（cleanupDom で DOM は元どおり。新しい押下の対象要素を壊さないため）。
+  function cancel(reason, { invalidatePress = true, rerender = true } = {}) {
     // 押下中の中止（回転・Esc・アプリ切替など）も、タップとしては無効（指を離した後の click を別の牌に当てない）
-    if (st.phase === 'pressing') { guard.invalidate(st.pointerId); toIdle(); return; }
+    if (st.phase === 'pressing') { if (invalidatePress) guard.invalidate(st.pointerId); toIdle(); return; }
     if (st.phase !== 'dragging') return;
     cleanupDom();
     toIdle(); // この操作は activate() で invalidate 済み。指を離した時点で guard.release される
-    hooks.onDragEnd({ committed: false, order: null, reason });
+    hooks.onDragEnd({ committed: false, order: null, reason: rerender ? reason : 'render' });
   }
 
   function activate() {
@@ -199,8 +203,12 @@ export function createHandDrag(root, hooks, options = {}) {
   // ---- イベント ----
   function onPointerDown(ev) {
     if (!ev.isPrimary) return; // 2本目の指などは無視（click の記録は guardDown で行う）
-    // 新しい主ポインターなのに前の操作が残っている = 前の操作の pointerup が届かなかった。前の操作を後始末する
-    if (st.phase !== 'idle' && st.pointerId !== ev.pointerId) cancel('lost-pointer');
+    // 新しい主ポインターなのに前の操作が残っている = 前の操作の pointerup が届かなかった（正常に終わった操作は
+    // すでに idle）。pointerId が同じ（マウスは常に同じ）でも違っても、共通の中止処理で後始末する。
+    // - ドラッグ中なら：浮いた牌・線を消し、idle に戻し、onDragEnd で AI を再開（一度だけ）。
+    //   この時点で再描画すると新しい押下の対象要素が DOM から外れて click が失われるため、再描画は求めない。
+    // - 押下中なら：その操作の click はもう届かない（pointerup が来ていない）ので、無効の印は付けない。
+    if (st.phase !== 'idle') cancel('lost-pointer', { invalidatePress: false, rerender: false });
     if (ev.pointerType === 'mouse' && ev.button !== 0) return;
     const el = ev.target.closest && ev.target.closest('.hand .tile[data-id]');
     if (!el || !hooks.canStart()) { toIdle(); return; }

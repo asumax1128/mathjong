@@ -1020,6 +1020,12 @@ async function handReorder(browser) {
       ['回転', async () => { await page.setViewportSize({ width: 844, height: 390 }); await page.waitForTimeout(50); await page.setViewportSize({ width: 390, height: 844 }); }],
       ['再描画', () => page.evaluate(() => window.__mathjong.render())],
       ['モーダル', () => page.evaluate(() => { const m = window.__mathjong; m.S.modal = 'settings'; m.render(); })],
+      // アプリ切替：Chromium では実際に非表示にできないため、visibilityState を hidden にして実際のイベントを送る
+      ['アプリ切替', () => page.evaluate(() => {
+        Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+        Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+      })],
     ];
     for (const [name, act] of cases) {
       const id = order[1];
@@ -1459,6 +1465,130 @@ async function handReorderAudit2(browser) {
   console.log('✓ Ver.0.2-D 第2回監査対応：遅れた古い click（pointerId あり・なし）を抑止し新しいタップは受理・cancel の期限・2本指・pointerup 欠落・再描画');
 }
 
+// ---- Ver.0.2-D P2-2：pointerup がドラッグ処理に届かなかった後の新しいマウス操作（同じ／異なる pointerId） ----
+// pointerup を「ドラッグ処理に届かない」状態にする：window の捕捉段階で1回だけ伝播を止める
+// （click 抑止の記録はそれより先に登録された捕捉リスナーで行われるので、release は記録される）。
+async function blockNextPointerUp(page) {
+  await page.evaluate(() => {
+    window.__blockUp = true;
+    window.addEventListener('pointerup', (e) => { if (window.__blockUp) { window.__blockUp = false; window.__blockedUp = (window.__blockedUp || 0) + 1; e.stopImmediatePropagation(); } }, true);
+  });
+}
+const dragState = (page) => page.evaluate(() => {
+  const { S, drag } = window.__mathjong;
+  S.game.checkInvariants();
+  return {
+    phase: drag.phase(), ghosts: document.querySelectorAll('.drag-ghost').length, markers: document.querySelectorAll('.drop-marker').length,
+    deferred: !!S.stepDeferred, timer: S.timer !== null && S.timer !== undefined, events: S.game.events.length,
+    appClicks: window.__appClicks || 0, selected: S.selected, accepted: S.input.accepted, failed: S.input.failed,
+  };
+});
+
+async function handReorderP22(browser) {
+  for (const variant of ['same-pointerId (mouse→mouse)', 'different-pointerId (touch→mouse)']) {
+    const ctx = await newContext(browser, { viewport: { width: 1366, height: 768 }, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?seed=9&speed=fast`);
+    await page.waitForSelector('.hand .tile.tap');
+    // アプリが受理した click（捕捉段階の抑止を通過したもの）を数える
+    await page.evaluate(() => { window.__appClicks = 0; document.getElementById('app').addEventListener('click', () => { window.__appClicks++; }); });
+    // 自分の打牌 → AI の手番
+    const drawn = await page.evaluate(() => window.__mathjong.S.game.drawn);
+    const db = await tileBox(page, drawn);
+    await page.mouse.click(db.x + db.width / 2, db.y + db.height / 2);
+    await page.mouse.click(db.x + db.width / 2, db.y + db.height / 2);
+    assert.equal((await dragState(page)).accepted, 1);
+    // 1. AI の手番中にドラッグを開始し、2. AI の保留を成立させる
+    const order = await shownOrder(page);
+    const b = await tileBox(page, order[2]);
+    const cx = b.x + b.width / 2;
+    const cy = b.y + b.height / 2;
+    let cdp = null;
+    if (variant.startsWith('same')) {
+      await page.mouse.move(cx, cy);
+      await page.mouse.down();
+      await page.mouse.move(cx + 40, cy, { steps: 1 });
+    } else {
+      cdp = await ctx.newCDPSession(page);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cx, y: cy }] });
+      await page.waitForTimeout(450);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: cx + 40, y: cy }] });
+    }
+    await page.waitForTimeout(700); // fast = 250ms：保留中に AI のタイマーが来て stepDeferred になる
+    let st = await dragState(page);
+    assert.equal(st.phase, 'dragging', `${variant}：ドラッグ中`);
+    assert.equal(st.deferred, true, `${variant}：AI の保留が成立`);
+    const eventsHeld = st.events;
+    // 3. pointerup がドラッグ処理に届かない
+    await blockNextPointerUp(page);
+    if (cdp) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    else await page.mouse.up();
+    await page.waitForTimeout(100);
+    st = await dragState(page);
+    assert.equal(await page.evaluate(() => window.__blockedUp), 1, `${variant}：pointerup がドラッグ処理に届かない状態を再現`);
+    assert.equal(st.phase, 'dragging', `${variant}：（再現）ドラッグ状態が残る`);
+    assert.equal(st.ghosts, 1);
+    assert.equal(st.events, eventsHeld, `${variant}：（再現）AI は止まったまま`);
+    // 4. 新しいマウス操作（マウスの pointerId は常に同じ）
+    const c0 = st.appClicks;
+    const t = await tileBox(page, order[5]);
+    await page.mouse.move(t.x + t.width / 2, t.y + t.height / 2);
+    await page.mouse.down();
+    st = await dragState(page);
+    assert.equal(st.ghosts, 0, `${variant}：浮いた牌が消える`);
+    assert.equal(st.markers, 0, `${variant}：挿入位置の線が消える`);
+    assert.notEqual(st.phase, 'dragging', `${variant}：古いドラッグは終了`);
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    // 5. 状態の確認
+    st = await dragState(page);
+    assert.equal(st.phase, 'idle', `${variant}：idle に復帰`);
+    assert.equal(st.deferred, false, `${variant}：AI の保留が解除`);
+    assert.equal(st.appClicks, c0 + 1, `${variant}：新しいクリックは受理（抑止されない）`);
+    await page.waitForFunction((n) => window.__mathjong.S.game.events.length > n, eventsHeld, { timeout: 5000 });
+    // AI が正常に進み、自分の手番が来る（手番が飛ばず、タイマーが二重にならない）。途中の宣言（チー・ロン）は見送る
+    for (let i = 0; i < 60; i++) {
+      await page.waitForSelector('.hand .tile.tap, button[data-action="pass"], .overlay .result', { timeout: 15000 });
+      if (await page.locator('.hand .tile.tap').count()) break;
+      if (await page.locator('.overlay .result').count()) throw new Error(`${variant}：自分の手番の前に終局（seed を変更して再検討）`);
+      await page.locator('button[data-action="pass"]').click();
+    }
+    await page.waitForSelector('.hand .tile.tap');
+    const seq = await page.evaluate(() => {
+      const ev = window.__mathjong.S.game.events;
+      const bad = [];
+      for (let i = 0; i < ev.length; i++) {
+        if (ev[i].type !== 'discard') continue;
+        const nxt = ev.slice(i + 1).find((e) => e.type === 'draw' || e.type === 'chi' || e.type === 'win');
+        if (nxt && nxt.type === 'draw' && nxt.seat !== (ev[i].seat + 1) % 4) bad.push(i);
+      }
+      return bad;
+    });
+    assert.deepEqual(seq, [], `${variant}：手番が飛ばない`);
+    // 自分の手番で、通常のクリック（選択 → 打牌）とドラッグが成立
+    const o2 = await shownOrder(page);
+    const u = await tileBox(page, o2[1]);
+    await page.mouse.click(u.x + u.width / 2, u.y + u.height / 2);
+    assert.equal((await dragState(page)).selected, o2[1], `${variant}：自分の手番の通常クリックで選択`);
+    const last = await tileBox(page, o2[o2.length - 1]);
+    const f = await tileBox(page, o2[0]);
+    await page.mouse.move(f.x + f.width / 2, f.y + f.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(last.x + last.width + 8, f.y + f.height / 2, { steps: 1 });
+    await page.mouse.up();
+    await page.waitForTimeout(30);
+    assert.deepEqual(await shownOrder(page), moveExpected(o2, o2[0], o2.length - 1), `${variant}：次のドラッグも成立`);
+    st = await dragState(page);
+    assert.equal(st.phase, 'idle');
+    assert.equal(st.ghosts, 0);
+    assert.equal(st.failed, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.2-D P2-2：pointerup が届かなかったドラッグを、同じ／異なる pointerId の新しいマウス操作で後始末（浮いた牌・線・AI 保留を解除、クリック受理）');
+}
+
 // 実機テスト用の固定 seed（docs/12）。「毎回右端のツモ牌を捨て、チー・ロンは見送る」と
 // 指定の手番で宣言ボタンが出ることを、公開サイト相当の画面で確認する。
 export const DEVICE_SEEDS = [
@@ -1522,6 +1652,7 @@ try {
   await handReorder(browser);
   await handReorderAuditFixes(browser);
   await handReorderAudit2(browser);
+  await handReorderP22(browser);
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
     await playDevice(browser, dev, 4242 + i * 101, rounds, stats);
