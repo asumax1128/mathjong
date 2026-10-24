@@ -1,0 +1,14 @@
+{
+  "name": "mathjong",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MATHJONG（数式麻雀）Ver.0.1 — 三角関数の牌で遊ぶ4人麻雀風Webゲーム",
+  "type": "module",
+  "scripts": {
+    "start": "node tools/serve.mjs",
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "node tests/e2e/play.mjs",
+    "simulate": "node tools/simulate.mjs"
+  },
+  "license": "UNLICENSED"
+}

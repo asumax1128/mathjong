@@ -4,6 +4,20 @@
 
 > **開発中／2026-10-24 時点のスナップショット**。仕様には正式に方向性が決まったものと、比較実験中の仮設定が混在します。とくに **360°の採否は未決定** です。
 
+## 遊ぶ（Ver.0.1 試作版）
+
+人間1人＋AI3人で1局ずつ遊べる Web 版を実装しました（依存ライブラリ・ビルド不要）。
+
+```bash
+node tools/serve.mjs          # → http://localhost:8080/ を開く
+npm test                      # 単体・対局テスト
+node tests/e2e/play.mjs       # ブラウザ実操作テスト（Playwright が必要）
+node tools/simulate.mjs --games 200 --check   # AI 自動対戦
+```
+
+スマホでは、同じ Wi-Fi の PC で起動して `http://<PCのIP>:8080/` を開くか、GitHub Pages（main のルート）で公開してください。
+実装仕様・暫定ルール・テスト結果は [Ver.0.1 実装記録](docs/10-ver0.1-implementation.md)。
+
 ## ゲームの核
 
 - **3枚で1面子**：関数牌（sin / cos / tan）＋角度牌（例：30°）＋結果牌（例：=1/2）。
@@ -26,6 +40,7 @@
 | [開発ロードマップ](docs/09-roadmap.md) | 企画からWeb試作・AI検証・4人オンライン対戦までの段階計画 |
 | [再現性と既知の制約](docs/07-simulation-reproducibility.md) | 既存簡易シミュレーターの注意点 |
 | [公式ライブラリ・過去案](docs/08-formula-library-and-history.md) | 数式組立型や加法定理などの将来構想 |
+| [Ver.0.1 実装記録](docs/10-ver0.1-implementation.md) | Web 試作版の仕様・暫定採用・テスト結果・既知の問題 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |
 
