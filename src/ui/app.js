@@ -6,7 +6,8 @@ import { decide, applyAction, PERSONALITIES } from '../engine/ai.js';
 import { createRng } from '../engine/rng.js';
 import { trigExact } from '../engine/exact.js';
 import { tileHTML, formulaHTML, backHTML, valueHTML } from './render.js';
-import { yakuCandidates, warmUp } from '../engine/yakuhint.js';
+import { yakuCandidates, warmUp, claimForSeat } from '../engine/yakuhint.js';
+import { hintKey } from './hintstate.js';
 import { YAKU_GUIDE, GUIDE_NOTES } from './guide.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, intParam } from './params.js';
 
@@ -67,6 +68,11 @@ function startRound() {
   warmUp(rules); // 役候補ヒント用の評価を少しずつ事前計算（判定・進行には影響しない）
   S.selected = null;
   S.hintsUsed = 0;
+  // ヒントは局ごとに閉じた状態から始める（使用回数も局ごと）
+  S.hintOpen = false;
+  S.hintKey = null;
+  S.hintText = null;
+  S.hintHighlight = null;
   S.modal = null;
   S.scored = false;
   render();
@@ -224,13 +230,12 @@ function headerHTML() {
   </header>`;
 }
 
-let lastHandKey = '';
 function render() {
   if (!S.game) return;
   const g = S.game;
-  // 手牌が変わったらヒント表示を消す（考える余地を残す）
-  const handKey = g.hands[HUMAN].join(',');
-  if (handKey !== lastHandKey) { lastHandKey = handKey; S.hintText = null; S.hintHighlight = null; }
+  // ヒント表示中は、役候補が参照する公開情報（手牌・河・公開面子・宣言状態）が変わったときだけ再計算する。
+  // 自動更新ではヒント使用回数を加算しない。
+  if (S.hintOpen) refreshHintIfChanged();
   app.innerHTML = `
     ${headerHTML()}
     <main class="table">
@@ -407,8 +412,24 @@ function settingsHTML() {
 }
 
 // ---------- ヒント ----------
-function computeHint() {
+function hintInputs() {
   const g = S.game;
+  const view = g.viewFor(HUMAN);
+  const claim = claimForSeat(g.pending(), HUMAN, (id) => g.typeOf(id));
+  return { view, claim };
+}
+
+function refreshHintIfChanged() {
+  const { view, claim } = hintInputs();
+  const key = hintKey(view, claim);
+  if (key === S.hintKey) return;
+  S.hintKey = key;
+  computeHint(view, claim);
+}
+
+function computeHint(view, claim) {
+  const g = S.game;
+  S.hintComputations = (S.hintComputations || 0) + 1;
   const ids = g.hands[HUMAN];
   // 手牌から同時に取れる完成面子の最大数（重複利用なし）
   const best = { n: 0, used: [] };
@@ -425,12 +446,13 @@ function computeHint() {
   const partial = rules.melds.filter((m) => m.tiles.filter((t) => types.has(t)).length === 2).length;
   S.hintHighlight = new Set(best.used);
   // 役候補（公開情報のみ。必要な牌の種類や捨て牌は表示しない）
-  const cands = yakuCandidates(rules, g.viewFor(HUMAN));
+  const cands = yakuCandidates(rules, view, { claim });
   const candHTML = cands.length
     ? `<ol class="yaku-cands">${cands.map((c) => `<li><b>${c.name}</b><span class="yc-pts">${c.yakuman ? '役満' : `+${c.yakuPoints}`}</span>${c.closedOnly ? '<span class="tag closed">門前限定</span>' : ''}<span class="yc-miss">${c.missing === 0 ? '完成！' : `あと${c.missing}枚`}</span></li>`).join('')}</ol>`
     : '<p class="yc-none">いま狙える役は見つかりません</p>';
   S.hintText = `<div class="hint-basic">完成している面子：<b>${best.n}組</b>（黄色の枠）／ あと1枚で完成する組み合わせ：<b>${partial}通り</b></div>
-    <div class="hint-yaku"><span class="hy-title">狙える役（近い順）</span>${candHTML}</div>
+    <div class="hint-yaku"><span class="hy-title">狙える役（近い順）</span>${candHTML}
+      <p class="yc-note" title="「あと◯枚」は目標の完成形に不足する牌の枚数です。和了までのツモ回数や巡数ではありません。">※あと◯枚＝完成形に足りない牌の数（ツモ回数・巡数ではない）</p></div>
     <div class="hint-tools"><button data-action="table" class="small">値表を見る</button><button data-action="guide" class="small">役ガイド</button></div>`;
 }
 
@@ -455,7 +477,11 @@ app.addEventListener('click', (ev) => {
     case 'chi': humanAct({ type: 'chi', option: Number(el.dataset.opt) }); break;
     case 'pass': humanAct({ type: 'pass' }); break;
     case 'hint':
-      if (S.hintText) { S.hintText = null; S.hintHighlight = null; } else { S.hintsUsed++; computeHint(); }
+      if (S.hintOpen) {
+        S.hintOpen = false; S.hintKey = null; S.hintText = null; S.hintHighlight = null;
+      } else {
+        S.hintsUsed++; S.hintOpen = true; S.hintKey = null; // render() で最新の局面から計算
+      }
       render();
       break;
     case 'guide-tab':
@@ -489,6 +515,6 @@ app.addEventListener('change', (ev) => {
 });
 
 // テスト・デバッグ用（E2E テストが盤面を確認するため）
-if (IS_LOCAL) window.__mathjong = { S, rules, decide, startRound };
+if (IS_LOCAL) window.__mathjong = { S, rules, decide, startRound, render, step };
 
 startRound();

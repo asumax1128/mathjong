@@ -231,6 +231,7 @@ table.values td.undef { color: #999; font-size: 12px; }
 .yc-pts { color: var(--accent); font-size: 12px; }
 .yc-miss { margin-left: auto; font-weight: 700; }
 .yc-none { margin: 4px 0 0; font-size: 13px; }
+.yc-note { margin: 3px 0 0; font-size: 10.5px; line-height: 1.35; color: var(--ink-dim); }
 .hint-tools { display: flex; gap: 6px; justify-content: center; margin-top: 6px; }
 .tag.closed { background: #f3d1c8; color: #7a2516; }
 .tag.open { background: #d6ead9; color: #1e5a2f; }
