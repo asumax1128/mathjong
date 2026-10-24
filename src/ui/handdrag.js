@@ -14,41 +14,69 @@
 import { insertionIndex, moveTo } from './handorder.js';
 
 // 「タップとして無効になった操作」に由来する click だけを抑止する（純粋なロジック。tests/handorder.test.js で検証）。
-// 抑止の状態はこの1か所だけで持つ（同時に追跡するのは1つの操作だけ）。
-// - invalidate(pointerId)：その操作がタップではなくなった時点で呼ぶ（押下中に閾値以上動いた／ドラッグになった）。
-// - release(pointerId)：そのポインターの pointerup / pointercancel。期限（ttlMs）はここから数える
-//   （指を離すまでの時間に左右されない）。
-// - pointerDown(ev)：新しい「主ポインター」の押下で解除する（新しいタップを抑止しない）。
-//   2本目の指（isPrimary=false）の押下では解除しない（1本目の操作の click が後から届くため）。
-// - shouldSuppress(ev)：対象の click なら true を返して解除する。キーボード由来（detail === 0）と、
-//   ポインター ID が分かっていて別のポインターの click は抑止しない。iOS Safari の合成 click は pointerId を
-//   持たないことがあるので、ID 不明の click は無効になった操作の click とみなす（合成 click は指を離した直後、
-//   次の押下より前に届く）。
-export function createClickGuard({ ttlMs = 1000, now = () => Date.now() } = {}) {
-  let inv = null; // { pointerId, releasedAt: number | null }
-  const expired = () => inv && inv.releasedAt !== null && now() - inv.releasedAt > ttlMs;
+//
+// 押下ごとに「操作の記録」を持つ：{ pointerId, downAt, upAt, invalid, clicked }。
+// 現在進行中の操作（押している最中）は upAt === null、終了した操作は upAt に時刻が入る。
+// click は「指を離した後」にしか届かないので、届いた click は終了済みでまだ click を受け取っていない操作に割り当てる：
+//   - pointerId が分かる click：その pointerId の、終了済み・未 click の最新の操作。
+//     （マウスのように同じ pointerId が再利用されても、押している最中の新しい操作には割り当てない）
+//   - pointerId が分からない click（iOS Safari の合成 click）：終了済み・未 click の操作のうち、最後に離されたもの。
+// 割り当てた操作が無効（invalid）なら抑止する。割り当てる操作がない click（記録外）は抑止しない。
+// 新しい押下では記録を消さない（遅れて届く古い click も、古い操作に割り当てて抑止できる）。
+// 記録は、離してから ttlMs を過ぎたら削除。pointerup が届かない操作は、次の主ポインターの押下で終了扱いにし、
+// 押してから maxAgeMs を過ぎたものも削除。件数は maxRecords まで（古いものから削除）。
+export function createClickGuard({ ttlMs = 1000, maxAgeMs = 10000, maxRecords = 8, now = () => Date.now() } = {}) {
+  let recs = [];
+  const latest = (pred) => { for (let i = recs.length - 1; i >= 0; i--) if (pred(recs[i])) return recs[i]; return null; };
+  function prune() {
+    const t = now();
+    recs = recs.filter((r) => (r.upAt === null ? t - r.downAt <= maxAgeMs : t - r.upAt <= ttlMs));
+    if (recs.length > maxRecords) recs = recs.slice(recs.length - maxRecords);
+  }
   return {
-    invalidate(pointerId) {
-      if (!inv || inv.pointerId !== pointerId) inv = { pointerId, releasedAt: null };
-    },
-    release(pointerId) {
-      if (inv && inv.pointerId === pointerId && inv.releasedAt === null) inv.releasedAt = now();
-    },
+    // 押下（主ポインターでなくても記録する）
     pointerDown(ev) {
-      if (!ev || ev.isPrimary !== false) inv = null;
+      prune();
+      const t = now();
+      if (ev.isPrimary !== false) {
+        // 新しい主ポインターの押下 = それ以前の押下はすべて終わっている（pointerup が届かなかった操作も終了扱い）
+        for (const r of recs) if (r.upAt === null && r.pointerId !== ev.pointerId) r.upAt = t;
+      }
+      recs.push({ pointerId: ev.pointerId, downAt: t, upAt: null, invalid: false, clicked: false });
+      prune();
     },
+    // pointerup / pointercancel。同じ操作の二重の release、別のポインターの release は影響しない
+    release(pointerId) {
+      const r = latest((x) => x.pointerId === pointerId && x.upAt === null);
+      if (r) r.upAt = now();
+    },
+    // その操作はタップではない（release の前後どちらで呼ばれてもよい）
+    invalidate(pointerId) {
+      const r = latest((x) => x.pointerId === pointerId);
+      if (r) r.invalid = true;
+      else recs.push({ pointerId, downAt: now(), upAt: now(), invalid: true, clicked: false });
+    },
+    // 抑止待ちの無効な操作があるか（テスト用）
     isArmed() {
-      if (expired()) inv = null;
-      return inv !== null;
+      prune();
+      return recs.some((r) => r.invalid && !r.clicked);
     },
+    // 記録の数（テスト用：無制限に増えないことの確認）
+    size() { prune(); return recs.length; },
     shouldSuppress(ev) {
-      if (!inv) return false;
-      if (expired()) { inv = null; return false; }
+      prune();
       if (ev.detail === 0) return false; // キーボード等
       const pid = ev.pointerId;
-      if (typeof pid === 'number' && pid >= 0 && pid !== inv.pointerId) return false; // 別のポインター
-      inv = null;
-      return true;
+      const known = typeof pid === 'number' && pid >= 0;
+      let target = null;
+      if (known) {
+        target = latest((r) => r.pointerId === pid && r.upAt !== null && !r.clicked);
+      } else {
+        for (const r of recs) if (r.upAt !== null && !r.clicked && (!target || r.upAt >= target.upAt)) target = r;
+      }
+      if (!target) return false;
+      target.clicked = true;
+      return target.invalid;
     },
   };
 }
@@ -170,9 +198,10 @@ export function createHandDrag(root, hooks, options = {}) {
 
   // ---- イベント ----
   function onPointerDown(ev) {
-    guard.pointerDown(ev);
-    if (!ev.isPrimary || (ev.pointerType === 'mouse' && ev.button !== 0)) return;
-    if (st.phase === 'dragging') return; // 2本目の指などは無視
+    if (!ev.isPrimary) return; // 2本目の指などは無視（click の記録は guardDown で行う）
+    // 新しい主ポインターなのに前の操作が残っている = 前の操作の pointerup が届かなかった。前の操作を後始末する
+    if (st.phase !== 'idle' && st.pointerId !== ev.pointerId) cancel('lost-pointer');
+    if (ev.pointerType === 'mouse' && ev.button !== 0) return;
     const el = ev.target.closest && ev.target.closest('.hand .tile[data-id]');
     if (!el || !hooks.canStart()) { toIdle(); return; }
     toIdle();
@@ -207,16 +236,19 @@ export function createHandDrag(root, hooks, options = {}) {
   }
 
   function onPointerUp(ev) {
-    guard.release(ev.pointerId); // 無効になった操作なら、ここから抑止の期限を数える
     if (st.phase === 'idle' || ev.pointerId !== st.pointerId) return;
     if (st.phase === 'pressing') { toIdle(); return; } // 通常のタップ：click 処理に任せる
     finish(ev.clientX, ev.clientY);
   }
 
   function onPointerCancel(ev) {
-    guard.release(ev.pointerId);
     if (st.phase !== 'idle' && ev.pointerId === st.pointerId) cancel('pointercancel');
   }
+
+  // click の記録（操作の開始・終了）は、状態に関係なくすべてのポインターについて最初に行う（捕捉段階）。
+  // release は invalidate より先でも後でもよい（記録は操作ごとに持つため、期限は必ず離した時点から始まる）。
+  const guardDown = (ev) => guard.pointerDown(ev);
+  const guardUp = (ev) => guard.release(ev.pointerId);
 
   // dragging 中はページのスクロールを止める（iOS Safari：非 passive の touchmove で preventDefault）
   function onTouchMove(ev) { if (st.phase === 'dragging' && ev.cancelable) ev.preventDefault(); }
@@ -235,6 +267,9 @@ export function createHandDrag(root, hooks, options = {}) {
   const onVisibility = () => { if (document.visibilityState === 'hidden') cancel('hidden'); };
   const onKey = (ev) => { if (ev.key === 'Escape') cancel('escape'); };
 
+  window.addEventListener('pointerdown', guardDown, true);
+  window.addEventListener('pointerup', guardUp, true);
+  window.addEventListener('pointercancel', guardUp, true);
   root.addEventListener('pointerdown', onPointerDown);
   window.addEventListener('pointermove', onPointerMove, { passive: false });
   window.addEventListener('pointerup', onPointerUp);

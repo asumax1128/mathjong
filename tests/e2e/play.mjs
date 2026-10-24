@@ -18,6 +18,9 @@ const args = process.argv.slice(2);
 const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
 const ROUNDS = Number(opt('--rounds', 6));
 const SHOTS = opt('--shots', null);
+// --channel chromium：Chromium の新しいヘッドレスモードで実行（既定はヘッドレスシェル）。
+// 新しいヘッドレスモードは横スワイプで「戻る」ナビゲーションが起きるなど、実ブラウザに近い挙動をする。
+const CHANNEL = opt('--channel', null);
 // GitHub Pages と同じサブパスで配信して相対パスを検証する
 const BASE = '/mathjong/';
 let PORT;
@@ -54,6 +57,8 @@ function watchErrors(page) {
   page.on('response', (r) => { if (r.status() >= 400) errors.push(`HTTP ${r.status()} ${r.url()}`); });
   page.on('requestfailed', (r) => errors.push(`failed ${r.url()} ${r.failure() && r.failure().errorText}`));
   page.on('request', (r) => { const u = new URL(r.url()); if (u.protocol.startsWith('http') && !u.pathname.startsWith(BASE) && u.pathname !== BASE.slice(0, -1)) errors.push(`outside base: ${r.url()}`); });
+  // ゲーム以外のページへの遷移（ブラウザの「戻る」スワイプなど）を検出
+  page.on('framenavigated', (f) => { if (f === page.mainFrame() && !/^https?:\/\//.test(f.url())) errors.push(`unexpected navigation: ${f.url()}`); });
   return errors;
 }
 
@@ -976,9 +981,13 @@ async function handReorder(browser) {
     assert.deepEqual(await shownOrder(page), order, '他家の手番中も順番を保つ');
     await force(3, 'v:1/2');
     await page.waitForSelector('button[data-action="chi"]');
-    // 宣言待ちの間は並び替えできない
+    // 宣言待ちの間は並び替えできない。長押しして牌1.5枚分動かす（並び替えが有効なら必ず順番が変わる操作）。
+    // 大きな横スワイプ（約240px 以上）は、並び替えが無効な状態ではブラウザの「戻る」ナビゲーションを起こすことがある
+    // （Chromium の新しいヘッドレスモードで確認）ため、テストの操作はその手前にとどめる。
+    const urlBefore = page.url();
     const b = await tileBox(page, order[0]);
-    await touchDrag(page, cdp, order[0], b.x + b.width * 6, b.y + b.height / 2);
+    await touchDrag(page, cdp, order[0], b.x + b.width * 2, b.y + b.height / 2);
+    assert.equal(page.url(), urlBefore, 'ページは遷移していない');
     assert.deepEqual(await shownOrder(page), order, '宣言待ちは並び替え不可');
     assert.equal((await engineState(page)).ghosts, 0);
     const used = await page.evaluate(() => { const { S } = window.__mathjong; const p = S.game.pending(); return p.chi[0].use; });
@@ -1333,6 +1342,123 @@ async function handReorderAuditFixes(browser) {
   console.log(`✓ Ver.0.2-D 監査対応：短い移動（8/9/12/16px）で誤打牌なし・pointercancel 復帰・click の区別・マウス1回移動のドロップ（ブラウザの click: ${JSON.stringify(realClicks)}）`);
 }
 
+// ---- Ver.0.2-D 第2回監査対応：遅れて届く古い click（新P2）・pointercancel と後始末（新P3） ----
+async function touchStartAt(cdp, x, y) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }); }
+async function touchEndAll(cdp) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); }
+async function trackPointerIds(page) {
+  await page.evaluate(() => { window.__pids = []; window.addEventListener('pointerdown', (e) => window.__pids.push(e.pointerId), true); });
+}
+async function injectClick(page, id, init) {
+  return page.evaluate(([i, it]) => {
+    const el = document.querySelector(`.hand .tile[data-id="${i}"]`);
+    const ev = it.pointerId !== undefined ? new PointerEvent('click', { bubbles: true, cancelable: true, ...it }) : new MouseEvent('click', { bubbles: true, cancelable: true, ...it });
+    el.dispatchEvent(ev);
+  }, [id, init]);
+}
+
+async function handReorderAudit2(browser) {
+  // 新P2：無効操作 A（16px 移動）→ 新しい主ポインター B で同じ牌を押す → B を離す前に A 由来の古い click を注入
+  for (const kind of ['pointerId', 'unknown']) {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    await trackPointerIds(page);
+    const X = (await shownOrder(page))[3];
+    await page.locator(`.hand .tile[data-id="${X}"]`).tap(); // X を選択（古い click が通ると打牌される状態）
+    assert.equal((await engineState(page)).selected, X);
+    await touchShortMove(page, cdp, X, 16); // 操作 A：タップとして無効
+    const pidA = await page.evaluate(() => window.__pids[window.__pids.length - 1]);
+    const bx = await tileBox(page, X);
+    await touchStartAt(cdp, bx.x + bx.width / 2, bx.y + bx.height / 2); // 操作 B：押している最中
+    await page.waitForTimeout(40);
+    const pidB = await page.evaluate(() => window.__pids[window.__pids.length - 1]);
+    assert.notEqual(pidA, pidB);
+    await injectClick(page, X, kind === 'pointerId' ? { detail: 1, pointerId: pidA } : { detail: 1 });
+    let st = await engineState(page);
+    assert.equal(st.selected, X, `${kind}：古い click で選択が変わらない`);
+    assert.equal(st.accepted, 0, `${kind}：古い click で打牌されない`);
+    await touchEndAll(cdp); // B を正常に終了 → B 由来の click（実際の Chromium の click）は受理される＝選択済みの X を打牌
+    await page.waitForTimeout(80);
+    st = await engineState(page);
+    assert.equal(st.accepted, 1, `${kind}：B 由来の click は受理（打牌）`);
+    assert.equal(st.myDiscards, 1);
+    assert.equal(st.failed, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // 新P3：移動前の touchCancel・ドラッグ開始後の touchCancel・期限・2本指の cancel・pointerup が届かない場合
+  {
+    const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow');
+    const order = await shownOrder(page);
+    const guardArmed = () => page.evaluate(() => window.__mathjong.drag.guard.isArmed());
+    // (a) 移動前に touchCancel → 押下中の取り消しとして無効化され、期限が始まり 1 秒後に解除
+    const a = await tileBox(page, order[1]);
+    await touchStartAt(cdp, a.x + a.width / 2, a.y + a.height / 2);
+    await page.waitForTimeout(60);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+    await page.waitForTimeout(30);
+    let st = await engineState(page);
+    assert.equal(st.phase, 'idle');
+    assert.equal(await guardArmed(), true, '移動前の cancel：抑止は有効（期限内）');
+    await page.waitForTimeout(1100);
+    assert.equal(await guardArmed(), false, '移動前の cancel：離した時点から1秒で解除（期限が始まっている）');
+    await page.locator(`.hand .tile[data-id="${order[1]}"]`).tap();
+    assert.equal((await engineState(page)).selected, order[1], 'cancel の後の通常タップ');
+    await page.evaluate(() => { window.__mathjong.S.selected = null; window.__mathjong.render(); });
+    // (b) ドラッグ開始後に touchCancel → 取り消し、AI の保留も解除
+    const b = await tileBox(page, order[2]);
+    await touchStartAt(cdp, b.x + b.width / 2, b.y + b.height / 2);
+    await page.waitForTimeout(450);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: b.x + b.width * 2, y: b.y + b.height / 2 }] });
+    await page.waitForTimeout(30);
+    assert.equal((await engineState(page)).phase, 'dragging');
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+    await page.waitForTimeout(50);
+    st = await engineState(page);
+    assert.equal(st.phase, 'idle');
+    assert.equal(st.ghosts, 0);
+    assert.deepEqual(await shownOrder(page), order, 'ドラッグ後の cancel は元の並び');
+    assert.equal(await guardArmed(), true);
+    await page.waitForTimeout(1100);
+    assert.equal(await guardArmed(), false, 'ドラッグ後の cancel も期限で解除');
+    // (c) 2本指で押して cancel → 選択・打牌なし、状態が残らない
+    const t1 = await tileBox(page, order[0]);
+    const t2 = await tileBox(page, order[5]);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: t1.x + t1.width / 2, y: t1.y + t1.height / 2, id: 1 }, { x: t2.x + t2.width / 2, y: t2.y + t2.height / 2, id: 2 }] });
+    await page.waitForTimeout(60);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+    await page.waitForTimeout(50);
+    st = await engineState(page);
+    assert.equal(st.phase, 'idle');
+    assert.equal(st.selected, null);
+    assert.equal(st.accepted, 0);
+    // (d) pointerup が届かない操作（押下だけ）：次の正常なタップで後始末され、タップは有効
+    await page.evaluate((id) => {
+      const el = document.querySelector(`.hand .tile[data-id="${id}"]`);
+      const r = el.getBoundingClientRect();
+      el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 901, isPrimary: true, pointerType: 'touch', clientX: r.left + 5, clientY: r.top + 5 }));
+    }, order[3]);
+    assert.equal((await engineState(page)).phase, 'pressing');
+    await page.waitForTimeout(450); // 長押しが成立 → dragging（pointerup は来ない）
+    assert.equal((await engineState(page)).phase, 'dragging');
+    await page.locator(`.hand .tile[data-id="${order[6]}"]`).tap(); // 新しい主ポインター
+    st = await engineState(page);
+    assert.equal(st.phase, 'idle', 'pointerup が届かないドラッグは、次の押下で後始末');
+    assert.equal(st.ghosts, 0);
+    assert.equal(st.selected, order[6], '次のタップは有効');
+    assert.equal(st.accepted, 0);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.stepDeferred), false);
+    // (e) DOM 再生成の後も不整合がない
+    await page.evaluate(() => window.__mathjong.render());
+    await page.locator(`.hand .tile[data-id="${order[6]}"]`).tap();
+    st = await engineState(page);
+    assert.equal(st.accepted, 1, '再描画の後の2回目のタップで打牌');
+    assert.equal(st.failed, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.2-D 第2回監査対応：遅れた古い click（pointerId あり・なし）を抑止し新しいタップは受理・cancel の期限・2本指・pointerup 欠落・再描画');
+}
+
 // 実機テスト用の固定 seed（docs/12）。「毎回右端のツモ牌を捨て、チー・ロンは見送る」と
 // 指定の手番で宣言ボタンが出ることを、公開サイト相当の画面で確認する。
 export const DEVICE_SEEDS = [
@@ -1374,7 +1500,8 @@ let browser;
 const stats = { rounds: 0, wins: [0, 0, 0, 0], draws: 0, tsumo: 0, ron: 0, ronDeclined: 0, chi: 0, chiPassed: 0, chiOverriddenByRon: 0, discards: 0, yaku: {} };
 const t0 = Date.now();
 try {
-  browser = await chromium.launch({ args: ['--no-proxy-server'] });
+  browser = await chromium.launch({ args: ['--no-proxy-server'], ...(CHANNEL ? { channel: CHANNEL } : {}) });
+  console.log(`ブラウザ：${CHANNEL ? `channel=${CHANNEL}` : 'headless shell（既定）'} ${browser.version()}`);
   await scenario(browser, 'tsumo', presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['=1']), (text) => {
     assert.match(text, /あなた の和了 ツモ/);
     assert.match(text, /三関制覇/);
@@ -1394,6 +1521,7 @@ try {
   await guideFitsScreen(browser);
   await handReorder(browser);
   await handReorderAuditFixes(browser);
+  await handReorderAudit2(browser);
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
     await playDevice(browser, dev, 4242 + i * 101, rounds, stats);

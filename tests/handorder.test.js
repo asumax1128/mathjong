@@ -108,88 +108,142 @@ test('チー後も残りの手牌の並び順を保つ（実際の Game）', () 
   assert.deepEqual(after, before.filter((id) => g.hands[1].includes(id)), 'チーで抜けた2枚以外は同じ順番');
 });
 
-// ---- タップとして無効になった操作の click の抑止（createClickGuard） ----
+// ---- タップとして無効になった操作の click の抑止（createClickGuard：操作ごとの記録） ----
 function clock() { let t = 0; return { now: () => t, tick: (ms) => { t += ms; } }; }
-const primary = { isPrimary: true };
+const down = (g, pointerId, isPrimary = true) => g.pointerDown({ pointerId, isPrimary });
+const click = (g, init) => g.shouldSuppress({ detail: 1, ...init });
 
-test('無効になった操作の click を1回だけ抑止（Chrome：click に同じ pointerId）', () => {
+test('通常のタップの click は抑止しない。2回タップ（打牌）も両方有効', () => {
   const c = clock();
   const g = createClickGuard({ now: c.now });
-  g.pointerDown(primary);
-  g.invalidate(7); // 閾値を超えて動いた、またはドラッグになった
-  g.release(7); // 指を離した
-  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 7 }), true);
-  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 7 }), false, '2回目は抑止しない');
+  down(g, 1); g.release(1);
+  assert.equal(click(g, { pointerId: 1 }), false);
+  c.tick(150);
+  down(g, 2); g.release(2);
+  assert.equal(click(g, {}), false, 'iOS の合成 click（pointerId なし）も通常タップなら有効');
 });
 
-test('iOS Safari：pointerId のない合成 click・pointerId=-1 の click も抑止', () => {
+test('無効になった操作の click を抑止（pointerId あり・なし・-1）。同じ操作の2回目の click はない', () => {
   const c = clock();
   const g = createClickGuard({ now: c.now });
-  g.invalidate(3); g.release(3); c.tick(5);
-  assert.equal(g.shouldSuppress({ detail: 1 }), true);
-  g.pointerDown(primary); g.invalidate(3); g.release(3);
-  assert.equal(g.shouldSuppress({ detail: 1, pointerId: -1 }), true);
+  down(g, 7); g.invalidate(7); g.release(7);
+  assert.equal(click(g, { pointerId: 7 }), true);
+  assert.equal(click(g, { pointerId: 7 }), false, '割り当てる操作がない click は抑止しない');
+  down(g, 8); g.invalidate(8); g.release(8);
+  assert.equal(click(g, {}), true, 'pointerId なし');
+  down(g, 9); g.invalidate(9); g.release(9);
+  assert.equal(click(g, { pointerId: -1 }), true, 'pointerId -1');
 });
 
-test('新しい主ポインターの押下から始まる通常タップは抑止しない（時間の窓に依存しない）', () => {
+test('新P2：無効操作 A の古い click が、新しい主ポインター B の押下の後に届いても抑止。B の click は受理', () => {
+  for (const oldClick of [{ pointerId: 3 }, {}]) {
+    const c = clock();
+    const g = createClickGuard({ now: c.now });
+    down(g, 3); g.invalidate(3); g.release(3); // 操作 A（無効）終了。A の click はまだ届いていない
+    c.tick(20);
+    down(g, 4); // 新しい主ポインター B（押している最中）
+    assert.equal(click(g, oldClick), true, `B を離す前の A 由来の click（${JSON.stringify(oldClick)}）は抑止`);
+    c.tick(60);
+    g.release(4);
+    assert.equal(click(g, { pointerId: 4 }), false, 'B 由来の click は受理');
+  }
+  // B の click が pointerId なしでも受理
   const c = clock();
   const g = createClickGuard({ now: c.now });
-  g.invalidate(3); g.release(3); // click が来なかった（スクロールになった等）
-  c.tick(50);
-  g.pointerDown(primary); // すぐに次のタップ
-  assert.equal(g.isArmed(), false);
-  assert.equal(g.shouldSuppress({ detail: 1 }), false, '次の通常タップは有効');
+  down(g, 3); g.invalidate(3); g.release(3);
+  down(g, 4);
+  assert.equal(click(g, {}), true);
+  g.release(4);
+  assert.equal(click(g, {}), false, 'B 由来の合成 click は受理');
 });
 
-test('2本目の指の押下では解除しない（1本目の操作の click を後で抑止）', () => {
+test('A の古い click が B の click より後に届いても抑止（pointerId なし）', () => {
   const c = clock();
   const g = createClickGuard({ now: c.now });
+  down(g, 3); g.invalidate(3); g.release(3);
+  down(g, 4); g.release(4);
+  assert.equal(click(g, {}), false, '最後に離された B の click');
+  assert.equal(click(g, {}), true, '残っている A の click');
+});
+
+test('同じ pointerId の再利用（マウス）：押している最中の新しい操作に古い click を割り当てない', () => {
+  const c = clock();
+  const g = createClickGuard({ now: c.now });
+  down(g, 1); g.invalidate(1); g.release(1); // マウスのドラッグ（無効）
+  down(g, 1); // 次のクリック（押している最中）
+  assert.equal(click(g, { pointerId: 1 }), true, '古いドラッグの click は抑止');
+  g.release(1);
+  assert.equal(click(g, { pointerId: 1 }), false, '新しいクリックの click は受理');
+});
+
+test('2本指：記録はポインターごとに分かれ、混同しない。2本目の押下で1本目の記録は終わらない', () => {
+  const c = clock();
+  const g = createClickGuard({ now: c.now });
+  down(g, 3); // 1本目
+  down(g, 5, false); // 2本目
   g.invalidate(3);
-  g.pointerDown({ isPrimary: false }); // 2本目の指
+  g.release(5);
+  assert.equal(click(g, { pointerId: 5 }), false, '2本目のタップは有効');
+  assert.equal(g.isArmed(), true, '1本目はまだ押している');
   g.release(3);
-  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 3 }), true);
+  assert.equal(click(g, { pointerId: 3 }), true, '1本目の click は抑止');
 });
 
-test('別のポインター・キーボードの click は抑止しない', () => {
-  const c = clock();
-  const g = createClickGuard({ now: c.now });
-  g.invalidate(3); g.release(3);
-  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 9 }), false, '別のポインター');
-  assert.equal(g.shouldSuppress({ detail: 0 }), false, 'キーボード由来（detail 0）');
-  assert.equal(g.isArmed(), true, 'まだ対象の click を待っている');
+test('新P3：pointercancel（release）の後に invalidate されても、期限は離した時点から始まる', () => {
+  for (const order of ['release-first', 'invalidate-first']) {
+    const c = clock();
+    const g = createClickGuard({ now: c.now, ttlMs: 1000 });
+    down(g, 3);
+    if (order === 'release-first') { g.release(3); g.invalidate(3); } else { g.invalidate(3); g.release(3); }
+    c.tick(999);
+    assert.equal(g.isArmed(), true, `${order}：期限直前は有効`);
+    c.tick(2);
+    assert.equal(g.isArmed(), false, `${order}：期限経過後は解除`);
+    assert.equal(g.size(), 0, '記録も削除');
+  }
 });
 
-test('期限は指を離した時点から数える（長く押していても抑止は有効）', () => {
+test('同じ操作の二重の release・別のポインターの release で期限が壊れない', () => {
   const c = clock();
   const g = createClickGuard({ now: c.now, ttlMs: 1000 });
-  g.invalidate(3);
-  c.tick(5000); // 5秒押したまま（ゆっくり動かした等）
-  assert.equal(g.isArmed(), true, '離すまでは期限切れにしない');
-  g.release(3);
-  c.tick(10);
-  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 3 }), true);
-  g.invalidate(4); g.release(4);
-  c.tick(1001);
-  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 4 }), false, '離してから期限切れ');
-  assert.equal(g.isArmed(), false);
-});
-
-test('pointercancel（release）後も、次の押下で正常に復帰', () => {
-  const c = clock();
-  const g = createClickGuard({ now: c.now });
-  g.pointerDown(primary); g.invalidate(5); g.release(5); // pointercancel
-  g.pointerDown(primary); // 次の操作
-  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 6 }), false);
-  assert.equal(g.isArmed(), false);
-});
-
-test('別のポインターの release では期限を始めない・同じ操作を二重に記録しない', () => {
-  const c = clock();
-  const g = createClickGuard({ now: c.now, ttlMs: 100 });
-  g.invalidate(3);
-  g.invalidate(3); // 同じ操作（閾値超え → ドラッグ）でも状態は1つ
+  down(g, 3); g.invalidate(3); g.release(3);
+  c.tick(600);
+  g.release(3); // 二重
+  g.release(9); // 別のポインター
+  c.tick(401);
+  assert.equal(g.isArmed(), false, '最初の release から 1000ms で期限切れ');
+  down(g, 4); g.invalidate(4);
   g.release(9);
-  c.tick(500);
-  assert.equal(g.isArmed(), true);
-  assert.equal(g.shouldSuppress({ detail: 1, pointerId: 3 }), true);
+  c.tick(5000);
+  assert.equal(g.isArmed(), true, '別のポインターの release では期限を始めない（まだ押している）');
+});
+
+test('pointerup が届かない操作：次の主ポインターの押下で終了扱い、押下から maxAgeMs で削除', () => {
+  const c = clock();
+  const g = createClickGuard({ now: c.now, ttlMs: 1000, maxAgeMs: 10000 });
+  down(g, 3); g.invalidate(3); // pointerup が届かない
+  c.tick(200);
+  down(g, 4); // 次の主ポインター → 3 は終了扱い
+  assert.equal(click(g, {}), true, '3 の遅れた click は抑止');
+  const g2 = createClickGuard({ now: c.now, ttlMs: 1000, maxAgeMs: 10000 });
+  down(g2, 7); g2.invalidate(7);
+  c.tick(10001);
+  assert.equal(g2.size(), 0, '押したまま maxAgeMs を過ぎた記録は削除');
+});
+
+test('記録は上限件数まで（無制限に増えない）', () => {
+  const c = clock();
+  const g = createClickGuard({ now: c.now, maxRecords: 8 });
+  for (let i = 0; i < 50; i++) { down(g, i); g.release(i); }
+  assert.ok(g.size() <= 8);
+});
+
+test('キーボード由来（detail 0）の click は抑止せず、記録も消費しない。期限切れ後の遅れた click は抑止できない（残余リスク）', () => {
+  const c = clock();
+  const g = createClickGuard({ now: c.now, ttlMs: 1000 });
+  down(g, 3); g.invalidate(3); g.release(3);
+  assert.equal(g.shouldSuppress({ detail: 0 }), false);
+  assert.equal(g.isArmed(), true, 'キーボードの click では消費しない');
+  c.tick(1001);
+  assert.equal(click(g, { pointerId: 3 }), false, '期限切れ後に届いた click は記録がないため抑止できない');
 });
