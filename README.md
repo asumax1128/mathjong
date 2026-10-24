@@ -24,6 +24,9 @@
 | [決定ログ](docs/05-decision-log.md) | 決定済み・比較中・保留事項と経緯 |
 | [次の検証タスク](docs/06-next-steps.md) | ルール設計と実装の優先順位 |
 | [再現性と既知の制約](docs/07-simulation-reproducibility.md) | 既存簡易シミュレーターの注意点 |
+| [公式ライブラリ・過去案](docs/08-formula-library-and-history.md) | 数式組立型や加法定理などの将来構想 |
+| [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
+| [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |
 
 ## 直近の比較（各2,500局）
 
