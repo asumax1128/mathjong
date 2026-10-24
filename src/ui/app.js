@@ -8,6 +8,15 @@ import { trigExact } from '../engine/exact.js';
 import { tileHTML, formulaHTML, backHTML, valueHTML } from './render.js';
 
 const params = new URLSearchParams(location.search);
+// テスト専用機能（山の指定・AI待ち時間0）はローカル開発環境でのみ有効。公開サイトでは無効。
+const IS_LOCAL = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+// ?seed=（0〜999999999の整数）と ?round=（1〜999）だけを受け付ける。不正値は無視。
+const intParam = (name, max) => {
+  const v = params.get(name);
+  return v !== null && /^\d{1,9}$/.test(v) && Number(v) <= max ? Number(v) : null;
+};
+const seedParam = intParam('seed', 999999999);
+const roundParam = intParam('round', 999);
 const rules = createRules(DEFAULT_CONFIG);
 const HUMAN = 0;
 const POS = ['自分', '下家', '対面', '上家'];
@@ -17,7 +26,14 @@ const PLAYERS = [
   { name: 'AI-B', kind: 'ai', personality: 'value' },
   { name: 'AI-C', kind: 'ai', personality: 'closed' },
 ];
-const SPEEDS = { fast: [250, 120], normal: [700, 350], slow: [1200, 600], test: [0, 0] };
+const SPEEDS = { fast: [250, 120], normal: [700, 350], slow: [1200, 600], ...(IS_LOCAL ? { test: [0, 0] } : {}) };
+const PUBLIC_SPEEDS = ['fast', 'normal', 'slow'];
+function initialSpeed() {
+  const q = params.get('speed');
+  if (q && SPEEDS[q]) return q;
+  const saved = store.get('mj-speed', 'normal');
+  return PUBLIC_SPEEDS.includes(saved) ? saved : 'normal';
+}
 
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -25,15 +41,16 @@ const store = {
 };
 
 const S = {
-  round: 1,
-  dealer: 0,
+  // 第n局の山と親は seed と n だけで決まる（親は局ごとに1つずつ移動）。?round=n で直接その局から始められる。
+  round: roundParam && roundParam > 0 ? roundParam : 1,
+  dealer: roundParam && roundParam > 0 ? (roundParam - 1) % 4 : 0,
   scores: [0, 0, 0, 0],
-  seedBase: params.has('seed') ? Number(params.get('seed')) : Math.floor(Math.random() * 1e9),
+  seedBase: seedParam ?? Math.floor(Math.random() * 1e9),
   game: null,
   selected: null,
   hintsUsed: 0,
   modal: null,
-  speed: params.get('speed') || store.get('mj-speed', 'normal'),
+  speed: initialSpeed(),
   timer: null,
   aiRng: null,
   history: [],
@@ -46,7 +63,7 @@ const nameOf = (s) => (s === HUMAN ? 'あなた' : `${PLAYERS[s].name}`);
 function startRound() {
   clearTimeout(S.timer);
   const seed = S.seedBase + S.round * 7919;
-  const presetWall = S.nextPresetWall || null; // テスト用：山の並びを指定
+  const presetWall = IS_LOCAL ? S.nextPresetWall || null : null; // テスト用：山の並びを指定（ローカルのみ）
   S.nextPresetWall = null;
   S.game = new Game({ rules, seed, dealer: S.dealer, players: PLAYERS, round: S.round, presetWall });
   S.aiRng = createRng(seed ^ 0x5bd1e995);
@@ -297,8 +314,15 @@ function resultHTML() {
   return `<div class="result">${head}${detail}
     <h3>累計得点（仮）</h3>${scores}${hints}
     <details><summary>全員の手牌を見る</summary>${[0, 1, 2, 3].map(revealHTML).join('')}</details>
+    ${reportInfoHTML()}
     <div class="modal-actions"><button data-action="next" class="primary">次の局へ</button>
     <button data-action="close-result">盤面を見る</button></div></div>`;
+}
+
+// 不具合報告用の再現情報（seed と局番号があれば同じ山・同じ親から再現できる）
+function reportInfoHTML() {
+  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ 第<b>${S.round}</b>局 ／ v${ENGINE_VERSION}<br>
+    この局から再現：URL の末尾に <code>?seed=${S.seedBase}&amp;round=${S.round}</code></p>`;
 }
 
 function rulesHTML() {
@@ -334,7 +358,7 @@ function settingsHTML() {
   const opt = (v, l) => `<option value="${v}" ${S.speed === v ? 'selected' : ''}>${l}</option>`;
   return `<h2>設定</h2>
     <label class="setting">AIの速さ <select data-action="speed">${opt('fast', '速い')}${opt('normal', '普通')}${opt('slow', 'ゆっくり')}</select></label>
-    <p class="note">シード：${S.seedBase}（同じ URL に ?seed=${S.seedBase} を付けると同じ配牌を再現できます）</p>
+    ${reportInfoHTML()}
     <div class="modal-actions"><button data-action="reset">新しい対局（得点リセット）</button></div>`;
 }
 
@@ -411,6 +435,6 @@ app.addEventListener('change', (ev) => {
 });
 
 // テスト・デバッグ用（E2E テストが盤面を確認するため）
-window.__mathjong = { S, rules, decide, startRound };
+if (IS_LOCAL) window.__mathjong = { S, rules, decide, startRound };
 
 startRound();

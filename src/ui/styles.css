@@ -23,6 +23,9 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: var(--felt); color: var(--ink); }
+/* iOS Safari：牌の「選択→もう一度タップで打牌」がダブルタップ拡大と衝突しないようにする */
+html { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.report-info code { font-size: 12px; background: #ebe5d3; padding: 1px 4px; border-radius: 3px; word-break: break-all; }
 body { min-height: 100dvh; }
 button { font: inherit; }
 
@@ -103,6 +106,7 @@ button:focus-visible, .tile.tap:focus-visible { outline: 3px solid var(--accent)
   background: var(--tile); color: var(--tile-ink);
   border: 1px solid var(--tile-edge); border-bottom-width: 3px; border-radius: 5px;
   font-weight: 700; line-height: 1; user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none; touch-action: manipulation;
   flex: 0 0 auto;
 }
 .tile.sz-l { width: var(--hand-w); height: var(--hand-h); font-size: calc(var(--hand-w) * 0.42); border-radius: 6px; }
