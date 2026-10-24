@@ -41,6 +41,8 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 | [再現性と既知の制約](docs/07-simulation-reproducibility.md) | 既存簡易シミュレーターの注意点 |
 | [公式ライブラリ・過去案](docs/08-formula-library-and-history.md) | 数式組立型や加法定理などの将来構想 |
 | [Ver.0.1 実装記録](docs/10-ver0.1-implementation.md) | Web 試作版の仕様・暫定採用・テスト結果・既知の問題 |
+| [実機テストと独立監査](docs/11-audit-and-device-testing.md) | iPhoneでのテスト手順、Claude→CodexのPR監査フロー |
+| [Codex監査ガイド](AGENTS.md) | 独立監査の重点項目と報告形式 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |
 
