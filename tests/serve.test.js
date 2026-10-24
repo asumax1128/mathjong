@@ -148,7 +148,8 @@ test('resolveRequestPath の単体検査', () => {
 
 test('実際のリポジトリ：ゲームのアセットは取得でき、.git や資料は取得できない', async () => {
   for (const p of ['', 'index.html', 'src/ui/app.js', 'src/ui/styles.css', 'src/ui/render.js', 'src/ui/icon.svg',
-    'src/engine/rules.js', 'src/engine/game.js', 'src/engine/ai.js', 'src/engine/config.js', 'src/engine/exact.js', 'src/engine/rng.js']) {
+    'src/engine/rules.js', 'src/engine/game.js', 'src/engine/ai.js', 'src/engine/config.js', 'src/engine/exact.js', 'src/engine/rng.js',
+    'src/engine/yakuhint.js', 'src/ui/guide.js', 'src/ui/params.js']) {
     assert.equal((await get(repoServer, `${BASE}${p}`)).status, 200, p);
   }
   for (const p of ['.git/HEAD', '.git/config', 'package.json', 'AGENTS.md', 'README.md', 'docs/01-game-rules.md', 'tests/serve.test.js', 'tools/serve.mjs', 'scripts/legacy/trig_sim.py', '.nojekyll']) {

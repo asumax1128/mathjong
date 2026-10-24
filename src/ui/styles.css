@@ -119,8 +119,11 @@ button:focus-visible, .tile.tap:focus-visible { outline: 3px solid var(--accent)
 .t-tan { color: var(--tan); }
 .t-func { background: #f3ecd8; }
 .t-func .fn { font-family: "Times New Roman", "Noto Serif JP", serif; font-style: italic; letter-spacing: -0.02em; }
-.t-angle .ang { font-variant-numeric: tabular-nums; letter-spacing: -0.04em; }
-.t-angle .deg { font-size: 0.75em; vertical-align: 0.35em; }
+/* 角度牌：数字を牌の中央に置き、度数記号は数字の右上に添える（記号の幅で数字がずれない） */
+.t-angle .ang { position: relative; display: inline-block; font-variant-numeric: tabular-nums; letter-spacing: -0.04em; }
+.t-angle .deg { position: absolute; left: 100%; top: -0.12em; font-size: 0.62em; margin-left: 0.02em; }
+.tile.sz-xs.t-angle .ang { letter-spacing: -0.08em; }
+.tile.sz-xs.t-angle { font-size: 9.5px; }
 .tile.sz-l.t-angle { font-size: calc(var(--hand-w) * 0.36); }
 .t-value { background: #eef1f5; }
 .t-value .eq { position: absolute; top: 1px; left: 3px; font-size: 0.7em; color: #4b5059; font-weight: 700; }
@@ -139,12 +142,17 @@ button:focus-visible, .tile.tap:focus-visible { outline: 3px solid var(--accent)
 
 /* 分数・根号 */
 .val { display: inline-flex; align-items: center; }
-.neg { margin-right: 0.04em; font-weight: 900; }
-.frac { display: inline-flex; flex-direction: column; align-items: center; font-size: 0.86em; line-height: 1.02; }
-.frac .num { padding: 0 0.08em; }
-.frac .den { border-top: 0.09em solid currentColor; padding: 0.04em 0.08em 0; }
-.rad { white-space: nowrap; }
-.radicand { border-top: 0.08em solid currentColor; padding-left: 0.04em; margin-left: -0.02em; }
+/* 負号（U+2212）は分数線の高さ（数式の中心）に揃える */
+.neg { margin-right: 0.06em; font-weight: 700; line-height: 1; align-self: center; }
+/* 分数：分子・分母を中央揃え。分数線は分子・分母の広い方の幅に合わせる（align-items: stretch） */
+.frac { display: inline-flex; flex-direction: column; align-items: stretch; font-size: 0.86em; line-height: 1.04; vertical-align: middle; }
+.frac .num, .frac .den { display: block; text-align: center; padding: 0 0.1em; white-space: nowrap; }
+.frac .num { padding-bottom: 0.06em; }
+.frac .den { border-top: 0.085em solid currentColor; padding-top: 0.06em; }
+/* 根号：√ 記号と被開平数の上線をつなげる */
+.rad { white-space: nowrap; display: inline-flex; align-items: flex-end; }
+.rad .rs { display: inline-block; transform: scaleY(1.08); transform-origin: bottom; margin-right: -0.04em; }
+.radicand { border-top: 0.08em solid currentColor; padding: 0.04em 0.04em 0 0.05em; line-height: 1; }
 
 /* ---- 操作バー ---- */
 .bar {
@@ -212,6 +220,41 @@ table.values td.undef { color: #999; font-size: 12px; }
   .top { gap: 6px; padding: 6px 8px; }
   button.small { padding: 0 8px; }
 }
+
+/* ---- ヒント（役候補） ---- */
+.hint-box { text-align: left; }
+.hint-basic { text-align: center; }
+.hint-yaku { margin-top: 6px; background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 6px 8px; }
+.hy-title { font-size: 12px; color: var(--ink-dim); }
+.yaku-cands { margin: 2px 0 0; padding-left: 1.3em; }
+.yaku-cands li { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 0; color: var(--ink); font-size: 14px; }
+.yc-pts { color: var(--accent); font-size: 12px; }
+.yc-miss { margin-left: auto; font-weight: 700; }
+.yc-none { margin: 4px 0 0; font-size: 13px; }
+.hint-tools { display: flex; gap: 6px; justify-content: center; margin-top: 6px; }
+.tag.closed { background: #f3d1c8; color: #7a2516; }
+.tag.open { background: #d6ead9; color: #1e5a2f; }
+.tag.sp { background: #e6dcf5; color: #4a2d7a; }
+.bar .tag, .hint-box .tag { font-size: 10px; border-radius: 4px; padding: 0 4px; }
+
+/* ---- ガイド ---- */
+.tabs { display: flex; gap: 4px; margin-bottom: 10px; position: sticky; top: -16px; background: #f8f5ec; padding: 4px 0; z-index: 1; }
+.tabs .tab { flex: 1; min-height: 40px; }
+.modal button.tab.on { background: #1e4636; color: #fff; border-color: #1e4636; }
+.guide-notes { padding-left: 1.1em; font-size: 13px; line-height: 1.6; color: #34433b; }
+.guide-yaku { list-style: none; padding: 0; margin: 0; }
+.gy { border: 1px solid #e0d9c6; border-radius: 10px; padding: 8px 10px; margin: 8px 0; background: #fffdf6; }
+.gy-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.gy-head b { font-size: 16px; }
+.gy-pts { margin-left: auto; font-weight: 700; color: #7a5a12; }
+.gy-cond { margin: 6px 0; font-size: 14px; line-height: 1.5; }
+.gy-ex { margin: 0; padding-left: 1.4em; font-size: 16px; }
+.gy-ex li { padding: 2px 0; }
+.gy-tiles { display: flex; gap: 2px; flex-wrap: wrap; }
+.gallery { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+.gallery .gl { width: 4.5em; flex: 0 0 auto; font-size: 11px; color: #5a6b62; }
+.gallery .gtiles { display: flex; flex-wrap: wrap; gap: 2px; }
+.gallery .tile.sz-l { --hand-w: 40px; }
 
 /* ---- 横長画面（タブレット横・PC・Chromebook） ---- */
 @media (min-width: 820px) {

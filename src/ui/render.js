@@ -4,7 +4,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 
 // '√3' → √ と被開平数（上線付き）
 function term(s) {
-  if (s.startsWith('√')) return `<span class="rad">√<span class="radicand">${esc(s.slice(1))}</span></span>`;
+  if (s.startsWith('√')) return `<span class="rad"><span class="rs">√</span><span class="radicand">${esc(s.slice(1))}</span></span>`;
   return `<span class="int">${esc(s)}</span>`;
 }
 

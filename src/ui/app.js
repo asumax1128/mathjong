@@ -6,8 +6,12 @@ import { decide, applyAction, PERSONALITIES } from '../engine/ai.js';
 import { createRng } from '../engine/rng.js';
 import { trigExact } from '../engine/exact.js';
 import { tileHTML, formulaHTML, backHTML, valueHTML } from './render.js';
+import { yakuCandidates, warmUp } from '../engine/yakuhint.js';
+import { YAKU_GUIDE, GUIDE_NOTES } from './guide.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, intParam } from './params.js';
 
+// 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
+const APP_VERSION = '0.2.0-a';
 const params = new URLSearchParams(location.search);
 // テスト専用機能（山の指定・AI待ち時間0）はローカル開発環境でのみ有効。公開サイトでは無効。
 const IS_LOCAL = isLocalHost(location.hostname);
@@ -60,6 +64,7 @@ function startRound() {
   S.nextPresetWall = null;
   S.game = new Game({ rules, seed, dealer: S.dealer, players: PLAYERS, round: S.round, presetWall });
   S.aiRng = createRng(seed ^ 0x5bd1e995);
+  warmUp(rules); // 役候補ヒント用の評価を少しずつ事前計算（判定・進行には影響しない）
   S.selected = null;
   S.hintsUsed = 0;
   S.modal = null;
@@ -213,7 +218,7 @@ function headerHTML() {
     <span class="info">第${S.round}局 <span class="wall" aria-label="山の残り">山 <b>${g.wall.length}</b></span></span>
     <span class="tools">
       <button data-action="hint" class="small">ヒント</button>
-      <button data-action="rules" class="small">ルール</button>
+      <button data-action="guide" class="small">ガイド</button>
       <button data-action="settings" class="small" aria-label="設定">⚙</button>
     </span>
   </header>`;
@@ -259,7 +264,7 @@ function modalHTML() {
   if (!S.modal) return '';
   let body = '';
   if (S.modal === 'result') body = resultHTML();
-  if (S.modal === 'rules') body = rulesHTML();
+  if (S.modal === 'guide') body = guideHTML();
   if (S.modal === 'table') body = tableHTML();
   if (S.modal === 'settings') body = settingsHTML();
   const closable = S.modal !== 'result';
@@ -316,15 +321,58 @@ function resultHTML() {
 
 // 不具合報告用の再現情報（seed と局番号があれば同じ山・同じ親から再現できる）
 function reportInfoHTML() {
-  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ 第<b>${S.round}</b>局 ／ v${ENGINE_VERSION}<br>
+  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ 第<b>${S.round}</b>局 ／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
     この局から再現：URL の末尾に <code>?seed=${S.seedBase}&amp;round=${S.round}</code></p>`;
+}
+
+// ---------- ガイド（役一覧・ルール・牌一覧） ----------
+const GUIDE_TABS = [['yaku', '役一覧'], ['rules', 'ルール'], ['tiles', '牌一覧']];
+
+function guideHTML() {
+  const tab = S.guideTab || 'yaku';
+  const tabs = GUIDE_TABS.map(([id, label]) => `<button data-action="guide-tab" data-tab="${id}" class="tab ${tab === id ? 'on' : ''}" aria-pressed="${tab === id}">${label}</button>`).join('');
+  const body = tab === 'rules' ? rulesHTML() : tab === 'tiles' ? tilesHTML() : yakuGuideHTML();
+  return `<div class="guide"><div class="tabs" role="tablist">${tabs}</div>${body}</div>`;
+}
+
+function yakuGuideHTML() {
+  const c = rules.config;
+  const meldByKey = new Map(rules.melds.map((m) => [m.key, m]));
+  const card = (y, isSpecial) => {
+    const g = YAKU_GUIDE[y.id] || { condition: '' };
+    const pts = y.yakuman ? `役満 ${y.points}` : `+${y.points}`;
+    const naki = y.closedOnly ? '<span class="tag closed">門前限定</span>' : '<span class="tag open">鳴いても可</span>';
+    let ex = '';
+    if (g.example) {
+      ex = g.example.map((k) => `<li>${formulaHTML(rules, meldByKey.get(k).idx)}</li>`).join('');
+      ex = `<ol class="gy-ex">${ex}</ol>`;
+    } else if (g.exampleAngles) {
+      ex = `<div class="gy-tiles">${g.exampleAngles.map((d) => tileHTML(rules.typeByKey.get(`a:${d}`), { size: 's' })).join('')}</div>`;
+    }
+    return `<li class="gy" data-yaku="${y.id}"><div class="gy-head"><b>${y.name}</b>${isSpecial ? '<span class="tag sp">特殊和了</span>' : ''}${naki}<span class="gy-pts">${pts}</span></div>
+      <p class="gy-cond">${g.condition}</p>${ex}</li>`;
+  };
+  const list = [
+    ...c.yaku.filter((y) => y.enabled).map((y) => card(y, false)),
+    ...c.specialHands.filter((s) => s.enabled).map((s) => card(s, true)),
+  ].join('');
+  return `<h2>役ガイド</h2>
+    <ul class="guide-notes">${GUIDE_NOTES.map((n) => `<li>${n}</li>`).join('')}<li>通常和了の基本点：${c.scoring.base}点</li></ul>
+    <ul class="guide-yaku">${list}</ul>`;
+}
+
+function tilesHTML() {
+  const sizes = [['l', '手牌'], ['m', '公開面子'], ['s', '結果画面'], ['xs', '河']];
+  const kinds = [['func', '関数牌'], ['angle', '角度牌'], ['value', '結果牌']];
+  return `<h2>牌一覧</h2><p class="note">関数牌 各${rules.types.find((t) => t.kind === 'func').copies}枚・角度牌と結果牌 各4枚、計${rules.deckSize}枚。</p>
+    ${kinds.map(([k, label]) => `<h3>${label}</h3>${sizes.map(([sz, sl]) => `<div class="gallery sz-row-${sz}"><span class="gl">${sl}</span><span class="gtiles">${rules.types.filter((t) => t.kind === k).map((t) => tileHTML(t, { size: sz })).join('')}</span></div>`).join('')}`).join('')}`;
 }
 
 function rulesHTML() {
   const c = rules.config;
   const yaku = c.yaku.filter((y) => y.enabled).map((y) => `<li><span>${y.name}${y.yakuman ? '（役満候補）' : ''}${y.closedOnly ? '・門前限定' : ''}</span><b>${y.yakuman ? y.points : '+' + y.points}</b></li>`).join('');
   const sp = c.specialHands.filter((s) => s.enabled).map((s) => `<li><span>${s.name}（${s.angles.join('°・')}°）${s.closedOnly ? '・門前限定' : ''}</span><b>${s.points}</b></li>`).join('');
-  return `<h2>ルール（Ver.0.1 暫定）</h2>
+  return `<h2>ルール（暫定）</h2>
   <ul class="rules-list">
     <li><b>面子</b>：関数牌＋角度牌＋結果牌で正しい等式（例：sin 30° = 1/2）。</li>
     <li><b>和了</b>：8枚＋1枚＝9枚で3面子。または特殊和了。</li>
@@ -376,8 +424,14 @@ function computeHint() {
   const types = new Set(ids.map((id) => g.typeOf(id)));
   const partial = rules.melds.filter((m) => m.tiles.filter((t) => types.has(t)).length === 2).length;
   S.hintHighlight = new Set(best.used);
-  S.hintText = `完成している面子：<b>${best.n}組</b>（黄色の枠）／ あと1枚で完成する組み合わせ：<b>${partial}通り</b>
-    <button data-action="table" class="small">値表を見る</button>`;
+  // 役候補（公開情報のみ。必要な牌の種類や捨て牌は表示しない）
+  const cands = yakuCandidates(rules, g.viewFor(HUMAN));
+  const candHTML = cands.length
+    ? `<ol class="yaku-cands">${cands.map((c) => `<li><b>${c.name}</b><span class="yc-pts">${c.yakuman ? '役満' : `+${c.yakuPoints}`}</span>${c.closedOnly ? '<span class="tag closed">門前限定</span>' : ''}<span class="yc-miss">${c.missing === 0 ? '完成！' : `あと${c.missing}枚`}</span></li>`).join('')}</ol>`
+    : '<p class="yc-none">いま狙える役は見つかりません</p>';
+  S.hintText = `<div class="hint-basic">完成している面子：<b>${best.n}組</b>（黄色の枠）／ あと1枚で完成する組み合わせ：<b>${partial}通り</b></div>
+    <div class="hint-yaku"><span class="hy-title">狙える役（近い順）</span>${candHTML}</div>
+    <div class="hint-tools"><button data-action="table" class="small">値表を見る</button><button data-action="guide" class="small">役ガイド</button></div>`;
 }
 
 // ---------- 入力 ----------
@@ -404,7 +458,11 @@ app.addEventListener('click', (ev) => {
       if (S.hintText) { S.hintText = null; S.hintHighlight = null; } else { S.hintsUsed++; computeHint(); }
       render();
       break;
-    case 'rules': case 'table': case 'settings':
+    case 'guide-tab':
+      S.guideTab = el.dataset.tab;
+      render();
+      break;
+    case 'guide': case 'table': case 'settings':
       if (act === 'table' && S.modal !== 'table') S.hintsUsed++;
       S.modal = act; render(); break;
     case 'close': S.modal = g.pending() ? null : 'result'; render(); break;

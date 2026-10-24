@@ -418,6 +418,98 @@ async function roundReproduction(browser) {
   console.log('✓ ?seed=&round= で同じ局を再現');
 }
 
+// ---- Ver.0.2-A：役ガイド・役候補ヒント・牌表示 ----
+async function v02aFeatures(browser) {
+  const ctx = await newContext(browser, { viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  const errors = watchErrors(page);
+  await page.goto(`${LOCAL}?seed=9&speed=slow`);
+  await page.waitForSelector('.hand .tile.tap');
+
+  // (1) 役候補ヒント：最大3件、エンジンの yakuCandidates（公開情報）と一致、必要牌は表示しない
+  await page.locator('button[data-action="hint"]').tap();
+  await page.waitForSelector('.hint-yaku');
+  const shown = await page.locator('.yaku-cands li b').allInnerTexts();
+  const expected = await page.evaluate(async (base) => {
+    const { yakuCandidates } = await import(`${base}src/engine/yakuhint.js`);
+    const { S, rules } = window.__mathjong;
+    return yakuCandidates(rules, S.game.viewFor(0)).map((c) => ({ name: c.name, missing: c.missing }));
+  }, BASE);
+  assert.ok(shown.length >= 1 && shown.length <= 3, `役候補 ${shown.length}件`);
+  assert.deepEqual(shown, expected.map((c) => c.name));
+  const misses = await page.locator('.yaku-cands .yc-miss').allInnerTexts();
+  assert.deepEqual(misses, expected.map((c) => (c.missing === 0 ? '完成！' : `あと${c.missing}枚`)));
+  const yakuArea = await page.locator('.hint-yaku').innerText();
+  assert.equal(await page.locator('.hint-yaku .tile').count(), 0, 'ヒントに牌を表示しない');
+  assert.ok(!/[°√]|sin|cos|tan/.test(yakuArea), `ヒントに必要牌の情報がある: ${yakuArea}`);
+  // 既存のヒント（完成面子・あと1枚）は維持
+  assert.match(await page.locator('.hint-basic').innerText(), /完成している面子：\d組.*あと1枚で完成する組み合わせ：\d+通り/s);
+
+  // (2) 役ガイド：有効な役・特殊和了すべて、得点・鳴き可否は設定データと一致、数式例あり
+  await page.locator('.hint-tools [data-action="guide"]').tap();
+  const cards = await page.evaluate(() => [...document.querySelectorAll('.gy')].map((el) => ({
+    id: el.dataset.yaku, pts: el.querySelector('.gy-pts').textContent, closed: !!el.querySelector('.tag.closed'),
+    open: !!el.querySelector('.tag.open'), formulas: el.querySelectorAll('.gy-ex .formula').length, tiles: el.querySelectorAll('.gy-tiles .tile').length,
+  })));
+  const cfg = await page.evaluate(() => {
+    const c = window.__mathjong.rules.config;
+    return [...c.yaku.filter((y) => y.enabled), ...c.specialHands.filter((s) => s.enabled)].map((y) => ({ id: y.id, points: y.points, yakuman: !!y.yakuman, closedOnly: !!y.closedOnly, special: !!y.angles }));
+  });
+  assert.deepEqual(cards.map((c) => c.id), cfg.map((c) => c.id));
+  for (const [i, y] of cfg.entries()) {
+    const c = cards[i];
+    assert.equal(c.pts, y.yakuman ? `役満 ${y.points}` : `+${y.points}`, y.id);
+    assert.equal(c.closed, y.closedOnly, `${y.id} 門前限定`);
+    assert.equal(c.open, !y.closedOnly, `${y.id} 鳴いても可`);
+    if (y.special) assert.equal(c.tiles, 9, `${y.id} 例の牌`);
+    else assert.equal(c.formulas, 3, `${y.id} 数式例`);
+  }
+
+  // (3) 牌一覧：全33種×4サイズで中身が枠からはみ出さない、角度の数字が中央
+  await page.locator('[data-action="guide-tab"][data-tab="tiles"]').tap();
+  const m = await page.evaluate(() => [...document.querySelectorAll('.gallery .tile')].map((t) => {
+    const r = t.getBoundingClientRect();
+    let over = 0;
+    for (const el of t.querySelectorAll('*')) {
+      const q = el.getBoundingClientRect();
+      if (!q.width) continue;
+      over = Math.max(over, r.left - q.left, q.right - r.right, r.top - q.top, q.bottom - r.bottom);
+    }
+    const ang = t.querySelector('.ang');
+    const off = ang ? Math.abs((ang.getBoundingClientRect().left + ang.getBoundingClientRect().right) / 2 - (r.left + r.right) / 2) : 0;
+    return { label: t.getAttribute('aria-label'), size: [...t.classList].find((c) => c.startsWith('sz-')), over, off };
+  }));
+  assert.equal(m.length, 33 * 4);
+  const overflow = m.filter((x) => x.over > 0.5);
+  assert.deepEqual(overflow, [], 'はみ出している牌');
+  const offCentre = m.filter((x) => x.off > 1);
+  assert.deepEqual(offCentre, [], '角度の数字が中央からずれている');
+  // 分数線は分子・分母の広い方の幅以上
+  const bars = await page.evaluate(() => [...document.querySelectorAll('.gallery .frac')].map((f) => {
+    const w = f.getBoundingClientRect().width;
+    const den = f.querySelector('.den').getBoundingClientRect().width;
+    const num = f.querySelector('.num .rad, .num .int').getBoundingClientRect().width;
+    return den + 0.5 >= num && Math.abs(den - w) < 0.5;
+  }));
+  assert.ok(bars.length > 0 && bars.every(Boolean), '分数線の幅');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+
+  // (4) 公開サイト相当でも役候補ヒントとガイドが動く（テスト用フックなし）
+  const ctx2 = await newContext(browser, { viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+  const p2 = await ctx2.newPage();
+  const e2 = watchErrors(p2);
+  await p2.goto(`${PUBLIC}?seed=9`);
+  await p2.waitForSelector('.hand .tile.tap');
+  await p2.locator('button[data-action="hint"]').tap();
+  await p2.waitForSelector('.yaku-cands, .yc-none');
+  await p2.locator('button[data-action="guide"]').first().tap();
+  await p2.waitForSelector('.gy');
+  assert.deepEqual(e2, []);
+  await ctx2.close();
+  console.log('✓ Ver.0.2-A：役候補ヒント・役ガイド・牌表示（132枚 はみ出しなし）');
+}
+
 // 実機テスト用の固定 seed（docs/12）。「毎回右端のツモ牌を捨て、チー・ロンは見送る」と
 // 指定の手番で宣言ボタンが出ることを、公開サイト相当の画面で確認する。
 export const DEVICE_SEEDS = [
@@ -474,6 +566,7 @@ try {
   await fixedSeeds(browser);
   await roundReproduction(browser);
   await rapidTapGuard(browser);
+  await v02aFeatures(browser);
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
     await playDevice(browser, dev, 4242 + i * 101, rounds, stats);
