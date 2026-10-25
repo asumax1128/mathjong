@@ -77,13 +77,13 @@ async function invariants(page) {
   });
 }
 
-async function playDevice(browser, dev, seed, rounds, stats, { autopass = false } = {}) {
+async function playDevice(browser, dev, seed, rounds, stats, { autopass = false, mode = 'legacy' } = {}) {
   const ctx = await newContext(browser, { viewport: dev.viewport, isMobile: dev.isMobile, hasTouch: dev.hasTouch, deviceScaleFactor: 2 });
   // Ver.0.2-B：チーのオートパス ON で通しプレイ（チーのみの宣言は画面に出ない）
   if (autopass) await ctx.addInitScript(() => { try { localStorage.setItem('mj-chi-autopass', '1'); } catch { /* */ } });
   const page = await ctx.newPage();
   const errors = watchErrors(page);
-  await page.goto(`${LOCAL}?seed=${seed}&speed=test`);
+  await page.goto(`${LOCAL}?${mode === 'legacy' ? 'rules=legacy' : `mode=${mode}`}&seed=${seed}&speed=test`);
   const tap = (loc) => (dev.hasTouch ? loc.tap() : loc.click());
 
   // 操作バーが画面内（下端のホームインジケーター領域を除く）に収まっている
@@ -117,6 +117,29 @@ async function playDevice(browser, dev, seed, rounds, stats, { autopass = false 
         // 一部の局ではロンを見送って進行が止まらないことを確認する
         if (r % 3 === 2 && !stats.ronDeclined) { stats.ronDeclined++; await tap(pass); continue; }
         stats.ron++; await tap(ron); continue;
+      }
+      // Ver.0.3：ポン（偶数局はポンする、奇数局は見送る）。ポン後は公開刻子と手牌枚数を確認
+      const pon = page.locator('button[data-action="pon"]');
+      if (await pon.count()) {
+        if (r % 2 === 0) {
+          const before = await page.evaluate(() => window.__mathjong.S.game.hands[0].length);
+          await tap(pon);
+          await page.waitForTimeout(30);
+          const st = await page.evaluate(() => {
+            const g = window.__mathjong.S.game;
+            const m = g.melds[0][g.melds[0].length - 1];
+            return { hand: g.hands[0].length, phase: g.phase, cur: g.current, call: m && m.call, kind: m && m.kind };
+          });
+          if (st.phase === 'turn' && st.cur === 0 && st.call === 'pon') {
+            assert.equal(st.hand, before - 2, 'ポン後の手牌枚数');
+            assert.equal(st.kind, 'koutsu');
+            stats.pon = (stats.pon || 0) + 1;
+          }
+        } else {
+          stats.ponPassed = (stats.ponPassed || 0) + 1;
+          await tap(pass);
+        }
+        continue;
       }
       if (await chi.count()) {
         // 奇数局ではチーを実行（公開面子と手牌枚数を確認）、偶数局では見送る
@@ -215,7 +238,7 @@ async function scenario(browser, name, wall, check) {
   const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const page = await ctx.newPage();
   const errors = watchErrors(page);
-  await page.goto(`${LOCAL}?seed=1&speed=test`);
+  await page.goto(`${LOCAL}?rules=legacy&seed=1&speed=test`);
   await page.waitForSelector('.hand .tile');
   await page.evaluate((w) => { const m = window.__mathjong; m.S.nextPresetWall = w; m.startRound(); }, wall);
   const tsumo = page.locator('button[data-action="tsumo"]');
@@ -276,7 +299,7 @@ async function rapidTapGuard(browser) {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    await page.goto(`${LOCAL}?seed=77&speed=slow`);
+    await page.goto(`${LOCAL}?rules=legacy&seed=77&speed=slow`);
     await page.waitForSelector('.hand .tile.tap');
     await page.evaluate(() => { window.__clicks = 0; document.addEventListener('click', () => { window.__clicks++; }, true); });
     const target = page.locator('.hand .tile.tap').last();
@@ -302,7 +325,7 @@ async function rapidTapGuard(browser) {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    await page.goto(`${LOCAL}?seed=78&speed=slow`);
+    await page.goto(`${LOCAL}?rules=legacy&seed=78&speed=slow`);
     await page.waitForSelector('.hand .tile.tap');
     await page.evaluate(() => { window.__clicks = 0; document.addEventListener('click', () => { window.__clicks++; }, true); });
     const tile = page.locator('.hand .tile.tap').first();
@@ -412,14 +435,14 @@ async function badSpeeds(browser) {
 async function roundReproduction(browser) {
   const ctx = await newContext(browser, { viewport: { width: 390, height: 844 } });
   const page = await ctx.newPage();
-  await page.goto(`${LOCAL}?seed=321&speed=slow`);
+  await page.goto(`${LOCAL}?rules=legacy&seed=321&speed=slow`);
   await page.waitForSelector('.hand .tile');
   const viaNext = await page.evaluate(() => {
     const m = window.__mathjong;
     m.S.round = 3; m.S.dealer = 2; m.startRound();
     return { wall: m.S.game.wall.slice(), hands: m.S.game.hands.map((h) => h.slice()), dealer: m.S.game.dealer };
   });
-  await page.goto(`${LOCAL}?seed=321&round=3&speed=slow`);
+  await page.goto(`${LOCAL}?rules=legacy&seed=321&round=3&speed=slow`);
   await page.waitForSelector('.hand .tile');
   const direct = await page.evaluate(() => {
     const g = window.__mathjong.S.game;
@@ -435,7 +458,7 @@ async function v02aFeatures(browser) {
   const ctx = await newContext(browser, { viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
   const page = await ctx.newPage();
   const errors = watchErrors(page);
-  await page.goto(`${LOCAL}?seed=9&speed=slow`);
+  await page.goto(`${LOCAL}?rules=legacy&seed=9&speed=slow`);
   await page.waitForSelector('.hand .tile.tap');
 
   // (1) 役候補ヒント：最大3件、エンジンの yakuCandidates（公開情報）と一致、必要牌は表示しない
@@ -542,7 +565,7 @@ async function v02aAuditFixes(browser) {
     const ctx = await newContext(browser, { viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    await page.goto(`${LOCAL}?seed=9&speed=fast`);
+    await page.goto(`${LOCAL}?rules=legacy&seed=9&speed=fast`);
     await page.waitForSelector('.hand .tile.tap');
     await page.locator('button[data-action="hint"]').tap();
     let st = await hintMatchesEngine(page);
@@ -575,7 +598,7 @@ async function v02aAuditFixes(browser) {
     const ctx = await newContext(browser, { viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    await page.goto(`${LOCAL}?seed=1&speed=slow`);
+    await page.goto(`${LOCAL}?rules=legacy&seed=1&speed=slow`);
     await page.waitForSelector('.hand .tile');
     const wall = presetWall(['0', '30', '45', '60', '90', '120', '135', '150'], ['=-√3', '180', '180', '180', '=1/√3', '180'],
       [['sin', 'sin', 'sin', '0', '0', '90', '=-√3', '=-√3'], ['tan', 'tan', 'tan', '360', '360', '90', '=-1/√2', '=-1/√2'], ['cos', 'tan', '270', '270', '=-√3/2', '=-√3/2', '=1/√3', '=1/√3']]);
@@ -623,7 +646,7 @@ async function v02aAuditFixes(browser) {
     const ctx = await newContext(browser, { viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    await page.goto(`${LOCAL}?seed=12&speed=slow`);
+    await page.goto(`${LOCAL}?rules=legacy&seed=12&speed=slow`);
     await page.waitForSelector('.hand .tile.tap');
     const btn = await page.locator('button[data-action="hint"]').boundingBox();
     for (let i = 0; i < 7; i++) await page.touchscreen.tap(btn.x + btn.width / 2, btn.y + btn.height / 2);
@@ -661,12 +684,13 @@ async function v02aAuditFixes(browser) {
 const WEBKIT_EMULATION = '.gallery .gtiles { flex-shrink: 0 !important; }';
 async function guideFitsScreen(browser) {
   const sizes = [[320, 568], [375, 667], [390, 844], [430, 932], [568, 320], [667, 375], [844, 390], [932, 430]];
+  // Ver.0.3：数学Ⅱ（既定・弧度法・33種）と数学Ⅰ（度数法・25種）の両方
   for (const [w, h] of sizes) {
-    for (const emulateWebKit of [false, true]) {
+    for (const [emulateWebKit, mode] of [[false, 'math2'], [true, 'math2'], [false, 'math1'], [true, 'math1']]) {
       const ctx = await newContext(browser, { viewport: { width: w, height: h }, isMobile: true, hasTouch: true });
       const page = await ctx.newPage();
       const errors = watchErrors(page);
-      await page.goto(`${PUBLIC}?seed=9`);
+      await page.goto(`${PUBLIC}?seed=9${mode === 'math1' ? '&mode=math1' : ''}`);
       await page.waitForSelector('.hand .tile');
       if (emulateWebKit) await page.addStyleTag({ content: WEBKIT_EMULATION });
       await page.locator('button[data-action="guide"]').first().tap();
@@ -677,14 +701,14 @@ async function guideFitsScreen(browser) {
           const m = document.querySelector('.modal');
           return { sw: m.scrollWidth, cw: m.clientWidth, doc: document.documentElement.scrollWidth - innerWidth, mr: m.getBoundingClientRect().right };
         });
-        const where = `${w}x${h} ${emulateWebKit ? 'WebKit想定' : '通常'} ${tab}`;
+        const where = `${w}x${h} ${mode} ${emulateWebKit ? 'WebKit想定' : '通常'} ${tab}`;
         assert.ok(o.sw <= o.cw, `${where}: モーダルが横スクロールする（${o.sw} > ${o.cw}）`);
         assert.ok(o.doc <= 0, `${where}: ページが横スクロールする`);
         assert.ok(o.mr <= w + 0.5, `${where}: モーダルが画面外`);
       }
-      // 牌一覧：33種×4サイズ＝132枚が、縦スクロールで1枚ずつ全体を表示でき、左右に切れない
+      // 牌一覧：数学Ⅱ 33種／数学Ⅰ 25種 ×4サイズが、縦スクロールで1枚ずつ全体を表示でき、左右に切れない
       const n = await page.locator('.gallery .tile').count();
-      assert.equal(n, 132);
+      assert.equal(n, (mode === 'math1' ? 25 : 33) * 4);
       const bad = await page.evaluate(() => {
         const m = document.querySelector('.modal');
         const cs = getComputedStyle(m);
@@ -708,7 +732,7 @@ async function guideFitsScreen(browser) {
       await ctx.close();
     }
   }
-  console.log('✓ 牌一覧：320〜430px（縦・横）・WebKit想定でも132枚すべて画面内に表示');
+  console.log('✓ 牌一覧：320〜430px（縦・横）・WebKit想定でも数学Ⅱ132枚・数学Ⅰ100枚すべて画面内に表示');
 }
 
 // ---- Ver.0.2-D：手牌の並び替え（長押しドラッグ） ----
@@ -756,7 +780,7 @@ async function reorderPage(browser, query, viewport = { width: 390, height: 844 
   const ctx = await newContext(browser, { viewport, isMobile: true, hasTouch: true });
   const page = await ctx.newPage();
   const errors = watchErrors(page);
-  await page.goto(`${LOCAL}${query}`);
+  await page.goto(`${LOCAL}?rules=legacy&${query.slice(1)}`); // 旧規則の局面（互換）
   await page.waitForSelector('.hand .tile[data-id]');
   const cdp = await ctx.newCDPSession(page);
   await page.evaluate(() => { window.__clicks = 0; window.addEventListener('click', () => { window.__clicks++; }, true); });
@@ -908,7 +932,7 @@ async function handReorder(browser) {
     const ctx = await newContext(browser, { viewport: { width: 1366, height: 768 } });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    await page.goto(`${LOCAL}?seed=9&speed=slow`);
+    await page.goto(`${LOCAL}?rules=legacy&seed=9&speed=slow`);
     await page.waitForSelector('.hand .tile.tap');
     const order = await shownOrder(page);
     const A = order[3];
@@ -1293,7 +1317,7 @@ async function handReorderAuditFixes(browser) {
     const ctx = await newContext(browser, { viewport: { width: 1366, height: 768 } });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    await page.goto(`${LOCAL}?seed=9&speed=slow`);
+    await page.goto(`${LOCAL}?rules=legacy&seed=9&speed=slow`);
     await page.waitForSelector('.hand .tile.tap');
     const order = await shownOrder(page);
     const first = await tileBox(page, order[0]);
@@ -1335,7 +1359,7 @@ async function handReorderAuditFixes(browser) {
     const ctx = await newContext(browser, { viewport: { width: 1366, height: 768 } });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    await page.goto(`${LOCAL}?seed=9&speed=slow`);
+    await page.goto(`${LOCAL}?rules=legacy&seed=9&speed=slow`);
     await page.waitForSelector('.hand .tile.tap');
     const order = await shownOrder(page);
     const b = await tileBox(page, order[2]);
@@ -1496,7 +1520,7 @@ async function handReorderP22(browser) {
     const ctx = await newContext(browser, { viewport: { width: 1366, height: 768 }, hasTouch: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    await page.goto(`${LOCAL}?seed=9&speed=fast`);
+    await page.goto(`${LOCAL}?rules=legacy&seed=9&speed=fast`);
     await page.waitForSelector('.hand .tile.tap');
     // アプリが受理した click（捕捉段階の抑止を通過したもの）を数える
     await page.evaluate(() => { window.__appClicks = 0; document.getElementById('app').addEventListener('click', () => { window.__appClicks++; }); });
@@ -1608,7 +1632,7 @@ async function fixedSeeds(browser) {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    await page.goto(`${PUBLIC}?seed=${fx.seed}&speed=fast`);
+    await page.goto(`${LOCAL}?rules=legacy&seed=${fx.seed}&speed=fast`); // 旧規則での固定 seed（互換）
     let myTurns = 0;
     let seenAt = null;
     for (let i = 0; i < 200 && seenAt === null; i++) {
@@ -1651,7 +1675,7 @@ async function apPage(browser, { viewport = { width: 390, height: 844 }, init = 
   if (init) await ctx.addInitScript(init.fn, init.arg);
   const page = await ctx.newPage();
   const errors = watchErrors(page);
-  await page.goto(`${LOCAL}${query}`);
+  await page.goto(`${LOCAL}?rules=legacy&${query.slice(1)}`); // 旧規則の局面（互換）
   await page.waitForSelector('.hand .tile');
   return { ctx, page, errors };
 }
@@ -1748,7 +1772,7 @@ async function chiAutoPass(browser) {
     assert.equal(st.stored, null);
     await page.locator('button[data-action="settings"]').tap();
     assert.equal(await page.locator('input[data-action="chi-autopass"]').isChecked(), false);
-    assert.match(await page.locator('.setting-note').innerText(), /チーだけできる場面を自動で見送ります。ロン・ツモは自動で見送りません。/);
+    assert.match(await page.locator('.setting-note').innerText(), /チーだけできる場面を自動で見送ります。ロン・ポン・ツモは自動で見送りません/);
     await page.locator('.modal-actions button[data-action="close"]').tap();
     await apScene(page, apWall(AP_CHI_ONLY));
     await apToSeat3(page);
@@ -2112,10 +2136,10 @@ async function chiAutoPass(browser) {
   // (12) バージョン表示：ヘッダー・ページタイトル・再現情報
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    assert.equal(await page.title(), 'MATHJONG 数式麻雀 Ver.0.2.1');
-    assert.equal(await page.locator('.logo').innerText(), 'MATHJONG Ver.0.2.1');
+    assert.equal(await page.title(), 'MATHJONG 数式麻雀 Ver.0.3.0-a');
+    assert.equal(await page.locator('.logo').innerText(), 'MATHJONG Ver.0.3.0-a');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.2\.1 ・ エンジン v0\.1\.0/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.3\.0-a ・ エンジン v0\.3\.0-a/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -2165,6 +2189,336 @@ async function chiAutoPassLayouts(browser) {
   console.log(`✓ Ver.0.2-B：設定スイッチ（44px以上）・通知・ロン＋チーの表示（縦横 ${sizes.length}サイズ）`);
 }
 
+// ---- Ver.0.3-A：数学Ⅰ・Ⅱ／刻子・ポン・新役（固定局面のテストプレイ） ----
+// 数学Ⅰに無い角度（210°〜360°）を使わない他家の手
+const V3_O1 = ['sin', 'sin', 'sin', '0', '90', '90', '=-√3', '=√3'];
+const V3_O2 = ['=1/2', 'cos', '135', '180', '150', '150', '=√3', '=√3'];
+const V3_O3 = ['=-1', 'tan', 'tan', '120', '120', '90', '=-1/√2', '=-1/√2'];
+async function v3Page(browser, mode, { viewport = { width: 390, height: 844 }, query = '', init = null } = {}) {
+  const ctx = await newContext(browser, { viewport, isMobile: true, hasTouch: true });
+  if (init) await ctx.addInitScript(init.fn, init.arg);
+  const page = await ctx.newPage();
+  const errors = watchErrors(page);
+  await page.goto(`${LOCAL}?mode=${mode}&seed=1&speed=slow${query}`);
+  await page.waitForSelector('.hand .tile');
+  return { ctx, page, errors };
+}
+async function v3Scene(page, wall) {
+  await page.evaluate((w) => { const m = window.__mathjong; m.S.nextPresetWall = w; m.startRound(); }, wall);
+  await page.waitForSelector('.hand .tile.tap');
+}
+const v3State = (page) => page.evaluate(() => {
+  const { S, rules } = window.__mathjong;
+  const g = S.game;
+  g.checkInvariants();
+  const p = g.pending();
+  return {
+    p: p && { seat: p.seat, type: p.type, ron: p.ron ?? null, chi: p.chi ? p.chi.length : null, pon: p ? !!p.pon : null },
+    melds0: g.melds[0].map((m) => `${m.call}:${m.kind}`), hand0: g.hands[0].length, ended: !p,
+    result: g.result && { winner: g.result.winner, how: g.result.how, points: g.result.points, yaku: g.result.analysis ? g.result.analysis.yaku.map((y) => y.id) : [] },
+    buttons: [...document.querySelectorAll('.bar button[data-action]')].map((b) => b.dataset.action),
+    passText: (document.querySelector('.bar button[data-action="pass"]') || {}).textContent?.trim() || null,
+    status: (document.querySelector('.bar .actions .status') || {}).textContent?.trim() || '',
+    mode: rules.config.mode, deck: rules.deckSize, autoPass: S.autoPass.count,
+  };
+});
+// 自分の宣言待ちで止まるまで、他家の行動（AI のタイマー）を待つ
+const v3WaitHuman = (page) => page.waitForFunction(() => { const p = window.__mathjong.S.game.pending(); return !p || p.seat === 0; }, null, { timeout: 8000 });
+
+// 和了形ごとのツモ和了（自分が親、配牌8枚＋最初のツモ）
+async function v3Tsumo(browser, mode, name, hand, draw, check) {
+  const { ctx, page, errors } = await v3Page(browser, mode);
+  await v3Scene(page, presetWall(hand, [draw], [V3_O1, V3_O2, V3_O3]));
+  await page.locator('button[data-action="tsumo"]').tap();
+  await page.waitForSelector('.overlay .result');
+  const text = await page.locator('.overlay .result').innerText();
+  const kinds = await page.locator('.overlay .formulas li').evaluateAll((els) => els.map((e) => e.className));
+  check(text, kinds);
+  assert.deepEqual(errors, [], name);
+  await ctx.close();
+}
+
+async function v03Rules(browser) {
+  // (1) 和了形・新役（ツモ和了の結果画面）
+  await v3Tsumo(browser, 'math1', '数式3組', ['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], '=1', (t, k) => {
+    assert.deepEqual(k, ['formula', 'formula', 'formula']);
+    assert.match(t, /三関制覇/);
+  });
+  await v3Tsumo(browser, 'math1', '刻子3組（対々和・三暗刻）', ['=0', '=0', '=0', '45', '45', '45', 'cos', 'cos'], 'cos', (t, k) => {
+    assert.deepEqual(k, ['koutsu', 'koutsu', 'koutsu']);
+    assert.match(t, /対々和/);
+    assert.match(t, /三暗刻/);
+    assert.match(t, /合計\s*9点/);
+    assert.match(t, /刻子/);
+  });
+  await v3Tsumo(browser, 'math2', '数式2＋刻子1（門前・役なし）', ['sin', '30', '=1/2', 'cos', '180', '=-1', '45', '45'], '45', (t, k) => {
+    assert.deepEqual(k.sort(), ['formula', 'formula', 'koutsu']);
+    assert.match(t, /役なし（門前のため和了可）/);
+    assert.match(t, /合計\s*1点/);
+    assert.match(t, /混合形/);
+    assert.match(t, /sin\s*π\s*6/, '数学Ⅱの数式は弧度法');
+  });
+  await v3Tsumo(browser, 'math1', '数式1＋刻子2', ['sin', '30', '=1/2', '45', '45', '45', '=0', '=0'], '=0', (t, k) => {
+    assert.deepEqual(k.sort(), ['formula', 'koutsu', 'koutsu']);
+    assert.match(t, /合計\s*1点/);
+  });
+  for (const [fn, name] of [['sin', '正弦一色'], ['cos', '余弦一色'], ['tan', '正接一色']]) {
+    // 数学Ⅰ（関数牌各12枚）：自分の9枚＋他家の3枚＝12枚
+    await v3Tsumo(browser, 'math1', name, Array(8).fill(fn), fn, (t) => {
+      assert.match(t, new RegExp(name));
+      assert.match(t, /役満/);
+      assert.match(t, /合計\s*16点/);
+      assert.ok(!/対々和/.test(t), '役満のとき通常役は加算しない');
+    });
+  }
+  await v3Tsumo(browser, 'math1', '九角無双', ['0', '30', '45', '60', '90', '120', '135', '150'], '180', (t) => {
+    assert.match(t, /九角無双/);
+    assert.match(t, /16点/);
+  });
+  await v3Tsumo(browser, 'math2', '九角無双（弧度法）', ['0', '30', '45', '60', '90', '120', '135', '150'], '180', (t) => {
+    assert.match(t, /九角無双/);
+    assert.match(t, /0・π\/6・π\/4・π\/3・π\/2・2π\/3・3π\/4・5π\/6・π/);
+  });
+  console.log('✓ Ver.0.3：和了形（数式3・刻子3・数式2＋刻子1・数式1＋刻子2）・対々和・三暗刻・正弦/余弦/正接一色・九角無双（数学Ⅰ・Ⅱ）');
+
+  // (2) ポン → 打牌 → チー（連続して鳴く）→ 鳴きは合計2回まで（数学Ⅰ）
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(['=1/2', '=1/2', '0', '0', '135', '=-√3', 'tan', 'cos'],
+      ['45', '=-1/√3', '=-√3/2', '=-1/√2', '=1/√3', '=1/√2', '60', '30', '=√3/2'], [V3_O1, V3_O2, V3_O3]));
+    await apDiscardDrawn(page);
+    await apForce(page, 1);
+    await apForce(page, 2, 'v:1/2');
+    let st = await v3State(page);
+    assert.deepEqual(st.p, { seat: 0, type: 'claim', ron: false, chi: 0, pon: true }, '対面の 1/2 をポンできる');
+    assert.deepEqual(st.buttons, ['pon', 'pass']);
+    assert.match(await page.locator('button[data-action="pon"]').innerText(), /ポン/);
+    await page.locator('button[data-action="pon"]').tap();
+    st = await v3State(page);
+    assert.deepEqual(st.melds0, ['pon:koutsu']);
+    assert.equal(st.hand0, 6);
+    assert.equal(st.status, 'ポン後：捨てる牌を選択');
+    assert.equal(await page.locator('.melds.mine .meld.pon .tile').count(), 3, '公開刻子を表示');
+    assert.match(await page.locator('.msg').innerText(), /あなた がポン/);
+    // 打牌（=-√3）→ 上家（seat3）は飛ばされ、下家の手番
+    const t1 = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'v:-√3'); });
+    await page.locator(`.hand .tile[data-id="${t1}"]`).tap();
+    await page.locator(`.hand .tile[data-id="${t1}"]`).tap();
+    st = await v3State(page);
+    assert.deepEqual([st.p.seat, st.p.type], [1, 'turn'], 'ポンした人の次（下家）の手番');
+    await apForce(page, 1);
+    await apForce(page, 2);
+    await apForce(page, 3, 'v:-1');
+    st = await v3State(page);
+    assert.deepEqual(st.p, { seat: 0, type: 'claim', ron: false, chi: 1, pon: false }, 'tan 135° = −1 のチー');
+    await page.locator('button[data-action="chi"]').tap();
+    st = await v3State(page);
+    assert.deepEqual(st.melds0, ['pon:koutsu', 'chi:formula']);
+    assert.equal(st.status, 'チー後：捨てる牌を選択');
+    const t2 = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'f:cos'); });
+    await page.locator(`.hand .tile[data-id="${t2}"]`).tap();
+    await page.locator(`.hand .tile[data-id="${t2}"]`).tap();
+    st = await v3State(page);
+    assert.equal(st.hand0, 2);
+    // 2回鳴いた後：0° の対子があっても、下家の 0° ではポンできない（宣言待ちにならない）
+    await apForce(page, 1, 'a:0');
+    st = await v3State(page);
+    assert.deepEqual([st.p.seat, st.p.type], [2, 'turn'], '鳴きは合計2回まで（3回目のポンはない）');
+    assert.ok(!st.buttons.includes('pon'));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.3：ポン（公開刻子・手番の飛び越し）→ チーと連続して鳴いた後の進行・鳴きは合計2回まで');
+
+  // (3) ポン＋チーの同時（上家の打牌）：OFF はポン・チー・見送る、ON はポン・見送る（チーも見送ります）。ポンは自動パスしない
+  for (const on of [false, true]) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    if (on) await apSetting(page, true);
+    await v3Scene(page, presetWall(['=1/2', '=1/2', 'sin', '30', '0', '0', '135', '=-√3'], ['45', '=-1/√3', '=-√3/2', '=-1/√2'],
+      [V3_O1, ['=1/√3', 'cos', 'cos', '180', '150', '150', '=√3', '=√3'], ['=1/2', 'tan', 'tan', '120', '120', '90', '=-1/√2', '=-1/√2']]));
+    await page.locator('button[data-action="hint"]').tap();
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    const st = await v3State(page);
+    assert.deepEqual(st.p, { seat: 0, type: 'claim', ron: false, chi: 1, pon: true });
+    assert.equal(st.autoPass, 0, 'ポンが可能なら自動パスしない');
+    if (on) {
+      assert.deepEqual(st.buttons, ['pon', 'pass']);
+      assert.match(st.passText, /チーも見送ります/);
+    } else {
+      assert.deepEqual(st.buttons, ['pon', 'chi', 'pass']);
+    }
+    // 役候補ヒントは、表示している選択肢と同じ経路
+    const h = await page.evaluate(async ([base, on]) => {
+      const { yakuCandidates, claimForSeat } = await import(`${base}src/engine/yakuhint.js`);
+      const { claimPendingForHint } = await import(`${base}src/ui/autopass.js`);
+      const { S, rules } = window.__mathjong;
+      const g = S.game;
+      const c = claimForSeat(claimPendingForHint(g.pending(), on), 0, (id) => g.typeOf(id));
+      const exp = yakuCandidates(rules, g.viewFor(0), { claim: c }).map((x) => `${x.name}|${x.missing === 0 ? '完成！' : `あと${x.missing}枚`}`);
+      const shown = [...document.querySelectorAll('.yaku-cands li')].map((li) => `${li.querySelector('b').textContent}|${li.querySelector('.yc-miss').textContent}`);
+      return { exp, shown, chiRoute: c.chiMelds.length, ponRoute: c.ponMeld !== null };
+    }, [BASE, on]);
+    assert.deepEqual(h.shown, h.exp, 'ヒントが表示中の宣言経路と一致');
+    assert.equal(h.chiRoute, on ? 0 : 1);
+    assert.equal(h.ponRoute, true);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // ON・チーだけ（数学Ⅰ）：自動パス
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await apSetting(page, true);
+    await v3Scene(page, presetWall(['=1/2', '45', 'sin', '30', '0', '0', '135', '=-√3'], ['45', '=-1/√3', '=-√3/2', '=-1/√2'],
+      [V3_O1, ['=1/√3', 'cos', 'cos', '180', '150', '150', '=√3', '=√3'], ['=1/2', 'tan', 'tan', '120', '120', '90', '=-1/√2', '=-1/√2']]));
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    const st = await v3State(page);
+    assert.equal(st.autoPass, 1, 'チーだけなら自動パス');
+    assert.deepEqual([st.p.seat, st.p.type], [0, 'turn']);
+    assert.equal(st.status, 'チーを自動で見送りました');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.3：ポン＋チー同時（OFF：ポン・チー／ON：ポンを残しチーを見送り対象）・ポンは自動パスしない・ヒントの経路一致');
+
+  // (4) ロン＞ポン：自分がポンを選んでも、後続の他家のロンが優先（ポンは取り消し）
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(['=1/2', '=1/2', '0', '0', '135', '=-√3', 'tan', 'cos'], ['45', '=-1/√3', '=-√3/2', '=-1/√2'],
+      [['cos', '180', '=-1', 'tan', '45', '=1', 'sin', '30'], ['=1/√3', 'cos', 'cos', '180', '150', '150', '=√3', '=√3'], ['=1/2', 'tan', 'tan', '120', '120', '90', '=-1/√2', '=-1/√2']]));
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    let st = await v3State(page);
+    assert.deepEqual(st.p, { seat: 0, type: 'claim', ron: false, chi: 0, pon: true });
+    await page.locator('button[data-action="pon"]').tap();
+    st = await v3State(page);
+    assert.deepEqual(st.melds0, [], 'ロン判断が終わるまでポンは確定しない');
+    await page.waitForSelector('.overlay .result', { timeout: 8000 });
+    st = await v3State(page);
+    assert.deepEqual([st.result.winner, st.result.how], [1, 'ron'], '下家のロンが優先');
+    assert.deepEqual(st.melds0, [], 'ポンは取り消し');
+    assert.equal(st.hand0, 8);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (5) 自分のロンの機会は、先に判断した他家のポンで失われない
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(['cos', '180', '=-1', 'tan', '45', '=1', 'sin', '30'], ['=1/2', '=-1/√3', '=-√3/2', '=-1/√2'],
+      [['=1/2', 'cos', 'sin', '0', '90', '90', '=-√3', '=√3'], ['=1/2', '=1/2', 'cos', '135', '150', '150', '=√3', '=-1/√3'], ['=1/√3', 'tan', 'tan', '120', '120', '90', '=-1/√2', '=-1/√2']]));
+    await apDiscardDrawn(page);
+    await apForce(page, 1, 'v:1/2'); // 対面（1/2 の対子）がポン判断 → 上家 → 自分のロン
+    await v3WaitHuman(page);
+    const st = await v3State(page);
+    assert.deepEqual(st.p, { seat: 0, type: 'claim', ron: true, chi: 0, pon: false }, '自分にはロンだけ（他家のポンより優先）');
+    assert.deepEqual(st.buttons, ['ron', 'pass']);
+    await page.locator('button[data-action="ron"]').tap();
+    await page.waitForSelector('.overlay .result');
+    assert.match(await page.locator('.overlay .result').innerText(), /あなた の和了 ロン/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.3：ロン＞ポン（自分のポンは後続ロンで取り消し／他家のポンで自分のロンは失われない）');
+
+  // (6) 数学Ⅰ：180°を超える牌が出ない・度数法。数学Ⅱ：弧度法の表示
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    const st = await page.evaluate(() => {
+      const { S, rules } = window.__mathjong;
+      const degs = S.game.tileType.map((t) => rules.types[t]).filter((t) => t.kind === 'angle').map((t) => t.deg);
+      return { max: Math.max(...degs), n: S.game.tileType.length, labels: [...document.querySelectorAll('.tile.t-angle')].map((e) => e.getAttribute('aria-label')) };
+    });
+    assert.equal(st.max, 180);
+    assert.equal(st.n, 124);
+    assert.ok(st.labels.every((l) => /^\d+°$/.test(l)), st.labels.join());
+    assert.equal(await page.locator('.top .mode').innerText(), '数Ⅰ');
+    await page.locator('button[data-action="hint"]').tap();
+    await page.locator('.hint-tools [data-action="table"]').tap();
+    assert.equal(await page.locator('.values tr').count(), 10, '値表は0°〜180°の9行');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math2');
+    await page.locator('button[data-action="guide"]').first().tap();
+    await page.locator('[data-action="guide-tab"][data-tab="tiles"]').tap();
+    const labels = await page.locator('.gallery.sz-row-l .tile.t-angle').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
+    assert.deepEqual(labels, ['0', 'π/6', 'π/4', 'π/3', 'π/2', '2π/3', '3π/4', '5π/6', 'π', '7π/6', '5π/4', '4π/3', '3π/2', '5π/3', '7π/4', '11π/6', '2π']);
+    // 縦組みの分数（分子 π・分母 6）、0 と 2π は別の牌
+    const frac = await page.locator('.gallery.sz-row-l .tile[aria-label="π/6"] .afrac').evaluate((e) => ({ num: e.querySelector('.num').textContent, den: e.querySelector('.den').textContent, dir: getComputedStyle(e).flexDirection }));
+    assert.deepEqual(frac, { num: 'π', den: '6', dir: 'column' });
+    assert.equal(await page.locator('.top .mode').innerText(), '数Ⅱ');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.3：数学Ⅰは0°〜180°（度数法・124枚）、数学Ⅱは弧度法（縦組みの分数・0 と 2π は別の牌）');
+
+  // (7) モードの選択：進行中の局は変わらず、「新しい対局」で切り替わる。保存して再読み込み後も維持、次の局でも維持
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?seed=3&speed=test`);
+    await page.waitForSelector('.hand .tile');
+    const info = () => page.evaluate(() => ({ mode: window.__mathjong.rules.config.mode, deck: window.__mathjong.S.game.tileType.length, stored: localStorage.getItem('mj-mode') }));
+    assert.deepEqual(await info(), { mode: 'math2', deck: 168, stored: null }, '既定は数学Ⅱ');
+    await page.locator('button[data-action="settings"]').tap();
+    await page.locator('label.setting.radio', { hasText: '数学Ⅰ' }).tap();
+    assert.match(await page.locator('.mode-note').innerText(), /新しい対局」で切り替わります/);
+    let st = await info();
+    assert.deepEqual([st.mode, st.deck, st.stored], ['math2', 168, 'math1'], '進行中の局は変えない');
+    await page.locator('button[data-action="reset"]').tap();
+    st = await info();
+    assert.deepEqual([st.mode, st.deck], ['math1', 124], '新しい対局で数学Ⅰ');
+    await page.reload();
+    await page.waitForSelector('.hand .tile');
+    assert.equal((await info()).mode, 'math1', '再読み込み後も数学Ⅰ');
+    await page.evaluate(() => { const { S, startRound } = window.__mathjong; S.round++; S.dealer = (S.dealer + 1) % 4; startRound(); });
+    assert.equal((await info()).mode, 'math1', '次の局でも維持');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.3：モード選択（進行中の局は不変・新しい対局で反映・保存/再読み込み・次の局で維持）');
+
+  // (8) ガイド：新役（刻子の数式例）・数学Ⅰで成立しない役は出さない・ルールにポンと優先順位
+  for (const mode of ['math1', 'math2']) {
+    const { ctx, page, errors } = await v3Page(browser, mode);
+    await page.locator('button[data-action="guide"]').first().tap();
+    const ids = await page.locator('.gy').evaluateAll((els) => els.map((e) => e.dataset.yaku));
+    for (const id of ['toitoi', 'sanankou', 'sinIsshoku', 'cosIsshoku', 'tanIsshoku', 'kyukaku']) assert.ok(ids.includes(id), `${mode} ${id}`);
+    assert.equal(ids.includes('shougen3'), mode === 'math2');
+    assert.equal(await page.locator('.gy[data-yaku="toitoi"] .formula.koutsu').count(), 3);
+    assert.match(await page.locator('.gy[data-yaku="sanankou"]').innerText(), /ロンで最後の刻子を完成させた場合も成立/);
+    await page.locator('[data-action="guide-tab"][data-tab="rules"]').tap();
+    const rulesText = await page.locator('.rules-list').innerText();
+    assert.match(rulesText, /ロン ＞ ポン ＞ チー/);
+    assert.match(rulesText, /雀頭は不要/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.3：ガイド（新役・刻子の数式例・数学Ⅰで成立しない役は非表示・ルールの優先順位）');
+
+  // (9) 数学Ⅰ・Ⅱで長押しの並び替え・自動整列・通常の打牌
+  for (const mode of ['math1', 'math2']) {
+    const { ctx, page, errors } = await v3Page(browser, mode, { query: '' });
+    const cdp = await ctx.newCDPSession(page);
+    await page.waitForSelector('.hand .tile.tap');
+    const order = await shownOrder(page);
+    const moved = await dragToIndex(page, cdp, order[0], 5);
+    assert.deepEqual(await shownOrder(page), moved, `${mode} 並び替え`);
+    await page.locator('button[data-action="autosort"]').tap();
+    const t = (await shownOrder(page))[2];
+    await page.locator(`.hand .tile[data-id="${t}"]`).tap();
+    await page.locator(`.hand .tile[data-id="${t}"]`).tap();
+    const mine = await page.evaluate(() => window.__mathjong.S.game.rivers[0].map((r) => r.id));
+    assert.deepEqual(mine, [t], `${mode} 打牌`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.3：数学Ⅰ・Ⅱで長押し並び替え・自動整列・通常の打牌');
+}
+
 const server = await startServer(0, { base: BASE, host: '127.0.0.1' });
 PORT = server.address().port;
 LOCAL = `http://localhost:${PORT}${BASE}`;
@@ -2197,14 +2551,20 @@ try {
   await handReorderP22(browser);
   await chiAutoPass(browser);
   await chiAutoPassLayouts(browser);
+  await v03Rules(browser);
+  // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
-    await playDevice(browser, dev, 4242 + i * 101, rounds, stats);
-    console.log(`✓ ${dev.name}: ${rounds}局 完走`);
+    const mode = i % 2 === 0 ? 'math2' : 'math1';
+    await playDevice(browser, dev, 4242 + i * 101, rounds, stats, { mode });
+    console.log(`✓ ${dev.name}: ${mode === 'math1' ? '数学Ⅰ' : '数学Ⅱ'} ${rounds}局 完走`);
   }
+  await playDevice(browser, DEVICES[0], 4242, 2, stats, { mode: 'legacy' });
+  console.log(`✓ ${DEVICES[0].name}: 旧規則（Ver.0.2.1 互換）2局 完走`);
   for (const [i, dev] of [DEVICES[0], { ...DEVICES[1], name: 'Android 横 (915×412)', viewport: { width: 915, height: 412 } }].entries()) {
-    await playDevice(browser, dev, 5151 + i * 37, 3, stats, { autopass: true });
-    console.log(`✓ ${dev.name}: チーのオートパス ON で3局 完走`);
+    const mode = i === 0 ? 'math1' : 'math2';
+    await playDevice(browser, dev, 5151 + i * 37, 3, stats, { autopass: true, mode });
+    console.log(`✓ ${dev.name}: チーのオートパス ON・${mode === 'math1' ? '数学Ⅰ' : '数学Ⅱ'}で3局 完走`);
   }
   console.log(JSON.stringify({ ...stats, seconds: (Date.now() - t0) / 1000 }));
   console.log('E2E OK');

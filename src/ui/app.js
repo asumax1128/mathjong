@@ -1,11 +1,11 @@
-// MATHJONG Ver.0.1 画面制御。ゲームの判定はすべて engine 側で行い、ここは表示と入力だけを担当する。
+// MATHJONG 画面制御。ゲームの判定はすべて engine 側で行い、ここは表示と入力だけを担当する。
 import { createRules } from '../engine/rules.js';
-import { DEFAULT_CONFIG, ENGINE_VERSION } from '../engine/config.js';
+import { makeConfig, MODES, DEFAULT_MODE, ENGINE_VERSION } from '../engine/config.js';
 import { Game } from '../engine/game.js';
 import { decide, applyAction, PERSONALITIES } from '../engine/ai.js';
 import { createRng } from '../engine/rng.js';
 import { trigExact } from '../engine/exact.js';
-import { tileHTML, formulaHTML, backHTML, valueHTML } from './render.js';
+import { tileHTML, formulaHTML, backHTML, valueHTML, angleHTML, angleText } from './render.js';
 import { yakuCandidates, warmUp, claimForSeat } from '../engine/yakuhint.js';
 import { hintKey } from './hintstate.js';
 import { reconcileOrder, defaultOrder } from './handorder.js';
@@ -16,7 +16,7 @@ import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, intParam } fr
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
-const APP_VERSION = '0.2.1';
+const APP_VERSION = '0.3.0-a';
 document.title = `MATHJONG 数式麻雀 Ver.${APP_VERSION}`;
 const params = new URLSearchParams(location.search);
 // テスト専用機能（山の指定・AI待ち時間0）はローカル開発環境でのみ有効。公開サイトでは無効。
@@ -24,7 +24,17 @@ const IS_LOCAL = isLocalHost(location.hostname);
 // ?seed=（0〜999999999の整数）と ?round=（1〜999）だけを受け付ける。不正値は無視。
 const seedParam = intParam(params.get('seed'), 999999999);
 const roundParam = intParam(params.get('round'), 999);
-const rules = createRules(DEFAULT_CONFIG);
+// モード（Ver.0.3）：数学Ⅰ（度数法・124枚）／数学Ⅱ（弧度法・168枚）。新しい対局の開始時にだけ切り替える。
+// ?mode=math1|math2 または保存値（mj-mode）。?rules=legacy はローカル開発環境だけの互換テスト用（Ver.0.2.1 の規則）。
+const MODE_KEY = 'mj-mode';
+const parseMode = (v) => (v === 'math1' || v === 'math2' ? v : null);
+const LEGACY = IS_LOCAL && params.get('rules') === 'legacy';
+const rulesCache = {};
+function rulesForMode(mode) {
+  const key = LEGACY ? 'legacy' : mode;
+  return rulesCache[key] || (rulesCache[key] = createRules(LEGACY ? makeConfig({ legacy: true }) : makeConfig({ mode })));
+}
+const modeLabel = (r) => (MODES[r.config.mode] ? MODES[r.config.mode].label : '旧規則');
 const HUMAN = 0;
 const POS = ['自分', '下家', '対面', '上家'];
 const PLAYERS = [
@@ -56,6 +66,10 @@ const S = {
 };
 
 S.speed = resolveSpeed(params.get('speed'), store.get('mj-speed', null), IS_LOCAL);
+// 対局中のモード（S.mode）と、次の新しい対局で使うモード（S.nextMode）
+S.mode = parseMode(params.get('mode')) || parseMode(store.get(MODE_KEY, null)) || DEFAULT_MODE;
+S.nextMode = S.mode;
+let rules = rulesForMode(S.mode);
 // チーのオートパス（Ver.0.2-B）。保存値 '1' だけが ON、それ以外・保存不可は OFF。
 S.chiAutoPass = parseChiAutoPass(store.get(CHI_AUTOPASS_KEY, null));
 // 自動パスの回数（手動操作の S.input とは別に数える）と、次の自分の手番に出す通知
@@ -201,6 +215,7 @@ function lastEventText() {
     const e = g.events[i];
     if (e.type === 'discard') return `${nameOf(e.seat)} が ${tileHTML(T(g.typeOf(e.tile)), { size: 's' })} を捨てました`;
     if (e.type === 'chi') return `${nameOf(e.seat)} がチー： ${formulaHTML(rules, e.meld)}`;
+    if (e.type === 'pon') return `${nameOf(e.seat)} がポン： ${formulaHTML(rules, e.meld)}`;
     if (e.type === 'win') return `${nameOf(e.seat)} の${e.how === 'ron' ? 'ロン' : 'ツモ'}和了！`;
     if (e.type === 'exhaustive-draw') return '流局（山がなくなりました）';
   }
@@ -211,7 +226,7 @@ function meldsHTML(seat, size) {
   const g = S.game;
   return g.melds[seat].map((m) => {
     const tiles = m.tiles.map((id) => tileHTML(T(g.typeOf(id)), { size, cls: id === m.claimed ? 'claimed' : '' })).join('');
-    return `<span class="meld" title="${rules.melds[m.meld].key}">${tiles}</span>`;
+    return `<span class="meld ${m.call === 'pon' ? 'pon' : 'chi'}" title="${m.call === 'pon' ? 'ポン' : 'チー'}">${tiles}</span>`;
   }).join('');
 }
 
@@ -275,6 +290,16 @@ function handHTML() {
     <div class="hand-help"><span>長押しで並び替え・タップ2回で捨てる</span><button data-action="autosort" class="small">自動整列</button></div>`;
 }
 
+// 直前の鳴き（チー／ポン）の名前
+function lastCallName(g) {
+  for (let i = g.events.length - 1; i >= 0; i--) {
+    const t = g.events[i].type;
+    if (t === 'pon') return 'ポン';
+    if (t === 'chi') return 'チー';
+  }
+  return 'チー';
+}
+
 function actionsHTML() {
   const g = S.game;
   const p = g.pending();
@@ -289,7 +314,7 @@ function actionsHTML() {
     // チーを自動で見送った後の最初の手番だけ、通常の案内の代わりに通知を出す（状態欄の大きさは変えない）
     const notice = S.autoPass.noticeKey === stateKey() ? 'チーを自動で見送りました' : null;
     const text = p.canTsumo ? (notice ? `${notice}・和了できます！` : '和了できます！')
-      : notice || (g.justDrew ? 'あなたの番：捨てる牌を選択' : 'チー後：捨てる牌を選択');
+      : notice || (g.justDrew ? 'あなたの番：捨てる牌を選択' : `${lastCallName(g)}後：捨てる牌を選択`);
     return `<div class="actions">
       <span class="status${notice ? ' autopass-notice' : ''}">${text}</span>
       ${tsumo}
@@ -300,6 +325,7 @@ function actionsHTML() {
   // 表示する選択肢はこの宣言の方針で決める（OFF なら従来どおり全部。ON でロン＋チーならチーを出さない）
   const v = visibleClaimActions(p, claimAutoPassOn());
   const ron = v.ron ? '<button data-action="ron" class="win">ロン</button>' : '';
+  const pon = v.pon ? `<button data-action="pon" class="pon">ポン ${formulaHTML(rules, v.pon.meld)}</button>` : '';
   const chi = v.chi.map((o) => {
     const m = rules.melds[o.meld];
     return `<button data-action="chi" data-opt="${o.index}" class="chi">チー ${formulaHTML(rules, m.idx)}</button>`;
@@ -309,7 +335,7 @@ function actionsHTML() {
     : `<button data-action="pass">${v.passLabel}</button>`;
   return `<div class="actions claim">
     <span class="status">${POS[p.from]} ${nameOf(p.from)} の打牌 ${tile}</span>
-    ${ron}${chi}
+    ${ron}${pon}${chi}
     ${pass}
   </div>`;
 }
@@ -318,7 +344,7 @@ function headerHTML() {
   const g = S.game;
   return `<header class="top">
     <span class="logo">MATHJONG <small>Ver.${APP_VERSION}</small></span>
-    <span class="info">第${S.round}局 <span class="wall" aria-label="山の残り">山 <b>${g.wall.length}</b></span></span>
+    <span class="info"><span class="mode" title="${modeLabel(rules)}">${({ math1: '数Ⅰ', math2: '数Ⅱ' })[rules.config.mode] || '旧'}</span> 第${S.round}局 <span class="wall" aria-label="山の残り">山 <b>${g.wall.length}</b></span></span>
     <span class="tools">
       <button data-action="hint" class="small">ヒント</button>
       <button data-action="guide" class="small">ガイド</button>
@@ -393,20 +419,23 @@ function resultHTML() {
     head = `<h2>${nameOf(r.winner)} の和了 <small>${how}</small></h2>`;
     if (a.kind === 'special') {
       const sp = rules.config.specialHands.find((s) => s.id === a.special);
-      detail = `<p class="special">特殊和了：角度牌9種類 ${sp.angles.map((d) => `${d}°`).join('・')}</p>
+      detail = `<p class="special">特殊和了：角度牌9種類 ${sp.angles.map((d) => angleText(rules.typeByKey.get(`a:${d}`))).join('・')}</p>
         <div class="tiles">${g.hands[r.winner].slice().sort((x, y) => g.typeOf(x) - g.typeOf(y)).map((id) => tileHTML(T(g.typeOf(id)), { size: 'm' })).join('')}</div>`;
     } else {
-      const exposed = new Set(a.exposedMelds);
-      detail = `<ol class="formulas">${a.melds.map((mi) => {
+      // 先頭の exposedMelds.length 組が公開面子（g.melds と同じ順）。チー／ポンの別を表示する。
+      const calls = g.melds[r.winner];
+      detail = `<ol class="formulas">${a.melds.map((mi, i) => {
         const m = rules.melds[mi];
         const tiles = m.tiles.map((t) => tileHTML(T(t), { size: 's' })).join('');
-        return `<li><span class="tiles">${tiles}</span>${formulaHTML(rules, mi)}${exposed.has(mi) ? '<span class="tag">チー</span>' : ''}</li>`;
+        const tag = i < a.exposedMelds.length ? `<span class="tag">${calls[i] && calls[i].call === 'pon' ? 'ポン' : 'チー'}</span>` : '';
+        return `<li class="${m.kind}"><span class="tiles">${tiles}</span>${formulaHTML(rules, mi)}${tag}</li>`;
       }).join('')}</ol>`;
     }
     const base = a.yakuman ? '' : `<li><span>通常和了</span><b>${rules.config.scoring.base}</b></li>`;
     const yaku = a.yaku.map((y) => `<li class="${y.yakuman ? 'yakuman' : ''}"><span>${y.name}${y.yakuman ? '（役満）' : ''}</span><b>${a.yakuman ? '' : '+'}${y.points}</b></li>`).join('');
     detail += `<ul class="yaku">${base}${yaku || (a.yakuman ? '' : '<li class="none"><span>役なし（門前のため和了可）</span><b></b></li>')}
       <li class="total"><span>合計</span><b>${r.points}点</b></li></ul>
+      ${a.kind === 'normal' && a.melds.some((mi) => rules.melds[mi].kind === 'koutsu') && a.melds.some((mi) => rules.melds[mi].kind === 'formula') ? '<p class="note">数式面子と刻子の混合形：数式系の役は付きません（門前なら役なしで和了できます）。</p>' : ''}
       ${a.candidateCount > 1 ? `<p class="note">この手は${a.candidateCount}通りの和了形に分けられます。最高得点の形を採用しました。</p>` : ''}`;
   } else {
     head = '<h2>流局</h2>';
@@ -425,8 +454,9 @@ function resultHTML() {
 
 // 不具合報告用の再現情報（seed と局番号があれば同じ山・同じ親から再現できる）
 function reportInfoHTML() {
-  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ 第<b>${S.round}</b>局 ／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
-    この局から再現：URL の末尾に <code>?seed=${S.seedBase}&amp;round=${S.round}</code></p>`;
+  const modeQ = LEGACY ? '' : `&amp;mode=${rules.config.mode}`;
+  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ 第<b>${S.round}</b>局 ／ ${modeLabel(rules)} ／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
+    この局から再現：URL の末尾に <code>?seed=${S.seedBase}&amp;round=${S.round}${modeQ}</code></p>`;
 }
 
 // ---------- ガイド（役一覧・ルール・牌一覧） ----------
@@ -447,8 +477,9 @@ function yakuGuideHTML() {
     const pts = y.yakuman ? `役満 ${y.points}` : `+${y.points}`;
     const naki = y.closedOnly ? '<span class="tag closed">門前限定</span>' : '<span class="tag open">鳴いても可</span>';
     let ex = '';
-    if (g.example) {
-      ex = g.example.map((k) => `<li>${formulaHTML(rules, meldByKey.get(k).idx)}</li>`).join('');
+    const example = (g.examples && g.examples[c.mode]) || g.example;
+    if (example) {
+      ex = example.map((k) => `<li>${formulaHTML(rules, meldByKey.get(k).idx)}</li>`).join('');
       ex = `<ol class="gy-ex">${ex}</ol>`;
     } else if (g.exampleAngles) {
       ex = `<div class="gy-tiles">${g.exampleAngles.map((d) => tileHTML(rules.typeByKey.get(`a:${d}`), { size: 's' })).join('')}</div>`;
@@ -460,35 +491,49 @@ function yakuGuideHTML() {
     ...c.yaku.filter((y) => y.enabled).map((y) => card(y, false)),
     ...c.specialHands.filter((s) => s.enabled).map((s) => card(s, true)),
   ].join('');
-  return `<h2>役ガイド</h2>
-    <ul class="guide-notes">${GUIDE_NOTES.map((n) => `<li>${n}</li>`).join('')}<li>通常和了の基本点：${c.scoring.base}点</li></ul>
+  const off = c.yaku.filter((y) => !y.enabled && y.disabledReason).map((y) => y.name);
+  return `<h2>役ガイド <small>${modeLabel(rules)}</small></h2>
+    <ul class="guide-notes">${GUIDE_NOTES.map((n) => `<li>${n}</li>`).join('')}<li>通常和了の基本点：${c.scoring.base}点</li>
+    ${off.length ? `<li>${modeLabel(rules)}では成立しない役（表示しません）：${off.join('・')}</li>` : ''}</ul>
     <ul class="guide-yaku">${list}</ul>`;
 }
 
 function tilesHTML() {
   const sizes = [['l', '手牌'], ['m', '公開面子'], ['s', '結果画面'], ['xs', '河']];
   const kinds = [['func', '関数牌'], ['angle', '角度牌'], ['value', '結果牌']];
-  return `<h2>牌一覧</h2><p class="note">関数牌 各${rules.types.find((t) => t.kind === 'func').copies}枚・角度牌と結果牌 各4枚、計${rules.deckSize}枚。</p>
+  return `<h2>牌一覧 <small>${modeLabel(rules)}</small></h2><p class="note">関数牌 各${rules.types.find((t) => t.kind === 'func').copies}枚・角度牌 ${rules.types.filter((t) => t.kind === 'angle').length}種と結果牌 13種 各4枚、計${rules.deckSize}枚。${rules.config.angleUnit === 'rad' ? '角度は弧度法（ラジアン）で表示。' : '角度は度数法で表示。'}</p>
     ${kinds.map(([k, label]) => `<h3>${label}</h3>${sizes.map(([sz, sl]) => `<div class="gallery sz-row-${sz}"><span class="gl">${sl}</span><span class="gtiles">${rules.types.filter((t) => t.kind === k).map((t) => tileHTML(t, { size: sz })).join('')}</span></div>`).join('')}`).join('')}`;
 }
 
 function rulesHTML() {
   const c = rules.config;
   const yaku = c.yaku.filter((y) => y.enabled).map((y) => `<li><span>${y.name}${y.yakuman ? '（役満候補）' : ''}${y.closedOnly ? '・門前限定' : ''}</span><b>${y.yakuman ? y.points : '+' + y.points}</b></li>`).join('');
-  const sp = c.specialHands.filter((s) => s.enabled).map((s) => `<li><span>${s.name}（${s.angles.join('°・')}°）${s.closedOnly ? '・門前限定' : ''}</span><b>${s.points}</b></li>`).join('');
-  return `<h2>ルール（暫定）</h2>
-  <ul class="rules-list">
+  const sp = c.specialHands.filter((s) => s.enabled).map((s) => `<li><span>${s.name}（${s.angles.map((d) => angleText(rules.typeByKey.get(`a:${d}`))).join('・')}）${s.closedOnly ? '・門前限定' : ''}</span><b>${s.points}</b></li>`).join('');
+  const ex30 = angleText(rules.typeByKey.get('a:30'));
+  const common = `
+    <li>フリテンは未実装。流局は山が尽きたとき。</li>
+    <li><b>手牌の並び替え</b>：牌を長押し（約0.35秒）して左右に動かし、指を離した位置に入れます。手牌の外で離すと取り消し。表示の順番だけが変わり、ゲームには影響しません。「自動整列」で種類順に戻ります。新しいツモ牌は右端に入ります。</li>`;
+  const body = c.rules.koutsu ? `
+    <li><b>モード</b>：${modeLabel(rules)}（${c.angleUnit === 'rad' ? '弧度法・0〜2π の17種類' : '度数法・0°〜180° の9種類'}・関数牌 各${rules.types.find((t) => t.kind === 'func').copies}枚・計${rules.deckSize}枚）。モードは設定で選び、新しい対局から切り替わります。</li>
+    <li><b>面子</b>は2種類：<b>数式面子</b>＝関数牌＋角度牌＋結果牌で正しい等式（例：sin ${ex30} = 1/2）、<b>刻子</b>＝同じ牌3枚（例：sin・sin・sin、1/2・1/2・1/2）。</li>
+    <li><b>和了</b>：配牌8枚＋ツモ1枚＝9枚で3面子（雀頭は不要）。数式面子と刻子は自由に混ぜられます。または特殊和了（九角無双）。</li>
+    <li><b>門前</b>（チー・ポンなし）なら役なしでも和了できます（通常和了 ${c.scoring.base}点）。</li>
+    <li><b>チー</b>：上家の捨て牌で数式面子が完成するとき。<b>ポン</b>：他家3人の捨て牌で、手牌に同じ牌が2枚あるとき刻子を公開。チーとポンは合計${c.rules.maxCalls}回まで。鳴いた後は牌を1枚捨てます。</li>
+    <li><b>鳴いた手は役が必要</b>。数式系の役は3組すべてが数式面子のときだけ付きます（刻子を含む混合形には付きません）。刻子を公開した手で付く役は対々和・関数一色です。</li>
+    <li><b>優先順位</b>：ロン ＞ ポン ＞ チー。複数のロンはアタマハネ、複数のポンは打牌者から手番順に近い人。ほかの人のロン判断が終わるまでポン・チーは確定しません。</li>
+    <li><b>三暗刻</b>は門前の刻子3組。ロンで最後の刻子を完成させた場合も成立します（Ver.0.3 の暫定規則。通常の麻雀とは異なります）。</li>${common}
+    <li><b>チーのオートパス</b>（設定・初期値 OFF）：ON にすると、チーだけできる場面を自動で見送ります。ロン・ポン・ツモは自動で見送りません。ロンやポンもできるときはチーを表示せず、「ロンしない／見送る」でチーも見送ります。</li>`
+    : `
     <li><b>面子</b>：関数牌＋角度牌＋結果牌で正しい等式（例：sin 30° = 1/2）。</li>
     <li><b>和了</b>：8枚＋1枚＝9枚で3面子。または特殊和了。</li>
     <li><b>チー</b>：上家の捨て牌で面子が完成するときのみ。面子は公開され、手牌から2枚減ります。チー後は役がないと和了できません。チーは最大2回。</li>
     <li><b>ロン</b>：他の3人の捨て牌で和了。ロンはチーより優先、複数ならアタマハネ（打牌者に近い人）。</li>
-    <li><b>門前</b>（チーなし）なら役なしでも和了できます。</li>
-    <li>フリテンは Ver.0.1 では未実装。流局は山が尽きたとき。</li>
-    <li><b>手牌の並び替え</b>：牌を長押し（約0.35秒）して左右に動かし、指を離した位置に入れます。手牌の外で離すと取り消し。表示の順番だけが変わり、ゲームには影響しません。「自動整列」で種類順に戻ります。新しいツモ牌は右端に入ります。</li>
-    <li><b>チーのオートパス</b>（設定・初期値 OFF）：ON にすると、チーだけできる場面を自動で見送ります。ロン・ツモは自動で見送りません。ロンとチーが両方できるときは「ロン」「ロンしない」だけを表示し、「ロンしない」でチーも見送ります。</li>
+    <li><b>門前</b>（チーなし）なら役なしでも和了できます。</li>${common}`;
+  return `<h2>ルール（暫定）</h2>
+  <ul class="rules-list">${body}
   </ul>
   <h3>役と仮得点</h3><ul class="yaku"><li><span>通常和了</span><b>${c.scoring.base}</b></li>${yaku}${sp}</ul>
-  <p class="note">役満成立時は通常和了点・通常役を加算せず、役満の点のみ（複数役満は加算）。<br>エンジン ${ENGINE_VERSION} / 牌 ${rules.deckSize}枚 / 面子 ${rules.melds.length}種類</p>`;
+  <p class="note">役満成立時は通常和了点・通常役を加算せず、役満の点のみ（複数役満は加算）。点数は試作段階の暫定値です。<br>エンジン ${ENGINE_VERSION} / 牌 ${rules.deckSize}枚 / 数式面子 ${rules.formulaCount}種類${c.rules.koutsu ? `・刻子 ${rules.melds.length - rules.formulaCount}種類` : ''}</p>`;
 }
 
 function tableHTML() {
@@ -500,16 +545,21 @@ function tableHTML() {
     return `<td>${valueHTML(v.display)}</td>`;
   };
   return `<h2>三角関数の値表</h2><div class="table-wrap"><table class="values"><tr><th>角度</th><th>sin</th><th>cos</th><th>tan</th></tr>
-    ${angles.map((a) => `<tr><th>${a.deg}°</th>${cell('sin', a.deg)}${cell('cos', a.deg)}${cell('tan', a.deg)}</tr>`).join('')}</table></div>`;
+    ${angles.map((a) => `<tr><th>${angleHTML(a)}</th>${cell('sin', a.deg)}${cell('cos', a.deg)}${cell('tan', a.deg)}</tr>`).join('')}</table></div>`;
 }
 
 function settingsHTML() {
   const labels = { fast: '速い', normal: '普通', slow: 'ゆっくり' };
   const opt = (v) => `<option value="${v}" ${S.speed === v ? 'selected' : ''}>${labels[v]}</option>`;
+  const modeOpt = (m) => `<label class="setting radio"><input type="radio" name="mode" value="${m.id}" data-action="mode" ${S.nextMode === m.id ? 'checked' : ''}><span>${m.label}（${m.id === 'math1' ? '度数法・0°〜180°・124枚' : '弧度法・0〜2π・168枚'}）</span></label>`;
   return `<h2>設定</h2>
+    <fieldset class="mode-select"><legend>モード（新しい対局から）</legend>
+      ${Object.values(MODES).map(modeOpt).join('')}
+      <p class="note mode-note">いまの対局：${modeLabel(rules)}。${S.nextMode !== rules.config.mode && !LEGACY ? '下の「新しい対局」で切り替わります（いまの局は変わりません）。' : 'モードの変更は「新しい対局」から反映されます。'}</p>
+    </fieldset>
     <label class="setting">AIの速さ <select data-action="speed">${publicSpeedNames().map(opt).join('')}</select></label>
     <label class="setting toggle"><input type="checkbox" data-action="chi-autopass" ${S.chiAutoPass ? 'checked' : ''}><span>チーのオートパス</span></label>
-    <p class="note setting-note">チーだけできる場面を自動で見送ります。ロン・ツモは自動で見送りません。</p>
+    <p class="note setting-note">チーだけできる場面を自動で見送ります。ロン・ポン・ツモは自動で見送りません（ポンとチーが両方できるときはチーだけを見送ります）。</p>
     ${reportInfoHTML()}
     <div class="modal-actions"><button data-action="reset">新しい対局（得点リセット）</button></div>`;
 }
@@ -547,7 +597,9 @@ function computeHint(view, claim) {
     }
   })(ids, []);
   const types = new Set(ids.map((id) => g.typeOf(id)));
-  const partial = rules.melds.filter((m) => m.tiles.filter((t) => types.has(t)).length === 2).length;
+  const handCounts = rules.countsOf(ids.map((id) => g.typeOf(id)));
+  // あと1枚で完成する組合せ：数式面子は3種のうち2種が手にある、刻子は同じ牌が2枚ある
+  const partial = rules.melds.filter((m) => (m.kind === 'koutsu' ? handCounts[m.type] === 2 : m.tiles.filter((t) => types.has(t)).length === 2)).length;
   S.hintHighlight = new Set(best.used);
   // 役候補（公開情報のみ。必要な牌の種類や捨て牌は表示しない）
   const cands = yakuCandidates(rules, view, { claim });
@@ -585,6 +637,7 @@ app.addEventListener('click', (ev) => {
       break;
     case 'tsumo': humanAct({ type: 'tsumo' }); break;
     case 'ron': humanAct({ type: 'ron' }); break;
+    case 'pon': humanAct({ type: 'pon' }); break;
     case 'chi': humanAct({ type: 'chi', option: Number(el.dataset.opt) }); break;
     case 'pass': humanAct({ type: 'pass' }); break;
     case 'hint':
@@ -611,6 +664,9 @@ app.addEventListener('click', (ev) => {
       startRound();
       break;
     case 'reset':
+      // 新しい対局：選んだモードをここで反映する（進行中の局のモードは変えない）
+      S.mode = S.nextMode;
+      rules = rulesForMode(S.mode);
       S.round = 1; S.dealer = 0; S.scores = [0, 0, 0, 0]; S.history = [];
       startRound();
       break;
@@ -622,6 +678,11 @@ app.addEventListener('change', (ev) => {
   if (ev.target.dataset.action === 'speed') {
     S.speed = resolveSpeed(ev.target.value, null, false);
     store.set('mj-speed', S.speed);
+  }
+  if (ev.target.dataset.action === 'mode') {
+    // 次の新しい対局のモードを選ぶだけ（いまの局は変えない）
+    const m = parseMode(ev.target.value);
+    if (m) { S.nextMode = m; store.set(MODE_KEY, m); render(); }
   }
   if (ev.target.dataset.action === 'chi-autopass') {
     // 値の保存だけ。次に発生する宣言から反映し、表示中の宣言の選択肢は変えない（ゲームは進めない）
@@ -659,6 +720,6 @@ const drag = createHandDrag(app, {
 });
 
 // テスト・デバッグ用（E2E テストが盤面を確認するため）
-if (IS_LOCAL) window.__mathjong = { S, rules, decide, startRound, render, step, drag };
+if (IS_LOCAL) window.__mathjong = { S, get rules() { return rules; }, decide, startRound, render, step, drag };
 
 startRound();

@@ -4,6 +4,17 @@ import { exact, key as exactKey, trigExact, quadrantOf } from './exact.js';
 
 const QUADRANT_ANGLES = { 1: [30, 45, 60], 2: [120, 135, 150], 3: [210, 225, 240], 4: [300, 315, 330] };
 
+// 度 → 弧度法の表示（π の分数）。例：30 → {num:'π', den:'6'}、150 → {num:'5π', den:'6'}、360 → {num:'2π'}、0 → {num:'0'}
+export function radianParts(deg) {
+  if (deg === 0) return { num: '0', den: null };
+  let a = deg;
+  let b = 180;
+  while (b) [a, b] = [b, a % b];
+  const p = deg / a;
+  const q = 180 / a;
+  return { num: `${p === 1 ? '' : p}π`, den: q === 1 ? null : String(q) };
+}
+
 export function createRules(config = DEFAULT_CONFIG) {
   // ---- 牌の種類（type）。0..T-1 の整数で管理 ----
   const types = [];
@@ -12,7 +23,11 @@ export function createRules(config = DEFAULT_CONFIG) {
   }
   for (const a of config.angles) {
     if (!a.enabled) continue;
-    types.push({ kind: 'angle', deg: a.deg, key: `a:${a.deg}`, copies: a.copies, quadrant: quadrantOf(a.deg) });
+    // unit・rad は画面表示用（数学Ⅱは弧度法）。判定には deg だけを使う。
+    types.push({
+      kind: 'angle', deg: a.deg, key: `a:${a.deg}`, copies: a.copies, quadrant: quadrantOf(a.deg),
+      unit: config.angleUnit || 'deg', rad: radianParts(a.deg),
+    });
   }
   for (const v of config.values) {
     const ex = exact(...v.exact);

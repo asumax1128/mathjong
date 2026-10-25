@@ -209,12 +209,12 @@ test('120局：判定関数による自動パスと独立実装の見送りで�
   assert.ok(ronSeen > 0 && tsumoSeen > 0, `ロン ${ronSeen}・ツモ ${tsumoSeen} の局面を確認`);
 });
 
-test('バージョン：画面 0.2.1（ヘッダー・title は同じ値）、エンジン 0.1.0', () => {
+test('バージョン：画面 0.3.0-a（ヘッダー・title は同じ値）、エンジン 0.3.0-a', () => {
   const app = readFileSync(new URL('../src/ui/app.js', import.meta.url), 'utf8');
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const v = app.match(/const APP_VERSION = '([^']+)';/)[1];
-  assert.equal(v, '0.2.1');
-  assert.equal(ENGINE_VERSION, '0.1.0');
+  assert.equal(v, '0.3.0-a');
+  assert.equal(ENGINE_VERSION, '0.3.0-a');
   assert.match(html, new RegExp(`<title>[^<]*Ver\\.${v.replace(/\./g, '\\.')}</title>`), 'index.html の title が画面の版と一致');
   assert.ok(app.includes('<small>Ver.${APP_VERSION}</small>'), 'ヘッダーは APP_VERSION から表示');
   assert.ok(!/Ver\.0\.1</.test(app), '固定の Ver.0.1 表記が残っていない');

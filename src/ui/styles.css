@@ -136,6 +136,12 @@ button:focus-visible, .tile.tap:focus-visible { outline: 3px solid var(--accent)
 .tile.sz-xs.t-angle .ang { letter-spacing: -0.08em; }
 .tile.sz-xs.t-angle { font-size: 9.5px; }
 .tile.sz-l.t-angle { font-size: calc(var(--hand-w) * 0.36); }
+/* 弧度法（数学Ⅱ）：π の分数を縦組みで。2π/3・11π/6 など幅のある分子も枠に収める */
+.t-angle .ang.rad { letter-spacing: -0.02em; }
+.t-angle .ang.rad .afrac { font-size: 0.78em; }
+.tile.sz-xs.t-angle .ang.rad .afrac, .tile.sz-s.t-angle .ang.rad .afrac { font-size: 0.82em; letter-spacing: -0.06em; }
+.tile.sz-xs.t-angle .ang.rad .afrac .num, .tile.sz-xs.t-angle .ang.rad .afrac .den { padding: 0; }
+.ang-in { display: inline-flex; align-items: center; }
 .t-value { background: #eef1f5; }
 .t-value .eq { position: absolute; top: 1px; left: 3px; font-size: 0.7em; color: #4b5059; font-weight: 700; }
 .tile.sz-xs .eq, .tile.sz-s .eq { left: 1px; top: 0; }
@@ -176,6 +182,16 @@ button:focus-visible, .tile.tap:focus-visible { outline: 3px solid var(--accent)
 .actions.claim { justify-content: flex-start; }
 .actions.claim .status { width: 100%; }
 button.chi { display: inline-flex; align-items: center; gap: 6px; background: #2d5a8a; border-color: #3d6fa5; }
+button.pon { display: inline-flex; align-items: center; gap: 6px; background: #6a4a8a; border-color: #8261a5; }
+.formula.koutsu .kt { font-size: 0.72em; font-weight: 400; opacity: 0.8; margin-left: 0.2em; }
+.top button.small { white-space: nowrap; }
+/* 狭い画面（〜400px）ではロゴを隠して、モード・局・山の残りとボタンを1行に収める（横スクロールを出さない） */
+.top .info { min-width: 0; overflow: hidden; }
+@media (max-width: 400px) { .top .logo { display: none; } }
+@media (max-width: 600px) { .top .logo small { display: none; } }
+.top .info .mode { font-size: 0.85em; padding: 1px 5px; white-space: nowrap; border: 1px solid var(--felt-line); border-radius: 10px; margin-right: 4px; }
+.mode-select { border: 1px solid var(--felt-line); border-radius: 8px; padding: 4px 10px 6px; margin: 0 0 10px; }
+.mode-select legend { font-size: 0.9em; padding: 0 4px; }
 .formula { display: inline-flex; align-items: center; gap: 0.15em; font-weight: 700; white-space: nowrap; }
 .formula .fn { font-family: "Times New Roman", serif; font-style: italic; }
 .formula .op { margin: 0 0.25em; }
@@ -225,8 +241,8 @@ table.values th, table.values td { border: 1px solid #ddd5c0; padding: 5px; text
 table.values td.undef { color: #999; font-size: 12px; }
 .setting { display: flex; align-items: center; gap: 10px; }
 .setting select { font: inherit; min-height: 40px; }
-.setting.toggle { min-height: 44px; padding: 4px 0; cursor: pointer; }
-.setting.toggle input { width: 24px; height: 24px; margin: 0; accent-color: var(--gold, #c9a227); flex-shrink: 0; }
+.setting.toggle, .setting.radio { min-height: 44px; padding: 4px 0; cursor: pointer; }
+.setting.toggle input, .setting.radio input { width: 24px; height: 24px; margin: 0; accent-color: var(--gold, #c9a227); flex-shrink: 0; }
 .setting-note { margin: 0 0 8px; }
 .pass-with-note { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.2; }
 .pass-note { font-size: 11px; opacity: 0.8; font-weight: normal; }
