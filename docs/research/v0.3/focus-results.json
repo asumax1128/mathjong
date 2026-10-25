@@ -1,0 +1,76 @@
+{
+  "model": "independent v0.3 simplified AI prototype, not official MATHJONG",
+  "seedStart": 201111,
+  "gamesPerCondition": 20000,
+  "mathMode": "Math I",
+  "deckTiles": 124,
+  "winningTiles": 9,
+  "opponents": "3 aware-pon AIs; seat0 optionally forces monochrome based on initial highest function count",
+  "rows": [
+    {
+      "threshold": "never",
+      "eligible": 0,
+      "eligibleWins": 0,
+      "eligibleFlushWins": 0,
+      "seat0Wins": 5440,
+      "seat0FlushWins": 0,
+      "allWinnersFlush": 0,
+      "draws": 39,
+      "focusPons": 0,
+      "meanMoves": 25.5081
+    },
+    {
+      "threshold": 2,
+      "eligible": 9991,
+      "eligibleWins": 233,
+      "eligibleFlushWins": 18,
+      "seat0Wins": 2897,
+      "seat0FlushWins": 18,
+      "allWinnersFlush": 19,
+      "draws": 117,
+      "focusPons": 6116,
+      "meanMoves": 28.0334
+    },
+    {
+      "threshold": 3,
+      "eligible": 2056,
+      "eligibleWins": 91,
+      "eligibleFlushWins": 12,
+      "seat0Wins": 4824,
+      "seat0FlushWins": 12,
+      "allWinnersFlush": 12,
+      "draws": 55,
+      "focusPons": 1387,
+      "meanMoves": 26.20895
+    },
+    {
+      "threshold": 4,
+      "eligible": 193,
+      "eligibleWins": 17,
+      "eligibleFlushWins": 5,
+      "seat0Wins": 5377,
+      "seat0FlushWins": 5,
+      "allWinnersFlush": 5,
+      "draws": 41,
+      "focusPons": 159,
+      "meanMoves": 25.59115
+    }
+  ],
+  "initialMaxFunctionCounts": {
+    "0": 962,
+    "1": 9047,
+    "2": 7935,
+    "3": 1863,
+    "4": 180,
+    "5": 12,
+    "6": 1
+  },
+  "method": "Focus on most common sin/cos/tan in 8-tile initial hand when at least threshold copies; discard all non-target first, pon target if possible; otherwise baseline aware-pon AI. Different AI decisions diverge play despite same seeds.",
+  "limitations": [
+    "Prototype AI not actual game engine",
+    "Only one player changes strategy",
+    "Limited to same-seed 20k per condition",
+    "Does not compare points or rank; seat0 win rates not fully randomized seating",
+    "Small sample for rare yakuman; cannot infer impossibility"
+  ]
+}
