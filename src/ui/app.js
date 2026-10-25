@@ -14,7 +14,7 @@ import { reconcileOrder, defaultOrder } from './handorder.js';
 import { createHandDrag } from './handdrag.js';
 import { CHI_AUTOPASS_KEY, parseChiAutoPass, visibleClaimActions, claimPendingForHint, claimPolicy, autoPassDue } from './autopass.js';
 import { YAKU_GUIDE, GUIDE_NOTES, guideCondition } from './guide.js';
-import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, intParam } from './params.js';
+import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, intParam, MAX_SEED, MAX_ROUND, MAX_RENCHAN } from './params.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
@@ -24,12 +24,12 @@ const params = new URLSearchParams(location.search);
 // テスト専用機能（山の指定・AI待ち時間0）はローカル開発環境でのみ有効。公開サイトでは無効。
 const IS_LOCAL = isLocalHost(location.hostname);
 // ?seed=（0〜999999999の整数）と ?round=（1〜999）だけを受け付ける。不正値は無視。
-const seedParam = intParam(params.get('seed'), 999999999);
-const roundParam = intParam(params.get('round'), 999);
+const seedParam = intParam(params.get('seed'), MAX_SEED);
+const roundParam = intParam(params.get('round'), MAX_ROUND);
 // Ver.0.4-A 対局の再現：?len=4|8（局数）・?hand=0〜7（親番：0=東1局）・?renchan=（連荘回数）・?dealer=0〜3（その局の親の席）・?ai=
 const lenParam = intParam(params.get('len'), 8);
 const handParam = intParam(params.get('hand'), 7);
-const renchanParam = intParam(params.get('renchan'), 99);
+const renchanParam = intParam(params.get('renchan'), MAX_RENCHAN);
 const dealerParam = intParam(params.get('dealer'), 3);
 // ?seed= がある URL（再現・テスト）はタイトルを飛ばしてその局から始める。ない場合はタイトル画面。
 const DIRECT_START = seedParam !== null && seedParam !== undefined;
@@ -208,6 +208,8 @@ function finishRound() {
     S.prevScores = S.match.scores.slice();
     S.lastRound = { label: handLabel(S.match), renchan: S.match.renchan, dealer: S.dealer };
     S.match = applyRoundResult(S.match, g.result);
+    // 再現 URL の範囲（MAX_ROUND）に達したら試合を終える（出力する round・renchan を読み取りの範囲内に保つ）
+    if (S.round >= MAX_ROUND && !S.match.over) S.match = { ...S.match, over: true };
     S.scores = S.match.scores;
     S.history.push({ round: S.round, result: g.result.type === 'win' ? { ...g.result, analysis: undefined } : g.result });
   }
@@ -525,7 +527,7 @@ function finalHTML() {
     <ul class="final-info">
       <li>実施した局数：<b>${m.played}局</b>（${m.length === 4 ? '4局戦・東1〜東4局' : '8局戦・東1〜南4局'}）</li>
       <li>連荘回数：<b>${m.renchanTotal}回</b></li>
-      <li>数学モード：${modeLabel(rules)} ／ AI難易度：${aiLabel(S.ai)}</li>
+      <li>数学モード：${modeLabel(rules)} ／ AI難易度：${aiLabel(S.matchSettings ? S.matchSettings.ai : S.ai)}</li>
       <li class="note">開始時の持ち点は各${START_POINTS}点（合計${START_POINTS * 4}点）。同点は同順位。点数配分は試作段階の暫定値です。</li>
     </ul>
     <div class="modal-actions"><button data-action="again" class="primary">もう一度遊ぶ</button><button data-action="to-title">タイトルへ戻る</button></div>
@@ -566,7 +568,8 @@ function reportInfoHTML() {
   const label = S.scored && S.lastRound ? S.lastRound : { label: handLabel(m), renchan: m.renchan };
   const hand = S.scored && S.lastRound ? m.log[m.log.length - 1].hand : m.hand;
   return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ ${label.label}・連荘${label.renchan}（通し第<b>${S.round}</b>局・親 ${POS[S.dealer]}）／ ${m.length}局戦 ／ ${modeLabel(rules)} ／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
-    この局から再現：URL の末尾に <code>?seed=${S.seedBase}&amp;round=${S.round}&amp;dealer=${S.dealer}&amp;hand=${hand}&amp;renchan=${label.renchan}&amp;len=${m.length}${modeQ}</code></p>`;
+    この局から再現：URL の末尾に <code>?seed=${S.seedBase}&amp;round=${S.round}&amp;dealer=${S.dealer}&amp;hand=${hand}&amp;renchan=${label.renchan}&amp;len=${m.length}${modeQ}</code><br>
+    <span class="report-caveat">このURLでは山・配牌・親・局状態を再現します。持ち点や過去の対局履歴は復元されず、全員100点から開始します。</span></p>`;
 }
 
 // ---------- ガイド（役一覧・ルール・牌一覧） ----------
@@ -895,13 +898,14 @@ app.addEventListener('click', (ev) => {
       startRound();
       break;
     case 'reset':
-      // 新しい対局：選んだモードをここで反映する（進行中の局のモードは変えない）。局数・AI 設定は同じ
-      startMatch();
+      // 設定画面の「新しい対局」：予約したモード（S.nextMode）と、タイトルで選んだ局数・AI を使う
+      startMatch({ settings: { mode: S.nextMode, length: S.length, ai: S.ai } });
       break;
     case 'again':
-      // もう一度遊ぶ：同じ設定で新しい山（seed）から
+      // もう一度遊ぶ：終了した試合と同じ設定（モード・局数・AI 難易度）で、新しい山・全員100点から。
+      // 予約中の次回用モード（S.nextMode）やタイトルの選択（S.length・S.ai）は使わない。
       S.seedBase = Math.floor(Math.random() * 1e9);
-      startMatch();
+      startMatch({ settings: { ...S.matchSettings } });
       break;
     case 'ask-title': S.confirmTitle = true; render(); break;
     case 'cancel-title': S.confirmTitle = false; render(); break;
@@ -918,8 +922,9 @@ app.addEventListener('click', (ev) => {
       render();
       break;
     case 'start-match':
+      // タイトル画面の「対局開始」：タイトルで選んだ内容で確定する
       S.seedBase = Math.floor(Math.random() * 1e9);
-      startMatch();
+      startMatch({ settings: { mode: S.nextMode, length: S.length, ai: S.ai } });
       break;
     default:
   }
@@ -995,8 +1000,12 @@ function goRound(n, dealer = (n - 1) % 4) {
 if (IS_LOCAL) window.__mathjong = { S, get rules() { return rules; }, decide, startRound, startMatch, goRound, render, step, drag };
 
 // 試合を始める。fromUrl：?seed= の再現・テスト用 URL（親番・連荘・親の席を URL から）
-function startMatch({ fromUrl = false } = {}) {
-  S.mode = S.nextMode;
+// settings：{ mode, length, ai } 試合の設定（採用元は呼び出し側が決める：タイトル／もう一度遊ぶ／設定画面）
+// fromUrl：?seed= の再現・テスト用 URL（設定は URL・保存値から、親番・連荘・親の席を URL から）
+function startMatch({ fromUrl = false, settings = null } = {}) {
+  const cfg = settings || { mode: S.nextMode, length: S.length, ai: S.ai };
+  S.matchSettings = { mode: cfg.mode, length: cfg.length, ai: cfg.ai }; // この試合の設定（「もう一度遊ぶ」「最終結果」で使う）
+  S.mode = cfg.mode;
   rules = rulesForMode(S.mode);
   S.screen = 'game';
   S.confirmTitle = false;
@@ -1006,18 +1015,18 @@ function startMatch({ fromUrl = false } = {}) {
   if (fromUrl) {
     // 従来の ?round=n だけの URL：親は (n−1) mod 4、親番は n−1（局数の範囲に丸める）
     const n = roundParam && roundParam > 0 ? roundParam : 1;
-    const hand = handParam !== null && handParam !== undefined ? handParam : Math.min(n - 1, S.length - 1);
+    const hand = handParam !== null && handParam !== undefined ? handParam : Math.min(n - 1, cfg.length - 1);
     const dealer = dealerParam !== null && dealerParam !== undefined ? dealerParam : (n - 1) % 4;
-    const h = Math.max(0, Math.min(S.length - 1, hand));
-    S.match = matchAt({ length: S.length, hand: h, renchan: renchanParam || 0, startDealer: (((dealer - h) % 4) + 4) % 4 });
+    const h = Math.max(0, Math.min(cfg.length - 1, hand));
+    S.match = matchAt({ length: cfg.length, hand: h, renchan: renchanParam || 0, startDealer: (((dealer - h) % 4) + 4) % 4 });
     S.round = n;
   } else {
-    S.match = createMatch({ length: S.length });
+    S.match = createMatch({ length: cfg.length });
     S.round = 1;
   }
   S.scores = S.match.scores;
   startRound();
 }
 
-if (DIRECT_START) startMatch({ fromUrl: true });
+if (DIRECT_START) startMatch({ fromUrl: true, settings: { mode: S.nextMode, length: S.length, ai: S.ai } });
 else render();

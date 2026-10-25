@@ -2961,6 +2961,169 @@ async function v04Match(browser) {
   console.log('✓ Ver.0.4-A：タイトル（モード・局数・AI難易度の保存）・ヒントボタンの移動・親の連荘／親交代・精算（合計400）・最終の親の延長・試合終了（同点同順位）・もう一度／タイトルへ・再現URL・320〜430px');
 }
 
+// ---- Ver.0.4-A 監査対応（PR #9）：もう一度遊ぶ・長い連荘の再現 URL・再現情報の注意書き ----
+const dealOf = (page) => page.evaluate(() => ({ wall: window.__mathjong.S.game.wall.slice(), hands: window.__mathjong.S.game.hands.map((h) => h.slice()), dealer: window.__mathjong.S.game.dealer }));
+const reproQuery = async (page) => {
+  await page.locator('button[data-action="settings"]').tap();
+  const info = await page.locator('.report-info').innerText();
+  await page.locator('.modal-actions button[data-action="close"]').tap();
+  return { info, q: info.match(/(\?seed=\S+)/)[1] };
+};
+
+async function v04Fixes(browser) {
+  // (1) P2-1：もう一度遊ぶは、終了した試合と同じ設定（数学モード・局数・AI難易度）。予約中の次回用モードは使わない。逆方向も。
+  for (const [startMode, pending, length, ai, otherLength] of [['math1', 'math2', 4, 'advanced', 8], ['math2', 'math1', 8, 'beginner', 4]]) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?speed=test`);
+    await page.waitForSelector('.title-screen');
+    const lab = { math1: '数学Ⅰ', math2: '数学Ⅱ' };
+    await page.locator('label.setting.radio', { hasText: lab[startMode] }).tap();
+    await page.locator('label.setting.radio', { hasText: `${length}局戦` }).tap();
+    await page.locator(`input[data-action="title-ai"][value="${ai}"]`).evaluate((e) => e.click());
+    await page.locator('button[data-action="start-match"]').tap();
+    await page.waitForSelector('.hand .tile');
+    const seed1 = await page.evaluate(() => window.__mathjong.S.seedBase);
+    // 試合中に、次回用の別の数学モードを予約する（設定画面）。S.length もタイトルの別の値にしておく（採用元を取り違えないこと）
+    await page.locator('button[data-action="settings"]').tap();
+    await page.locator('label.setting.radio', { hasText: lab[pending] }).tap();
+    await page.locator('.modal-actions button[data-action="close"]').tap();
+    await page.evaluate((l) => { window.__mathjong.S.length = l; }, otherLength);
+    // 試合を進めて（得点・和了・履歴・ヒントを作り）終了させる
+    await v3Scene(page, presetWall(TSUMO_HAND, ['=1'], [V3_O1, V3_O2, V3_O3]));
+    await page.locator('button[data-action="hint"]').tap();
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.waitForSelector('.overlay .result');
+    await page.evaluate(() => { const { S, render } = window.__mathjong; S.match.over = true; S.modal = 'final'; render(); });
+    const before = await page.evaluate(() => { const { S, rules } = window.__mathjong; return { mode: rules.config.mode, len: S.match.length, scores: S.match.scores.slice(), hist: S.history.length, seed: S.seedBase, next: S.nextMode }; });
+    assert.equal(before.mode, startMode);
+    assert.equal(before.next, pending, '予約中の次回用モード');
+    assert.ok(before.scores.some((x) => x !== 100) && before.hist > 0);
+    assert.match(await page.locator('.final-info').innerText(), new RegExp(`AI難易度：${{ beginner: '初級', advanced: '上級' }[ai]}`));
+    await page.locator('button[data-action="again"]').tap();
+    await page.waitForSelector('.hand .tile');
+    const after = await page.evaluate(() => {
+      const { S, rules } = window.__mathjong;
+      return { mode: rules.config.mode, deck: S.game.tileType.length, len: S.match.length, ai: S.matchSettings.ai, scores: S.match.scores.slice(), hist: S.history.length, played: S.match.played, renchan: S.match.renchan, wins: S.match.wins.slice(), seed: S.seedBase, next: S.nextMode, round: S.round, hintOpen: S.hintOpen, hints: S.hintsUsed, label: document.querySelector('.hand-label').textContent };
+    });
+    assert.equal(after.mode, startMode, `もう一度遊ぶは ${startMode} のまま（予約中の ${pending} にならない）`);
+    assert.equal(after.deck, startMode === 'math1' ? 124 : 168);
+    assert.equal(after.len, length, '局数も同じ');
+    assert.equal(after.ai, ai, 'AI 難易度も同じ');
+    assert.deepEqual([after.scores, after.hist, after.played, after.renchan, after.wins, after.round, after.label, after.hintOpen, after.hints], [[100, 100, 100, 100], 0, 0, 0, [0, 0, 0, 0], 1, '東1局', false, 0], '得点・履歴・局数・連荘・和了回数・ヒントは初期化');
+    assert.notEqual(after.seed, before.seed, '新しい山（seed）');
+    assert.equal(after.next, pending, '予約中の次回用モードは保持（再試合には影響しない）');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.4-A 監査 P2-1：もう一度遊ぶは同じ設定（数学Ⅰ→Ⅱ予約・Ⅱ→Ⅰ予約の両方向）で、seed・得点・履歴・ヒントを初期化');
+
+  // (2) P2-2：連荘99→100・通し局数999→1000・大きな値の再現 URL の往復（山・配牌・親席・親番・連荘回数が一致）
+  for (const [name, start, expect] of [
+    ['連荘99→100', 'seed=4242&round=150&dealer=0&hand=0&renchan=99&len=4&mode=math1', { renchan: 100, round: 151, label: '東1局' }],
+    ['局数999→1000', 'seed=4242&round=999&dealer=0&hand=0&renchan=0&len=8&mode=math2', { renchan: 1, round: 1000, label: '東1局' }],
+    ['大きな値', 'seed=999999999&round=499999&dealer=0&hand=0&renchan=499998&len=8&mode=math1', { renchan: 499999, round: 500000, label: '東1局' }],
+  ]) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { query: '' });
+    await page.goto(`${LOCAL}?${start}&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    let st = await matchState(page);
+    assert.equal(st.renchan, Number(start.match(/renchan=(\d+)/)[1]), `${name}: 開始時の連荘回数が読めている`);
+    assert.equal(st.round, Number(start.match(/round=(\d+)/)[1]));
+    // 親（自分）がツモ和了 → 連荘で次の局へ（正規の進行で出力される値）
+    await v3Scene(page, presetWall(TSUMO_HAND, ['=1'], [V3_O1, V3_O2, V3_O3]));
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.waitForSelector('.overlay .result');
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.hand .tile');
+    st = await matchState(page);
+    assert.deepEqual([st.renchan, st.round, st.label], [expect.renchan, expect.round, expect.label], `${name}: 正規の進行`);
+    const deal = await dealOf(page);
+    const { q } = await reproQuery(page);
+    const parsed = Object.fromEntries(new URLSearchParams(q.slice(1)));
+    assert.equal(Number(parsed.renchan), expect.renchan, `${name}: URL に連荘回数 ${expect.renchan} を出力`);
+    assert.equal(Number(parsed.round), expect.round);
+    await page.goto(`${LOCAL}${q}&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    const st2 = await matchState(page);
+    assert.deepEqual([st2.renchan, st2.round, st2.label, st2.dealer, st2.length, st2.mode], [expect.renchan, expect.round, expect.label, 0, Number(parsed.len), parsed.mode], `${name}: 往復で同じ局面設定（黙って別の局面にならない）`);
+    assert.deepEqual(await dealOf(page), deal, `${name}: 同じ山・配牌・親席`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // 通常の連荘局（東2局・連荘1）と、従来の seed と round だけの URL
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math2', { query: '&len=8' });
+    await page.evaluate(() => window.__mathjong.goRound(5, 0));
+    await page.evaluate(() => { const { S, render } = window.__mathjong; S.match.hand = 1; S.match.renchan = 1; S.match.startDealer = 3; S.dealer = 0; render(); });
+    const { q } = await reproQuery(page);
+    assert.match(q, /round=5&dealer=0&hand=1&renchan=1&len=8&mode=math2/);
+    const st1 = await matchState(page);
+    await page.goto(`${LOCAL}?seed=321&round=3&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    const old = await matchState(page);
+    assert.deepEqual([old.label, old.renchan, old.dealer, old.round], ['東3局', 0, 2, 3], '従来の seed と round だけの URL');
+    assert.equal(st1.renchan, 1);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // 範囲外・不正な整数は拒否して無視（別の局面として黙って扱わず、範囲内の値だけを採用）
+  for (const bad of ['renchan=1000000', 'renchan=-1', 'renchan=1.5', 'renchan=1e3', 'renchan=abc', 'round=1000001', 'round=-3', 'round=2.5', 'round=99999999999999999999', 'hand=8', 'dealer=4', 'len=5']) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?seed=77&${bad}&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    const st = await matchState(page);
+    const key = bad.split('=')[0];
+    assert.ok(st.renchan === 0 && st.round === 1 && st.length === 4 && st.dealer === 0, `${bad}: 不正な ${key} は無視（既定の局面）`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // 上限（通し局数 1,000,000）に達したら試合を終える（出力する値を読み取りの範囲内に保つ）
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { query: '' });
+    await page.goto(`${LOCAL}?seed=9&round=1000000&dealer=0&hand=0&renchan=999999&len=8&mode=math1&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    assert.deepEqual([(await matchState(page)).round, (await matchState(page)).renchan], [1000000, 999999], '上限の値も読める');
+    await v3Scene(page, presetWall(TSUMO_HAND, ['=1'], [V3_O1, V3_O2, V3_O3]));
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.waitForSelector('.overlay .result');
+    assert.equal(await page.locator('button[data-action="next"]').innerText(), '最終結果へ', '連荘でも上限で試合終了');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (3) P3-1：再現情報の注意書き（設定・局結果）。URL から復元すると全員100点から
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { query: '&len=4' });
+    await v3Scene(page, presetWall(TSUMO_HAND, ['=1'], [V3_O1, V3_O2, V3_O3]));
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.waitForSelector('.overlay .result');
+    const caveat = /このURLでは山・配牌・親・局状態を再現します。持ち点や過去の対局履歴は復元されず、全員100点から開始します。/;
+    assert.match(await page.locator('.overlay .result .report-info').innerText(), caveat, '局結果の再現情報');
+    assert.deepEqual((await matchState(page)).scores, [112, 96, 96, 96]);
+    await page.locator('button[data-action="close-result"]').tap();
+    const { info, q } = await reproQuery(page);
+    assert.match(info, caveat, '設定の再現情報');
+    // 注意書きは再現情報の中（別の画面を開かない）。長すぎず、横にはみ出さない
+    // （終局後は設定を閉じると局結果へ戻るので、局結果を閉じてから設定を開き直す）
+    await page.locator('button[data-action="close-result"]').tap();
+    await page.locator('button[data-action="settings"]').tap();
+    const m = await page.evaluate(() => { const c = document.querySelector('.report-caveat'); const mo = document.querySelector('.modal'); return { inside: !!c.closest('.report-info'), fs: parseFloat(getComputedStyle(c).fontSize), over: mo.scrollWidth - mo.clientWidth, len: c.textContent.length }; });
+    assert.ok(m.inside && m.fs >= 11 && m.over <= 0 && m.len <= 70, JSON.stringify(m));
+    await page.goto(`${LOCAL}${q}&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    const st = await matchState(page);
+    assert.deepEqual(st.scores, [100, 100, 100, 100], 'URL から復元すると全員100点');
+    assert.deepEqual([st.label, st.dealer, st.round], ['東1局', 0, 1], '山・親・局状態は再現');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.4-A 監査 P2-2・P3-1：連荘99→100／通し局数999→1000／大きな値の再現 URL の往復・従来 URL・不正な整数の拒否・上限での試合終了・再現情報の注意書き（全員100点から）');
+}
+
 const server = await startServer(0, { base: BASE, host: '127.0.0.1' });
 PORT = server.address().port;
 LOCAL = `http://localhost:${PORT}${BASE}`;
@@ -2996,6 +3159,7 @@ try {
   await v03Rules(browser);
   await v03bHints(browser);
   await v04Match(browser);
+  await v04Fixes(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));

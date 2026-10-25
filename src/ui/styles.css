@@ -370,3 +370,4 @@ table.values td.undef { color: #999; font-size: 12px; }
   .opponents { grid-template-columns: 1fr 1.2fr 1fr; grid-template-areas: "left top right"; }
   .tile.sz-xs { width: 26px; height: 35px; font-size: 11px; }
 }
+.report-caveat { display: block; margin-top: 3px; font-size: 11px; color: #7a5b00; }
