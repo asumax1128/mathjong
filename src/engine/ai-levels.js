@@ -68,7 +68,7 @@ export const ADVANCED = {
   valueExp: null, // 完成形の重み：null＝性格の重み、数値 e＝点数^e
   koutsuBias: null, // null＝性格の値
   wallScale: 0, // 山の残りが少ないほど遠い形を減衰（0＝しない）
-  defense: 1, // 放銃の見込み（点）の重み（0＝守らない。対戦結果から 1 に調整）
+  defense: 1.5, // 放銃の見込み（点）の重み（0＝守らない。対戦結果から 1.5 に調整：数学Ⅰ・Ⅱとも 1.0 より良く、2.0 と同程度）
   callScale: 1, // 鳴きのしきい値の倍率（1＝中級と同じ）。calls: false で鳴かない
   calls: true,
 };
