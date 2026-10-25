@@ -1,7 +1,7 @@
 // URL パラメータ・保存値の検証（src/ui/params.js）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveSpeed, speedDelays, intParam, isLocalHost, publicSpeedNames } from '../src/ui/params.js';
+import { resolveSpeed, speedDelays, intParam, isLocalHost, publicSpeedNames, MAX_SEED, MAX_ROUND, MAX_RENCHAN } from '../src/ui/params.js';
 
 const BAD = ['toString', 'constructor', '__proto__', 'hasOwnProperty', 'valueOf', 'unknown', '', ' fast', 'FAST', 'test '];
 
@@ -49,4 +49,25 @@ test('seed / round の整数パラメータ', () => {
   for (const v of ['1000', '-1', '1.5', 'abc', '', '1e3', ' 1', '0x10', '1234567890', null, undefined, 'constructor']) {
     assert.equal(intParam(v, 999), null, `${v}`);
   }
+});
+
+// ---- 監査 P2-2：再現 URL の範囲（出力する値と読み取る値を同じ定数にそろえる） ----
+test('再現 URL の範囲：連荘99→100・局番号999→1000・上限まで受け付け、上限を超える値・不正な値は拒否', () => {
+  assert.equal(MAX_RENCHAN, MAX_ROUND - 1, '連荘回数は通し局数より小さい');
+  for (const v of [99, 100, 101, 999, 1000, 1001, 12345, MAX_ROUND]) assert.equal(intParam(String(v), MAX_ROUND), v, `round ${v}`);
+  for (const v of [99, 100, 101, 5000, MAX_RENCHAN]) assert.equal(intParam(String(v), MAX_RENCHAN), v, `renchan ${v}`);
+  assert.equal(intParam(String(MAX_ROUND + 1), MAX_ROUND), null);
+  assert.equal(intParam(String(MAX_RENCHAN + 1), MAX_RENCHAN), null);
+  for (const bad of ['-1', '1.5', '1e3', '0x10', ' 5', '5 ', '', 'abc', '१२', '1000000000000', '99999999999999999999', 'Infinity', 'NaN', '+5', null, undefined]) {
+    assert.equal(intParam(bad, MAX_ROUND), null, `不正な値 ${JSON.stringify(bad)}`);
+  }
+  assert.equal(intParam('007', MAX_ROUND), 7, '先頭の0は数値として読む（従来どおり）');
+});
+
+test('山の seed（seedBase + round × 7919）は上限でも JavaScript の安全な整数の範囲内で、局ごとに異なる', () => {
+  const max = MAX_SEED + MAX_ROUND * 7919;
+  assert.ok(Number.isSafeInteger(max) && max < 2 ** 53);
+  const seen = new Set();
+  for (const r of [1, 2, 99, 100, 999, 1000, 1001, 5000, MAX_ROUND]) seen.add(MAX_SEED + r * 7919);
+  assert.equal(seen.size, 9);
 });
