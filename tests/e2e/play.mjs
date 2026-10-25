@@ -386,8 +386,11 @@ async function publicMode(browser) {
   await page.locator('button[data-action="start-match"]').tap();
   await page.waitForSelector('.hand .tile');
   assert.match(await page.locator('.top .info').innerText(), /東1局/);
-  await firstHand('?seed=77&round=-1&len=9&hand=-2&dealer=7&renchan=abc');
-  assert.match(await page.locator('.top .info').innerText(), /東1局/, 'seed が正しければ、ほかの不正な値は無視して始める');
+  // seed が正しくても、ほかの値が不正なら別の局面として黙って始めない（エラー画面）。Ver.0.4-A の最終修正
+  await page.goto(`${PUBLIC}?seed=77&round=-1&len=9&hand=-2&dealer=7&renchan=abc`);
+  await page.waitForSelector('.replay-error');
+  assert.match(await page.locator('.re-title').innerText(), /再現URLの局状態が不正です/);
+  assert.equal(await page.locator('.hand .tile').count(), 0, '対局は始めない');
   // /mathjong（末尾スラッシュなし）でも開ける（301 → /mathjong/）。
   // route で返したリダイレクト先はブラウザが再度横取りしないため、ホスト名に依存しない localhost で確認する。
   // （リダイレクト応答そのものは tests/serve.test.js で検査）
@@ -2869,7 +2872,7 @@ async function v04Match(browser) {
 
   // (4) 最終の親（東4局）が連荘して延長 → 流局で試合終了 → 最終結果（同点は同順位）→ もう一度遊ぶ／タイトルへ
   {
-    const { ctx, page, errors } = await v3Page(browser, 'math1', { query: '&len=4&hand=3&dealer=0' });
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { query: '&round=4&len=4&hand=3&dealer=0' }); // 東4局の親は自分（起家は逆算）
     let st = await matchState(page);
     assert.deepEqual([st.label, st.dealer], ['東4局', 0]);
     await v3Scene(page, presetWall(TSUMO_HAND, ['=1'], [V3_O1, V3_O2, V3_O3]));
@@ -2914,19 +2917,20 @@ async function v04Match(browser) {
 
   // (5) 再現情報：連荘中の局を URL（seed・round・dealer・hand・renchan・len・mode）で再現できる
   {
-    const { ctx, page, errors } = await v3Page(browser, 'math2', { query: '&len=8' });
-    await page.evaluate(() => { const { goRound, S } = window.__mathjong; S.match.renchan = 0; goRound(6, 1); });
-    await page.evaluate(() => { const { S } = window.__mathjong; S.match.renchan = 2; window.__mathjong.render(); });
+    // 正規の状態（通し第8局 = 南2局・連荘2。round ≥ hand + renchan + 1 を満たす）から始め、出力される URL を往復する
+    const { ctx, page, errors } = await v3Page(browser, 'math2', { query: '' });
+    await page.goto(`${LOCAL}?seed=555&round=8&dealer=1&hand=5&renchan=2&len=8&mode=math2&speed=slow`);
+    await page.waitForSelector('.hand .tile');
     const st = await matchState(page);
     await page.locator('button[data-action="settings"]').tap();
     const info = await page.locator('.report-info').innerText();
     const q = info.match(/(\?seed=\S+)/)[1];
-    assert.match(q, /round=6&dealer=1&hand=5&renchan=2&len=8&mode=math2/);
+    assert.match(q, /seed=555&round=8&dealer=1&hand=5&renchan=2&len=8&mode=math2/);
     const deal = await page.evaluate(() => ({ wall: window.__mathjong.S.game.wall.slice(), hands: window.__mathjong.S.game.hands.map((h) => h.slice()) }));
     await page.goto(`${LOCAL}${q}&speed=slow`);
     await page.waitForSelector('.hand .tile');
     const st2 = await matchState(page);
-    assert.deepEqual([st2.label, st2.renchan, st2.dealer, st2.round, st2.length], ['南2局', 2, 1, 6, 8]);
+    assert.deepEqual([st2.label, st2.renchan, st2.dealer, st2.round, st2.length], ['南2局', 2, 1, 8, 8]);
     assert.deepEqual(await page.evaluate(() => ({ wall: window.__mathjong.S.game.wall.slice(), hands: window.__mathjong.S.game.hands.map((h) => h.slice()) })), deal, '同じ山・配牌');
     assert.equal(st.dealer, 1);
     assert.deepEqual(errors, []);
@@ -3068,17 +3072,35 @@ async function v04Fixes(browser) {
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  // 範囲外・不正な整数は拒否して無視（別の局面として黙って扱わず、範囲内の値だけを採用）
-  for (const bad of ['renchan=1000000', 'renchan=-1', 'renchan=1.5', 'renchan=1e3', 'renchan=abc', 'round=1000001', 'round=-3', 'round=2.5', 'round=99999999999999999999', 'hand=8', 'dealer=4', 'len=5']) {
+  // 範囲外・不正な値・不可能な組み合わせは拒否（別の局面として黙って始めず、エラー画面からタイトルへ戻れる）
+  for (const bad of ['renchan=1000000', 'renchan=-1', 'renchan=1.5', 'renchan=1e3', 'renchan=abc', 'round=1000001', 'round=-3', 'round=0', 'round=2.5', 'round=99999999999999999999',
+    'hand=8', 'dealer=4', 'len=5', 'mode=math3',
+    'round=1&hand=0&renchan=999999&dealer=0&len=4', 'round=100&hand=0&renchan=100&dealer=0&len=4', 'round=100&hand=2&renchan=98&dealer=2&len=4', 'round=10&hand=4&renchan=0&dealer=0&len=4']) {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
     await page.goto(`${LOCAL}?seed=77&${bad}&speed=slow`);
+    await page.waitForSelector('.replay-error', { timeout: 5000 });
+    assert.match(await page.locator('.re-title').innerText(), /再現URLの局状態が不正です/, bad);
+    assert.ok((await page.locator('.re-list li').count()) >= 1, `${bad}: 理由を表示`);
+    assert.equal(await page.locator('.hand .tile').count(), 0, `${bad}: 対局を始めない`);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game), null);
+    await page.locator('button[data-action="to-title"]').tap();
+    await page.waitForSelector('.title-screen');
+    assert.ok(!new URL(page.url()).search, `${bad}: 戻ると URL の検索部分を外す（再読み込みで同じエラーに戻らない）`);
+    await page.locator('button[data-action="start-match"]').tap();
+    await page.waitForSelector('.hand .tile');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // 受理される組み合わせ（境界）
+  for (const [q, label, renchan] of [['round=1&hand=0&renchan=0&dealer=0&len=4', '東1局', 0], ['round=100&hand=0&renchan=99&dealer=0&len=4', '東1局', 99], ['round=100&hand=2&renchan=97&dealer=2&len=4', '東3局', 97], ['round=1000000&hand=0&renchan=999999&dealer=0&len=4', '東1局', 999999], ['round=10&hand=7&renchan=0&dealer=3&len=8', '南4局', 0]]) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    await page.goto(`${LOCAL}?seed=77&${q}&speed=slow`);
     await page.waitForSelector('.hand .tile');
     const st = await matchState(page);
-    const key = bad.split('=')[0];
-    assert.ok(st.renchan === 0 && st.round === 1 && st.length === 4 && st.dealer === 0, `${bad}: 不正な ${key} は無視（既定の局面）`);
-    assert.deepEqual(errors, []);
+    assert.deepEqual([st.label, st.renchan], [label, renchan], q);
     await ctx.close();
   }
   // 上限（通し局数 1,000,000）に達したら試合を終える（出力する値を読み取りの範囲内に保つ）
@@ -3124,6 +3146,128 @@ async function v04Fixes(browser) {
   console.log('✓ Ver.0.4-A 監査 P2-2・P3-1：連荘99→100／通し局数999→1000／大きな値の再現 URL の往復・従来 URL・不正な整数の拒否・上限での試合終了・再現情報の注意書き（全員100点から）');
 }
 
+// ---- Ver.0.4-A 最終修正（PR #9）：終了理由（通常終了／通し局数の上限）と不可能な局状態の再現 URL ----
+const LIMIT_NOTE = '通し局数の上限（1,000,000局）に達したため、試合を終了しました。親の連荘もここで終了します。';
+async function v04End(browser) {
+  const open = async (q) => {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?seed=31&${q}&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    return { ctx, page, errors };
+  };
+  const endInfo = (page) => page.evaluate(() => { const { S } = window.__mathjong; return { over: S.match.over, reason: S.match.endReason, hist: S.history.length, scores: S.match.scores.slice(), played: S.match.played, round: S.round, log: S.match.log.length }; });
+  const resultText = (page) => page.locator('.overlay .result').innerText();
+  const finalText = async (page) => { await page.locator('button[data-action="next"]').tap(); await page.waitForSelector('.overlay .final'); return page.locator('.overlay .final').innerText(); };
+  const LIMIT_URL = 'round=1000000&dealer=0&hand=0&renchan=0&len=8&mode=math1';
+
+  // (1) 上限の局で親が和了：上限による終了（連荘もここで終わる）。精算は1回だけ。局結果と最終結果で理由が一致
+  {
+    const { ctx, page, errors } = await open(LIMIT_URL);
+    await v3Scene(page, presetWall(TSUMO_HAND, ['=1'], [V3_O1, V3_O2, V3_O3]));
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.waitForSelector('.overlay .result');
+    const info = await endInfo(page);
+    assert.deepEqual([info.over, info.reason, info.hist, info.scores, info.log], [true, 'round-limit', 1, [112, 96, 96, 96], 1], '精算は1回だけ');
+    const rt = await resultText(page);
+    assert.ok(rt.includes(LIMIT_NOTE), '局結果に上限の説明');
+    assert.ok(!/親が和了したので連荘/.test(rt), '連荘はここで終了');
+    assert.equal(await page.locator('button[data-action="next"]').innerText(), '最終結果へ');
+    const ft = await finalText(page);
+    assert.ok(ft.includes(LIMIT_NOTE), '最終結果にも同じ説明');
+    // 上限終了後は次局へ進めない（もう一度「次へ」を押す手段がなく、状態も変わらない）
+    assert.equal(await page.locator('.final button[data-action="next"]').count(), 0);
+    assert.deepEqual(await endInfo(page), info, '最終結果の表示で精算を重ねない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (2) 上限の局で流局
+  {
+    const { ctx, page, errors } = await open(LIMIT_URL);
+    await forceDraw(page);
+    await page.waitForSelector('.overlay .result');
+    const info = await endInfo(page);
+    assert.deepEqual([info.over, info.reason, info.scores], [true, 'round-limit', [100, 100, 100, 100]]);
+    assert.ok((await resultText(page)).includes(LIMIT_NOTE));
+    assert.ok((await finalText(page)).includes(LIMIT_NOTE));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (3) 上限の局で子（下家）がツモ和了：親交代で続くはずの試合も上限で終了
+  {
+    const { ctx, page, errors } = await open(LIMIT_URL);
+    await v3Scene(page, presetWall(['sin', 'sin', 'sin', '0', '0', '90', '=-√3', '=-√3'], ['=-√3/2', '=1'], [TSUMO_HAND, V3_O2, V3_O3]));
+    await apDiscardDrawn(page);
+    await page.waitForSelector('.overlay .result', { timeout: 10000 });
+    const info = await endInfo(page);
+    assert.deepEqual([info.over, info.reason, info.hist], [true, 'round-limit', 1]);
+    assert.equal((await page.evaluate(() => window.__mathjong.S.game.result.winner)), 1, '下家のツモ和了');
+    assert.deepEqual(info.scores, [96, 112 - 4, 96 + 2, 96 + 2].map((x, i) => [96, 108, 98, 98][i]), '子ツモ：和了者 +4B、親 −2B、ほかの子 −B');
+    assert.ok((await resultText(page)).includes(LIMIT_NOTE));
+    assert.ok((await finalText(page)).includes(LIMIT_NOTE));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (4) 同じ上限の局で通常の終了条件（最終の親番）も満たす：通常終了を優先し、上限の説明は出さない
+  {
+    const { ctx, page, errors } = await open('round=1000000&dealer=3&hand=3&renchan=0&len=4&mode=math1');
+    await forceDraw(page);
+    await page.waitForSelector('.overlay .result');
+    const info = await endInfo(page);
+    assert.deepEqual([info.over, info.reason], [true, 'normal']);
+    const rt = await resultText(page);
+    assert.ok(!rt.includes('上限') && /試合終了/.test(rt), '通常終了に上限の説明は出さない');
+    assert.ok(!(await finalText(page)).includes('上限'));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (5) 通常の東4局終了・南4局終了：上限の説明なし。通常の連荘規則は維持（上限の1局前でも連荘）
+  for (const q of ['round=4&dealer=3&hand=3&renchan=0&len=4&mode=math1', 'round=8&dealer=3&hand=7&renchan=0&len=8&mode=math1']) {
+    const { ctx, page, errors } = await open(q);
+    await forceDraw(page);
+    await page.waitForSelector('.overlay .result');
+    assert.deepEqual((await endInfo(page)).reason, 'normal', q);
+    assert.ok(!(await resultText(page)).includes('上限'));
+    assert.ok(!(await finalText(page)).includes('上限'));
+    await ctx.close();
+    assert.deepEqual(errors, []);
+  }
+  {
+    const { ctx, page, errors } = await open('round=999999&dealer=0&hand=0&renchan=0&len=8&mode=math1');
+    await v3Scene(page, presetWall(TSUMO_HAND, ['=1'], [V3_O1, V3_O2, V3_O3]));
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.waitForSelector('.overlay .result');
+    const info = await endInfo(page);
+    assert.deepEqual([info.over, info.reason], [false, null], '上限の1局前の連荘は通常どおり続く');
+    assert.match(await resultText(page), /親が和了したので連荘/);
+    assert.equal(await page.locator('button[data-action="next"]').innerText(), '次の局へ');
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.hand .tile');
+    assert.deepEqual([(await matchState(page)).round, (await matchState(page)).renchan], [1000000, 1]);
+    // 次の URL（上限の局）も読み取れる
+    await page.locator('button[data-action="settings"]').tap();
+    const q2 = (await page.locator('.report-info').innerText()).match(/(\?seed=\S+)/)[1];
+    assert.match(q2, /round=1000000&dealer=0&hand=0&renchan=1&len=8/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (6) 不可能な局状態の再現 URL はエラー画面（理由つき）。正常な URL とは区別され、旧形式は従来どおり
+  {
+    const { ctx, page } = await open('round=1&dealer=0&hand=0&renchan=0&len=4');
+    await page.goto(`${LOCAL}?seed=9&round=1&dealer=0&hand=0&renchan=999999&len=4&mode=math2&speed=slow`);
+    await page.waitForSelector('.replay-error');
+    assert.match(await page.locator('.re-list').innerText(), /不可能な局状態/);
+    assert.equal(await page.locator('.hand .tile').count(), 0);
+    await page.goto(`${LOCAL}?seed=321&round=3&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    const old = await matchState(page);
+    assert.deepEqual([old.label, old.renchan, old.dealer, old.round], ['東3局', 0, 2, 3], '旧形式の URL は従来どおり');
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.4-A 最終修正：終了理由（上限の局で親和了・子和了・流局→round-limit／通常終了を優先／東4局・南4局は通常）・精算1回・局結果と最終結果で一致・不可能な局状態の URL はエラー画面・旧形式は従来どおり');
+}
+
 const server = await startServer(0, { base: BASE, host: '127.0.0.1' });
 PORT = server.address().port;
 LOCAL = `http://localhost:${PORT}${BASE}`;
@@ -3160,6 +3304,7 @@ try {
   await v03bHints(browser);
   await v04Match(browser);
   await v04Fixes(browser);
+  await v04End(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));

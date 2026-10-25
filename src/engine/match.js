@@ -21,6 +21,7 @@ export function createMatch({ length = 4, startDealer = 0 } = {}) {
     best: [0, 0, 0, 0], // 1回の和了で得た最高の点（精算後の増加分）
     bestBase: [0, 0, 0, 0], // その和了の基本点 B
     over: false,
+    endReason: null, // 終了の理由：null（続行中）／'normal'（最終の親番が終わった通常終了）／'round-limit'（通し局数の上限で打ち切り）
     log: [], // 各局の記録 { label, dealer, renchan, result, deltas, dealerKeeps }
   };
 }
@@ -58,8 +59,11 @@ export function settle(result, dealer) {
 }
 
 // 1局の結果を反映して次の状態を返す。親が和了すれば連荘（同じ親番）、子の和了・流局は親交代。
-// 最終の親番（4局戦の東4局・8局戦の南4局）が終わったら over。最終の親の連荘中は続く。
-export function applyRoundResult(m, result) {
+// 最終の親番（4局戦の東4局・8局戦の南4局）が終わったら over（endReason 'normal'）。最終の親の連荘中は続く。
+// opts：{ round, maxRound } 通し局数の上限。今の局の通し番号 round が maxRound に達したら、続くはずでも試合を終える
+// （endReason 'round-limit'。連荘もここで終わる）。同じ局で通常の終了条件も満たすなら 'normal' を優先する
+// （上限がなくても終わる試合なので、上限による打ち切りとは言わない）。精算は1回だけ行う。
+export function applyRoundResult(m, result, { round = null, maxRound = null } = {}) {
   if (m.over) throw new Error('match is over');
   const dealer = dealerOf(m);
   const deltas = settle(result, dealer);
@@ -82,6 +86,8 @@ export function applyRoundResult(m, result) {
     n.renchan = 0;
     if (n.hand >= n.length) n.over = true;
   }
+  if (n.over) n.endReason = 'normal';
+  else if (maxRound !== null && round !== null && round >= maxRound) { n.over = true; n.endReason = 'round-limit'; }
   return n;
 }
 

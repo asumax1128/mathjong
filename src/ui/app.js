@@ -14,25 +14,27 @@ import { reconcileOrder, defaultOrder } from './handorder.js';
 import { createHandDrag } from './handdrag.js';
 import { CHI_AUTOPASS_KEY, parseChiAutoPass, visibleClaimActions, claimPendingForHint, claimPolicy, autoPassDue } from './autopass.js';
 import { YAKU_GUIDE, GUIDE_NOTES, guideCondition } from './guide.js';
-import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, intParam, MAX_SEED, MAX_ROUND, MAX_RENCHAN } from './params.js';
+import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, MAX_ROUND } from './params.js';
+import { validateReplay, replayQuery } from './replay.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
 const APP_VERSION = '0.4.0-a';
 document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`;
+const store = {
+  get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* 保存できなくても動作する */ } },
+};
 const params = new URLSearchParams(location.search);
 // テスト専用機能（山の指定・AI待ち時間0）はローカル開発環境でのみ有効。公開サイトでは無効。
 const IS_LOCAL = isLocalHost(location.hostname);
-// ?seed=（0〜999999999の整数）と ?round=（1〜999）だけを受け付ける。不正値は無視。
-const seedParam = intParam(params.get('seed'), MAX_SEED);
-const roundParam = intParam(params.get('round'), MAX_ROUND);
-// Ver.0.4-A 対局の再現：?len=4|8（局数）・?hand=0〜7（親番：0=東1局）・?renchan=（連荘回数）・?dealer=0〜3（その局の親の席）・?ai=
-const lenParam = intParam(params.get('len'), 8);
-const handParam = intParam(params.get('hand'), 7);
-const renchanParam = intParam(params.get('renchan'), MAX_RENCHAN);
-const dealerParam = intParam(params.get('dealer'), 3);
-// ?seed= がある URL（再現・テスト）はタイトルを飛ばしてその局から始める。ない場合はタイトル画面。
-const DIRECT_START = seedParam !== null && seedParam !== undefined;
+// 再現 URL（Ver.0.4-A）：?seed=（0〜999,999,999）がある URL は、タイトルを飛ばしてその局から始める。
+//   従来形式 ?seed&round、新形式 ?seed&round&dealer&hand&renchan&len[&mode]。src/ui/replay.js で、各値の範囲と
+//   局状態の組み合わせ（round ≥ hand + renchan + 1、hand < len など）を検証する。不整合な URL は別の局面として
+//   黙って始めず、エラー画面（タイトルへ戻れる）を出す。seed がない・不正な URL は通常のタイトル画面。
+const savedLen = (() => { const v = store.get('mj-length', null); return v === '4' || v === '8' ? Number(v) : 4; })();
+const REPLAY = validateReplay(params, { defaultLen: savedLen });
+const RV = REPLAY.values; // seed が有効なときだけ（kind が none なら null）
 // モード（Ver.0.3）：数学Ⅰ（度数法・124枚）／数学Ⅱ（弧度法・168枚）。新しい対局の開始時にだけ切り替える。
 // ?mode=math1|math2 または保存値（mj-mode）。?rules=legacy はローカル開発環境だけの互換テスト用（Ver.0.2.1 の規則）。
 const MODE_KEY = 'mj-mode';
@@ -53,10 +55,6 @@ const PLAYERS = [
   { name: 'AI-C', kind: 'ai', personality: 'closed' },
 ];
 
-const store = {
-  get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
-  set(k, v) { try { localStorage.setItem(k, v); } catch { /* 保存できなくても動作する */ } },
-};
 
 // AI 難易度（Ver.0.4-A では設定の保持と表示だけ。対局 AI はすべて現行の中級の判断）
 const AI_LEVELS = [
@@ -73,12 +71,12 @@ const aiLabel = (id) => {
 
 const S = {
   // 局の通し番号（連荘を含む、1から）。山は seed と この番号だけで決まる（従来の ?round=n と同じ）。
-  round: roundParam && roundParam > 0 ? roundParam : 1,
+  round: REPLAY.kind !== 'none' && REPLAY.ok ? RV.round : 1,
   dealer: 0, // その局の親の席（試合の状態 S.match から決まる）
   scores: [START_POINTS, START_POINTS, START_POINTS, START_POINTS],
   match: null, // 試合の状態（src/engine/match.js）
-  screen: DIRECT_START ? 'game' : 'title',
-  seedBase: seedParam ?? Math.floor(Math.random() * 1e9),
+  screen: REPLAY.kind === 'none' ? 'title' : REPLAY.ok ? 'game' : 'replay-error',
+  seedBase: RV ? RV.seed : Math.floor(Math.random() * 1e9),
   game: null,
   selected: null,
   hintsUsed: 0,
@@ -95,7 +93,7 @@ S.mode = parseMode(params.get('mode')) || parseMode(store.get(MODE_KEY, null)) |
 S.nextMode = S.mode;
 let rules = rulesForMode(S.mode);
 // 対局設定（タイトル画面で選び、「対局開始」で確定）。保存キー mj-mode・mj-length・mj-ai
-S.length = parseLen(lenParam) || parseLen(store.get('mj-length', null)) || 4;
+S.length = REPLAY.kind !== 'none' && REPLAY.ok && RV.lenGiven ? RV.len : savedLen;
 S.ai = parseAi(params.get('ai')) || parseAi(store.get('mj-ai', null)) || 'intermediate';
 // チーのオートパス（Ver.0.2-B）。保存値 '1' だけが ON、それ以外・保存不可は OFF。
 S.chiAutoPass = parseChiAutoPass(store.get(CHI_AUTOPASS_KEY, null));
@@ -207,9 +205,9 @@ function finishRound() {
     S.scored = true;
     S.prevScores = S.match.scores.slice();
     S.lastRound = { label: handLabel(S.match), renchan: S.match.renchan, dealer: S.dealer };
-    S.match = applyRoundResult(S.match, g.result);
-    // 再現 URL の範囲（MAX_ROUND）に達したら試合を終える（出力する round・renchan を読み取りの範囲内に保つ）
-    if (S.round >= MAX_ROUND && !S.match.over) S.match = { ...S.match, over: true };
+    // 通し局数が MAX_ROUND に達したら試合を終える（出力する round・renchan を再現 URL の範囲内に保つ。
+    // 終了の理由は S.match.endReason に残る：'normal'＝通常終了、'round-limit'＝上限による打ち切り）
+    S.match = applyRoundResult(S.match, g.result, { round: S.round, maxRound: MAX_ROUND });
     S.scores = S.match.scores;
     S.history.push({ round: S.round, result: g.result.type === 'win' ? { ...g.result, analysis: undefined } : g.result });
   }
@@ -398,6 +396,7 @@ function headerHTML() {
 
 function render() {
   if (S.screen === 'title') { app.innerHTML = titleHTML(); return; }
+  if (S.screen === 'replay-error') { app.innerHTML = replayErrorHTML(); return; }
   if (!S.game) return;
   // 並び替え中に再描画が必要になったら、並び替えを中止してから描画する（DOM が作り直されるため）
   if (drag && drag.isDragging()) drag.cancel('render');
@@ -496,7 +495,8 @@ function resultHTML() {
     <tr><th>持ち点</th>${[0, 1, 2, 3].map((s) => `<td class="${r.winner === s ? 'win' : ''}">${S.scores[s]}</td>`).join('')}</tr></table>`;
   const m = S.match;
   const dealerName = (s) => (s === HUMAN ? 'あなた' : `${POS[s]} ${PLAYERS[s].name}`);
-  const nextLine = m.over ? `<p class="next-round over">${S.lastRound.label}の親番が終わりました。<b>試合終了</b>です。</p>`
+  const nextLine = m.over && m.endReason === 'round-limit' ? `<p class="next-round over">${ROUND_LIMIT_NOTE}</p>`
+    : m.over ? `<p class="next-round over">${S.lastRound.label}の親番が終わりました。<b>試合終了</b>です。</p>`
     : m.renchan > 0 && r.type === 'win' && r.winner === S.lastRound.dealer
       ? `<p class="next-round">親が和了したので<b>連荘</b>：次は${handLabel(m)}（連荘${m.renchan}回目）、親は${dealerName(dealerOf(m))}</p>`
       : `<p class="next-round"><b>親交代</b>：次は${handLabel(m)}、親は${dealerName(dealerOf(m))}</p>`;
@@ -510,6 +510,9 @@ function resultHTML() {
     <div class="modal-actions"><button data-action="next" class="primary">${m.over ? '最終結果へ' : '次の局へ'}</button>
     <button data-action="close-result">盤面を見る</button></div></div>`;
 }
+
+// 通し局数の上限で試合を終えた場合の説明（通常の試合終了では表示しない）
+const ROUND_LIMIT_NOTE = `通し局数の上限（${MAX_ROUND.toLocaleString('en-US')}局）に達したため、試合を終了しました。親の連荘もここで終了します。`;
 
 // 試合終了のリザルト（最終順位・得点・開始点との差・和了回数・最高和了・局数・連荘・設定）
 function finalHTML() {
@@ -528,10 +531,21 @@ function finalHTML() {
       <li>実施した局数：<b>${m.played}局</b>（${m.length === 4 ? '4局戦・東1〜東4局' : '8局戦・東1〜南4局'}）</li>
       <li>連荘回数：<b>${m.renchanTotal}回</b></li>
       <li>数学モード：${modeLabel(rules)} ／ AI難易度：${aiLabel(S.matchSettings ? S.matchSettings.ai : S.ai)}</li>
+      ${m.endReason === 'round-limit' ? `<li class="note round-limit-note">${ROUND_LIMIT_NOTE}</li>` : ''}
       <li class="note">開始時の持ち点は各${START_POINTS}点（合計${START_POINTS * 4}点）。同点は同順位。点数配分は試作段階の暫定値です。</li>
     </ul>
     <div class="modal-actions"><button data-action="again" class="primary">もう一度遊ぶ</button><button data-action="to-title">タイトルへ戻る</button></div>
   </div>`;
+}
+
+// 再現 URL の局状態が不正なとき（別の局面として黙って始めない）。タイトルへ戻れる。
+function replayErrorHTML() {
+  return `<main class="title-screen replay-error">
+    <h1 class="re-title">再現URLの局状態が不正です</h1>
+    <p class="re-lead">この再現URLは、正規の進行では起こり得ない局状態、または範囲外の値を含んでいるため、対局を始めませんでした。</p>
+    <ul class="re-list">${REPLAY.errors.map((e) => `<li><code>${e.key}</code>：${e.message}</li>`).join('')}</ul>
+    <button data-action="to-title" class="primary start-btn">タイトルへ戻る</button>
+  </main>`;
 }
 
 // ---------- タイトル画面 ----------
@@ -563,12 +577,11 @@ function titleHTML() {
 // 不具合報告用の再現情報。山は seed と局の通し番号（round）で決まり、親の席・親番・連荘回数・局数も URL で指定する。
 // （持ち点は再現しない。連荘で「局番号から親が決まらない」ため dealer を明示する）
 function reportInfoHTML() {
-  const modeQ = LEGACY ? '' : `&amp;mode=${rules.config.mode}`;
   const m = S.match;
   const label = S.scored && S.lastRound ? S.lastRound : { label: handLabel(m), renchan: m.renchan };
   const hand = S.scored && S.lastRound ? m.log[m.log.length - 1].hand : m.hand;
   return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ ${label.label}・連荘${label.renchan}（通し第<b>${S.round}</b>局・親 ${POS[S.dealer]}）／ ${m.length}局戦 ／ ${modeLabel(rules)} ／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
-    この局から再現：URL の末尾に <code>?seed=${S.seedBase}&amp;round=${S.round}&amp;dealer=${S.dealer}&amp;hand=${hand}&amp;renchan=${label.renchan}&amp;len=${m.length}${modeQ}</code><br>
+    この局から再現：URL の末尾に <code>${replayQuery({ seed: S.seedBase, round: S.round, dealer: S.dealer, hand, renchan: label.renchan, len: m.length, mode: LEGACY ? null : rules.config.mode }).replace(/&/g, '&amp;')}</code><br>
     <span class="report-caveat">このURLでは山・配牌・親・局状態を再現します。持ち点や過去の対局履歴は復元されず、全員100点から開始します。</span></p>`;
 }
 
@@ -910,6 +923,8 @@ app.addEventListener('click', (ev) => {
     case 'ask-title': S.confirmTitle = true; render(); break;
     case 'cancel-title': S.confirmTitle = false; render(); break;
     case 'to-title':
+      // 再現 URL のエラー画面から戻るときは、再読み込みで同じエラーに戻らないよう URL の検索部分を外す
+      if (S.screen === 'replay-error') { try { history.replaceState(null, '', location.pathname); } catch { /* 無視 */ } }
       // 対局を終了してタイトルへ（AI の進行・ドラッグ・ヒントを止める）
       clearTimeout(S.timer);
       S.timer = null;
@@ -1013,12 +1028,10 @@ function startMatch({ fromUrl = false, settings = null } = {}) {
   S.prevScores = null;
   S.lastRound = null;
   if (fromUrl) {
-    // 従来の ?round=n だけの URL：親は (n−1) mod 4、親番は n−1（局数の範囲に丸める）
-    const n = roundParam && roundParam > 0 ? roundParam : 1;
-    const hand = handParam !== null && handParam !== undefined ? handParam : Math.min(n - 1, cfg.length - 1);
-    const dealer = dealerParam !== null && dealerParam !== undefined ? dealerParam : (n - 1) % 4;
-    const h = Math.max(0, Math.min(cfg.length - 1, hand));
-    S.match = matchAt({ length: cfg.length, hand: h, renchan: renchanParam || 0, startDealer: (((dealer - h) % 4) + 4) % 4 });
+    // 検証済みの値（src/ui/replay.js）。従来の ?round=n だけの URL は、親が (n−1) mod 4、親番が n−1（局数の範囲に丸め）。
+    // 起家（東1局の親）は、指定された親の席と親番から逆算する（どの組み合わせも矛盾しない）。
+    const { round: n, hand: h, dealer, renchan } = RV;
+    S.match = matchAt({ length: cfg.length, hand: h, renchan, startDealer: (((dealer - h) % 4) + 4) % 4 });
     S.round = n;
   } else {
     S.match = createMatch({ length: cfg.length });
@@ -1028,5 +1041,5 @@ function startMatch({ fromUrl = false, settings = null } = {}) {
   startRound();
 }
 
-if (DIRECT_START) startMatch({ fromUrl: true, settings: { mode: S.nextMode, length: S.length, ai: S.ai } });
-else render();
+if (REPLAY.kind !== 'none' && REPLAY.ok) startMatch({ fromUrl: true, settings: { mode: S.nextMode, length: S.length, ai: S.ai } });
+else render(); // タイトル画面、または再現 URL のエラー画面

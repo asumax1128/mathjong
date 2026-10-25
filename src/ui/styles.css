@@ -371,3 +371,7 @@ table.values td.undef { color: #999; font-size: 12px; }
   .tile.sz-xs { width: 26px; height: 35px; font-size: 11px; }
 }
 .report-caveat { display: block; margin-top: 3px; font-size: 11px; color: #7a5b00; }
+.replay-error .re-title { font-size: 20px; color: #fca5a5; margin: 24px 0 4px; text-align: center; }
+.replay-error .re-lead { font-size: 13px; color: var(--ink-dim); margin: 0; }
+.replay-error .re-list { font-size: 13px; padding-left: 1.2em; margin: 4px 0; }
+.round-limit-note, .next-round.over { font-size: 13px; }

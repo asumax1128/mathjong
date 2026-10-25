@@ -1,0 +1,64 @@
+// 再現 URL（Ver.0.4-A）：読み取り・整合性の検証・出力（URL の組み立て）を1か所にまとめる。画面から独立した純粋関数。
+// tests/replay.test.js で検証。ゲームが出力する URL は、必ずここの検証を通る（出力と入力を同じ定義にそろえる）。
+//
+// URL の種類
+//   none   ：seed がない、または seed が不正 → 再現ではない（タイトル画面から）
+//   legacy ：従来形式 ?seed=S[&round=n]（hand・renchan・dealer がない）。親は (n−1) mod 4、親番は n−1（局数の範囲に丸める）。
+//   replay ：新形式 ?seed&round&dealer&hand&renchan&len[&mode]（hand・renchan・dealer のどれかがある）。
+//            足りない項目は従来形式と同じ既定値で補い、組み合わせ全体を検証する。
+// 指定された項目が1つでも不正なら、別の局面として黙って始めずに ok=false（errors に理由）を返す。
+import { intParam, MAX_SEED, MAX_ROUND, MAX_RENCHAN } from './params.js';
+
+export const REPLAY_LENGTHS = [4, 8];
+const MODES = ['math1', 'math2'];
+
+// params：URLSearchParams と同じ has/get を持つもの。defaultLen：URL に len がないときの局数（保存値など）
+export function validateReplay(params, { defaultLen = 4 } = {}) {
+  if (!params.has('seed')) return { kind: 'none', ok: true, errors: [], values: null };
+  const seed = intParam(params.get('seed'), MAX_SEED);
+  if (seed === null) return { kind: 'none', ok: true, errors: [], values: null };
+
+  const errors = [];
+  const bad = (key, message) => errors.push({ key, message });
+  const num = (key, max, min = 0) => {
+    if (!params.has(key)) return undefined;
+    const v = intParam(params.get(key), max);
+    if (v === null || v < min) { bad(key, `${key} が範囲外または不正な値です（${min}〜${max} の整数）`); return null; }
+    return v;
+  };
+  const fresh = params.has('hand') || params.has('renchan') || params.has('dealer');
+
+  let len = defaultLen;
+  const lenRaw = num('len', 8);
+  if (lenRaw !== undefined && lenRaw !== null) {
+    if (REPLAY_LENGTHS.includes(lenRaw)) len = lenRaw; else bad('len', 'len は 4 または 8 です');
+  }
+  const roundRaw = num('round', MAX_ROUND, 1);
+  const handRaw = num('hand', 7);
+  const renchanRaw = num('renchan', MAX_RENCHAN);
+  const dealerRaw = num('dealer', 3);
+  let mode = null;
+  if (params.has('mode')) {
+    mode = params.get('mode');
+    if (!MODES.includes(mode)) { bad('mode', 'mode は math1 または math2 です'); mode = null; }
+  }
+
+  const round = roundRaw ?? 1;
+  const hand = handRaw ?? Math.min(round - 1, len - 1);
+  const dealer = dealerRaw ?? (round - 1) % 4;
+  const renchan = renchanRaw ?? 0;
+
+  // 局状態の整合性（新形式のみ。従来形式には hand・renchan がないので適用しない）
+  if (fresh && errors.length === 0) {
+    if (hand > len - 1) bad('hand', `${len}局戦の親番は 0〜${len - 1} です（hand=${hand}）`);
+    // 親番 hand に着くまでに少なくとも hand 局、その親番の連荘 renchan 局を終えている。現在の局はその次なので
+    // 通し局数 round は hand + renchan + 1 以上でなければ、正規の進行では起こり得ない。
+    if (round < hand + renchan + 1) bad('round', `通し局数 ${round} は、親番 ${hand} と連荘 ${renchan} の局状態に必要な ${hand + renchan + 1} 局より小さく、不可能な局状態です`);
+  }
+  return { kind: fresh ? 'replay' : 'legacy', ok: errors.length === 0, errors, values: { seed, round, hand, renchan, dealer, len, lenGiven: lenRaw !== undefined && lenRaw !== null, mode } };
+}
+
+// 再現 URL のクエリ（先頭の ? 付き）。ゲームが出力する形式。mode が null なら省く。
+export function replayQuery({ seed, round, dealer, hand, renchan, len, mode = null }) {
+  return `?seed=${seed}&round=${round}&dealer=${dealer}&hand=${hand}&renchan=${renchan}&len=${len}${mode ? `&mode=${mode}` : ''}`;
+}
