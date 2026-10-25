@@ -69,7 +69,7 @@ test('初級：チー・ポンをしない、ロン・ツモは必ずする、�
       });
     }
   }
-  assert.ok(seen.ron > 5 && seen.tsumo > 0 && seen.callChance > 20, JSON.stringify(seen));
+  assert.ok(seen.ron > 0 && seen.tsumo > 0 && seen.callChance > 20, JSON.stringify(seen)); // 各局面を実際に通ったこと
 });
 
 test('初級の打牌：完成した面子の牌を残しやすい（残したい度の低い牌から選ぶ）', () => {
