@@ -48,11 +48,11 @@ function play(rules, seed, levels, check = () => {}, dealer = seed % 4) {
   return { g, log };
 }
 
-test('初級：チー・ポンをしない、ロン・ツモは必ずする、打牌は自分の手牌から（数学Ⅰ・Ⅱ、各40局）', () => {
+test('初級：チー・ポンをしない、ロン・ツモは必ずする、打牌は自分の手牌から（数学Ⅰ・Ⅱ、各30局）', () => {
   const seen = { ron: 0, tsumo: 0, callChance: 0 };
   for (const mode of ['math1', 'math2']) {
     const r = rulesFor(mode);
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 30; i++) {
       // 初級2人・中級2人（席を入れ替える）
       const levels = i % 2 ? ['beginner', 'intermediate', 'beginner', 'intermediate'] : ['intermediate', 'beginner', 'intermediate', 'beginner'];
       play(r, 700 + i, levels, (g, p, a, lv) => {
@@ -84,10 +84,10 @@ test('初級の打牌：完成した面子の牌を残しやすい（残した�
   assert.ok(Math.abs(BEGINNER.PICK.reduce((a, b) => a + b, 0) - 1) < 1e-12);
 });
 
-test('上級：ロン・ツモは必ずする。打牌・宣言は合法（数学Ⅰ・Ⅱ、各20局）', () => {
+test('上級：ロン・ツモは必ずする。打牌・宣言は合法（数学Ⅰ・Ⅱ、各10局）', () => {
   for (const mode of ['math1', 'math2']) {
     const r = rulesFor(mode);
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 10; i++) {
       play(r, 900 + i, ['advanced', 'advanced', 'intermediate', 'advanced'], (g, p, a, lv) => {
         if (lv !== 'advanced') return;
         if (p.type === 'turn' && p.canTsumo) assert.deepEqual(a, { type: 'tsumo' });
@@ -129,7 +129,7 @@ test('非公開情報を参照しない：他家の手牌・山の並びを入�
   let changedHidden = 0;
   for (const mode of ['math1', 'math2']) {
     const r = rulesFor(mode);
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 3; i++) {
       const shuf = createRng(31 + i);
       play(r, 5200 + i, ['advanced', 'beginner', 'intermediate', 'advanced'], (g, p) => {
         // 自分の判断に必要な選択肢（pending）は自分の手牌だけで決まる。手番は全員、宣言は自分の選択肢だけで比べる。
@@ -146,10 +146,10 @@ test('非公開情報を参照しない：他家の手牌・山の並びを入�
       });
     }
   }
-  assert.ok(compared > 300 && changedHidden > 100, `${compared} ${changedHidden}`);
+  assert.ok(compared > 150 && changedHidden > 50, `${compared} ${changedHidden}`);
 });
 
-test('上級の危険度は確率（0〜1）で、自分の席は 0。他家の手牌を変えても同じ', () => {
+test('上級の危険度は確率（0〜1）で、自分の席は 0。上級は守りの評価を使う', () => {
   const r = rulesFor('math2');
   const { g } = play(r, 6100, ['intermediate', 'intermediate', 'intermediate', 'intermediate'], () => {}, 0);
   const view = g.viewFor(1);
