@@ -151,7 +151,17 @@ button:focus-visible, .tile.tap:focus-visible { outline: 3px solid var(--accent)
 
 .tile.tap { cursor: pointer; transition: transform 0.08s; }
 .tile.selected { transform: translateY(-10px); border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold); }
-.tile.hint { box-shadow: 0 0 0 2px #f1d24a; }
+/* Ver.0.3-B 数式の確認：牌の外側に色枠（中身を隠さない・操作を妨げない）。共有の牌は上半分＝赤、下半分＝青 */
+.tile.fhf::before {
+  content: ''; position: absolute; inset: -4px; border-radius: 9px; padding: 3px; pointer-events: none;
+  background: var(--fh-col);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+.tile.fhf-yellow { --fh-col: #f1d24a; }
+.tile.fhf-red { --fh-col: #ef4444; }
+.tile.fhf-blue { --fh-col: #3b82f6; }
+.tile.fhf-rb { --fh-col: linear-gradient(to bottom, #ef4444 0 50%, #3b82f6 50% 100%); }
 .tile.claimed { background: #fde7b0; }
 .tile.last { box-shadow: 0 0 0 2px var(--accent); }
 .tile.claimable { box-shadow: 0 0 0 2px var(--win); }
@@ -266,6 +276,30 @@ table.values td.undef { color: #999; font-size: 12px; }
 .yc-none { margin: 4px 0 0; font-size: 13px; }
 .yc-note { margin: 3px 0 0; font-size: 10.5px; line-height: 1.35; color: var(--ink-dim); }
 .hint-tools { display: flex; gap: 6px; justify-content: center; margin-top: 6px; }
+.hint-basic .hb-row { margin: 1px 0; }
+.fh-confirm { margin-top: 4px; }
+.fh { margin-top: 6px; background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 6px 8px; color: var(--ink); }
+.fh-list { list-style: none; margin: 4px 0 0; padding: 0; max-height: 11.5em; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.fh-item { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 6px; font-size: 14px; min-height: 36px; }
+.fh-item.is-a { background: rgba(239, 68, 68, 0.16); }
+.fh-item.is-b { background: rgba(59, 130, 246, 0.18); }
+.fh-no { display: inline-flex; align-items: center; justify-content: center; min-width: 1.5em; height: 1.5em; border-radius: 50%; background: rgba(255, 255, 255, 0.12); font-size: 12px; font-weight: 700; }
+.fh-item .formula { flex: 0 1 auto; }
+.fh-copies { font-size: 12px; color: var(--ink-dim); }
+.fh-role { font-size: 11px; font-weight: 700; border-radius: 4px; padding: 0 4px; color: #111; }
+.fh-role.off { opacity: 0.4; }
+.fh-role.fh-yellow { background: #f1d24a; } .fh-role.fh-red { background: #ef4444; color: #fff; } .fh-role.fh-blue { background: #3b82f6; color: #fff; }
+.fh-picks { margin-left: auto; display: inline-flex; gap: 4px; }
+.fh-pick { min-height: 32px; min-width: 36px; padding: 0 6px; font-size: 12px; opacity: 0.55; }
+.fh-pick[aria-pressed="true"] { opacity: 1; }
+.fh-pick.fh-red { border-color: #ef4444; } .fh-pick.fh-blue { border-color: #3b82f6; }
+.fh-pick.fh-red[aria-pressed="true"] { background: #ef4444; color: #fff; } .fh-pick.fh-blue[aria-pressed="true"] { background: #3b82f6; color: #fff; }
+.fh-modes { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
+.fh-modes button { min-height: 36px; }
+.fh-modes button[aria-pressed="true"] { background: var(--gold); color: #111; }
+.fh-note { margin: 4px 0 0; font-size: 12px; color: var(--ink-dim); }
+.fh-red-t { color: #fca5a5; } .fh-blue-t { color: #93c5fd; }
+.fh-shared { color: var(--ink); }
 .tag.closed { background: #f3d1c8; color: #7a2516; }
 .tag.open { background: #d6ead9; color: #1e5a2f; }
 .tag.sp { background: #e6dcf5; color: #4a2d7a; }
