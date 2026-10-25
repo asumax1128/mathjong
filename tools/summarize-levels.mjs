@@ -4,7 +4,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const dir = process.argv[2];
-const files = readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
+// 実行中（空）のファイルは除く
+const files = readdirSync(dir).filter((f) => f.endsWith('.json') && readFileSync(join(dir, f), 'utf8').trim()).sort();
 const rs = files.map((f) => ({ name: f.replace(/\.json$/, ''), ...JSON.parse(readFileSync(join(dir, f), 'utf8')) }));
 const LV = { beginner: '初級', intermediate: '中級', advanced: '上級' };
 const f2 = (x) => (x >= 0 ? `+${x.toFixed(2)}` : x.toFixed(2));
