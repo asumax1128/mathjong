@@ -150,6 +150,8 @@ export function modeConfig(mode = DEFAULT_MODE) {
     if (mode === 'math1' && MATH1_IMPOSSIBLE.includes(y.id)) { y.enabled = false; y.disabledReason = '数学Ⅰ（0°〜180°）では成立しない'; }
   }
   c.yaku.push(...clone(KOUTSU_YAKU));
+  // 役候補ヒント：刻子系の役は「あと何枚」に1枚分を足した順位で並べる（数式系を優先。表示する枚数は正確な値）
+  c.hint = { koutsuPenalty: 1 };
   for (const s of c.specialHands) s.category = 'formula';
   return c;
 }

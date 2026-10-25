@@ -51,18 +51,16 @@ test('ON：ツモ番（ツモ可能・不可能）・終局・他家の宣言は
 });
 
 test('表示する宣言ボタン：OFF は従来どおり全部', () => {
-  assert.deepEqual(visibleClaimActions(claim(), false), {
-    ron: false, chi: [{ index: 0, meld: 10 }, { index: 1, meld: 20 }], passLabel: '見送る', passNote: null,
+  assert.deepEqual(visibleClaimActions(claim(), false), { ron: false, pon: null, chi: [{ index: 0, meld: 10 }, { index: 1, meld: 20 }], passLabel: '見送る', passNote: null,
   });
-  assert.deepEqual(visibleClaimActions(claim({ ron: true }), false), {
-    ron: true, chi: [{ index: 0, meld: 10 }, { index: 1, meld: 20 }], passLabel: 'ロンしない', passNote: null,
+  assert.deepEqual(visibleClaimActions(claim({ ron: true }), false), { ron: true, pon: null, chi: [{ index: 0, meld: 10 }, { index: 1, meld: 20 }], passLabel: 'ロンしない', passNote: null,
   });
-  assert.deepEqual(visibleClaimActions(claim({ ron: true, chi: [] }), false), { ron: true, chi: [], passLabel: 'ロンしない', passNote: null });
+  assert.deepEqual(visibleClaimActions(claim({ ron: true, pon: null, chi: [] }), false), { ron: true, pon: null, chi: [], passLabel: 'ロンしない', passNote: null });
 });
 
 test('表示する宣言ボタン：ON・ロン＋チーはチーを出さず「ロンしない」に「チーも見送ります」', () => {
-  assert.deepEqual(visibleClaimActions(claim({ ron: true }), true), { ron: true, chi: [], passLabel: 'ロンしない', passNote: 'チーも見送ります' });
-  assert.deepEqual(visibleClaimActions(claim({ ron: true, chi: [] }), true), { ron: true, chi: [], passLabel: 'ロンしない', passNote: null }, 'ロンのみ');
+  assert.deepEqual(visibleClaimActions(claim({ ron: true }), true), { ron: true, pon: null, chi: [], passLabel: 'ロンしない', passNote: 'チーも見送ります' });
+  assert.deepEqual(visibleClaimActions(claim({ ron: true, pon: null, chi: [] }), true), { ron: true, pon: null, chi: [], passLabel: 'ロンしない', passNote: null }, 'ロンのみ');
   // チーのみ（自動パスに失敗したときの手動表示）：チーの選択肢を出す。index はエンジンの候補番号のまま
   assert.deepEqual(visibleClaimActions(claim(), true).chi, [{ index: 0, meld: 10 }, { index: 1, meld: 20 }]);
   assert.equal(visibleClaimActions(turn(true), true), null);
