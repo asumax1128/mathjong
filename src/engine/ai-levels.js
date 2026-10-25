@@ -228,7 +228,7 @@ export function advancedDiscard(rules, view, personality, rng, info) {
 //   melds  ：o の鳴いた回数（1回・2回）
 //   inRiver：o 自身が t を捨てているか（捨てた牌で待つことは少ない。フリテンはないので 0 にはならない）
 // 係数は中級 AI どうしの対局（数学Ⅰ 300局・数学Ⅱ 200局、seed 9000〜）で、他家の実際の手牌から求めた「その牌でロンできたか」に
-// 当てはめた値（tools/ の検証スクリプトは docs/17 に記載）。実際の対局では他家の手牌は一切見ない。
+// 当てはめた値（node tools/calibrate-advanced.mjs --mode math1|math2 で再計算できる）。実際の対局では他家の手牌は一切見ない。
 export const DANGER_COEF = {
   //        [定数, log(w+0.001), turns, melds=1, melds=2, inRiver, min(turns,12)^2/10, w>0]
   math1: [-6.982, 0.679, 0.554, 0.988, 2.007, -2.886, -0.264, 1.53],
@@ -237,8 +237,8 @@ export const DANGER_COEF = {
 
 // 自分の和了の見込み（同じ対局データで当てはめ）：logit = a + b·log(手の価値) + c·山の残り + d·鳴いた回数
 export const WIN_COEF = {
-  math1: [-2.519, 0.933, 0.027, 0.811],
-  math2: [-3.712, 0.94, 0.02, 1.319],
+  math1: [-2.816, 0.883, 0.03, 0.653],
+  math2: [-3.673, 0.79, 0.02, 1.297],
 };
 
 const sigmoid = (x) => 1 / (1 + Math.exp(-x));
