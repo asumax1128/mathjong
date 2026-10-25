@@ -156,6 +156,7 @@ const claimAutoPassOn = () => { const c = currentClaimPolicy(); return !!(c && c
 function step(changed = false) {
   clearTimeout(S.timer);
   S.timer = null;
+  if (!S.game) return; // タイトル画面へ戻った後（遅れて呼ばれた step は何もしない）
   // 手牌の並び替え（dragging）中は AI を進めない。指を離すか中止した時点で step() を1回だけ呼び直す。
   // AI の判断・乱数は局面だけで決まるので、待つ時間は結果に影響しない。
   if (drag && drag.isDragging()) { S.stepDeferred = true; return; }
