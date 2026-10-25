@@ -2285,7 +2285,8 @@ async function v03Rules(browser) {
   {
     const { ctx, page, errors } = await v3Page(browser, 'math1');
     await v3Scene(page, presetWall(['=1/2', '=1/2', '0', '0', '135', '=-√3', 'tan', 'cos'],
-      ['45', '=-1/√3', '=-√3/2', '=-1/√2', '=1/√3', '=1/√2', '60', '30', '=√3/2'], [V3_O1, V3_O2, V3_O3]));
+      // 4枚目（下家の2回目のツモ）は対面がチーできない牌にする（対面 AI は cos 135° = −1/√2 をチーし得る）
+      ['45', '=-1/√3', '=-√3/2', '=-1/√3', '=1/√3', '=1/√2', '60', '30', '=√3/2'], [V3_O1, V3_O2, V3_O3]));
     await apDiscardDrawn(page);
     await apForce(page, 1);
     await apForce(page, 2, 'v:1/2');
@@ -2476,6 +2477,11 @@ async function v03Rules(browser) {
     assert.equal((await info()).mode, 'math1', '再読み込み後も数学Ⅰ');
     await page.evaluate(() => { const { S, startRound } = window.__mathjong; S.round++; S.dealer = (S.dealer + 1) % 4; startRound(); });
     assert.equal((await info()).mode, 'math1', '次の局でも維持');
+    // 切替後のガイドの条件文は度数法（P3-1）
+    await page.locator('button[data-action="guide"]').first().tap();
+    const conds = await page.locator('.gy-cond').allInnerTexts();
+    assert.ok(conds.length > 5 && conds.every((c) => !c.includes('π')), '数学Ⅰへ切り替えた後は度数法');
+    assert.match(conds.join(' '), /30°・45°・60°/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -2490,6 +2496,15 @@ async function v03Rules(browser) {
     assert.equal(ids.includes('shougen3'), mode === 'math2');
     assert.equal(await page.locator('.gy[data-yaku="toitoi"] .formula.koutsu').count(), 3);
     assert.match(await page.locator('.gy[data-yaku="sanankou"]').innerText(), /ロンで最後の刻子を完成させた場合も成立/);
+    // 監査 P3-1：条件文の角度表記はモードに合わせる（数学Ⅰ＝度数法、数学Ⅱ＝弧度法）
+    const conds = await page.locator('.gy-cond').allInnerTexts();
+    if (mode === 'math2') {
+      assert.ok(conds.every((c) => !c.includes('°')), `数学Ⅱに度数法が残る: ${conds.filter((c) => c.includes('°')).join(' / ')}`);
+      assert.match(await page.locator('.gy[data-yaku="yokaku"] .gy-cond').innerText(), /cos\(π\/2−θ\).*0≦θ≦π\/2/);
+    } else {
+      assert.ok(conds.every((c) => !c.includes('π')), '数学Ⅰに弧度法が混ざる');
+      assert.match(await page.locator('.gy[data-yaku="yokaku"] .gy-cond').innerText(), /cos\(90°−θ\).*0°≦θ≦90°/);
+    }
     await page.locator('[data-action="guide-tab"][data-tab="rules"]').tap();
     const rulesText = await page.locator('.rules-list').innerText();
     assert.match(rulesText, /ロン ＞ ポン ＞ チー/);

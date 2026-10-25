@@ -219,3 +219,83 @@ test('ヒント：AI 対局の各局面で、候補の代表完成形が和了�
     }
   }
 });
+
+// ---------------- 監査 P3-2：ロン経路はロン和了として評価（三暗刻の設定と代表得点がエンジンと一致） ----------------
+import { createRules } from '../src/engine/rules.js';
+import { makeConfig } from '../src/engine/config.js';
+
+function ronScene(flag) {
+  const r = createRules(makeConfig({ mode: 'math2', rules: { sanankouRonCounts: flag } }));
+  const hand = ['=0', '=0', '=0', '45', '45', '45', 'cos', 'cos'];
+  const v = view(r, hand, { rivers: [[], [], [], ['cos']] });
+  const claim = { type: t(r, 'cos'), from: 3, ron: true, chiMelds: [], ponMeld: null };
+  const engine = r.analyzeWin(r.countsOf([...hand, 'cos'].map((s) => t(r, s))), [], { ron: true });
+  return { r, v, claim, engine, hand };
+}
+
+test('P3-2：sanankouRonCounts=true（既定）：ロンの代表得点は 9点（対々和＋三暗刻）でエンジンと一致', () => {
+  const { r, v, claim, engine } = ronScene(true);
+  const cs = yakuCandidates(r, v, { claim, limit: 99 }).filter((c) => c.via === 'ron');
+  assert.deepEqual(engine.yaku.map((y) => y.id).sort(), ['sanankou', 'toitoi']);
+  assert.equal(engine.points, 9);
+  assert.equal(find(cs, 'toitoi').points, engine.points);
+  assert.equal(find(cs, 'sanankou').points, engine.points);
+});
+
+test('P3-2：sanankouRonCounts=false：ロンでは三暗刻を出さず、対々和の代表得点は 4点（エンジンと一致）', () => {
+  const { r, v, claim, engine } = ronScene(false);
+  assert.deepEqual(engine.yaku.map((y) => y.id), ['toitoi']);
+  assert.equal(engine.points, 4);
+  const cs = yakuCandidates(r, v, { claim, limit: 99 });
+  const ron = cs.filter((c) => c.via === 'ron');
+  assert.equal(find(ron, 'sanankou'), undefined);
+  assert.equal(find(ron, 'toitoi').points, 4, '修正前は 9点（ツモ用の評価を使っていた）');
+  // 門前のツモでは三暗刻が成立する（ロン以外の経路は従来どおり）
+  const tsumo = r.analyzeWin(r.countsOf(['=0', '=0', '=0', '45', '45', '45', 'cos', 'cos', 'cos'].map((s) => t(r, s))));
+  assert.ok(tsumo.yaku.some((y) => y.id === 'sanankou'));
+  const base = yakuCandidates(r, view(r, ['=0', '=0', '=0', '45', '45', '45', 'cos', 'cos']), { limit: 99 });
+  assert.equal(find(base, 'sanankou').missing, 1, 'ツモで完成する形として三暗刻は候補（あと1枚）');
+  assert.equal(find(base, 'sanankou').points, 9);
+});
+
+test('P3-2：ロン経路の代表完成形は、ロン和了として評価した点数と一致（AI 対局の宣言局面、両設定）', () => {
+  for (const flag of [true, false]) {
+    const r = createRules(makeConfig({ mode: 'math1', rules: { sanankouRonCounts: flag } }));
+    let checked = 0;
+    for (let seed = 1; seed <= 25 && checked < 30; seed++) {
+      const lineup = ['speed', 'value', 'closed', 'speed'];
+      const g = new Game({ rules: r, seed, players: lineup.map((p) => ({ kind: 'ai', personality: p })) });
+      const rng = createRng(seed);
+      while (g.pending()) {
+        const p = g.pending();
+        if (p.type === 'claim' && p.ron) {
+          const c = claimForSeat(p, p.seat, (id) => g.typeOf(id));
+          const exposed = g.viewFor(p.seat).melds[p.seat].map((m) => m.meld);
+          for (const x of yakuCandidates(r, g.viewFor(p.seat), { claim: c, limit: 99 }).filter((y) => y.via === 'ron')) {
+            const ev = r.evaluateMelds(x.example || [], exposed.length === 0, { ron: true });
+            if (!x.special) assert.equal(x.points, ev.points, `${x.name}`);
+            assert.ok(x.points <= g.ronAnalysis(p.seat, p.tile).points);
+            checked++;
+          }
+        }
+        applyAction(g, p.seat, decide(g, p.seat, lineup[p.seat], rng));
+      }
+    }
+    assert.ok(checked > 0);
+  }
+});
+
+test('P3-2：ポン後は三暗刻を候補に出さない。既定設定（true）ではロンの評価は通常の評価と同一（候補・並び順は従来どおり）', () => {
+  const r = M1;
+  const pon = r.koutsuOf(t(r, '=0')).idx;
+  const cs = yakuCandidates(r, view(r, ['45', '45', '45', 'cos', 'cos', 'cos'], { exposed: [pon] }), { limit: 99 });
+  assert.equal(find(cs, 'sanankou'), undefined);
+  assert.equal(find(cs, 'toitoi').missing, 0);
+  // 既定（sanankouRonCounts=true）では、全組合せでロンとしての評価が通常の評価と同じ
+  const M = r.melds.length;
+  for (let a = 0; a < M; a++) for (let b = a; b < M; b++) for (let c = b; c < M; c++) {
+    const x = r.evaluateMelds([a, b, c], true);
+    const y = r.evaluateMelds([a, b, c], true, { ron: true });
+    if (x.points !== y.points || x.yaku.length !== y.yaku.length) assert.fail(`${a},${b},${c}`);
+  }
+});

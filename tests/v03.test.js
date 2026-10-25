@@ -416,3 +416,118 @@ test('AI 4人の自動対局（数学Ⅰ・Ⅱ 各12局）：毎手の不変条�
     assert.ok(wins > 0);
   }
 });
+
+// ---------------- 監査 P2-1：不足枚数の減衰は f の miss 乗（4〜9枚も） ----------------
+import { handValue, missFactor, unseenCounts, AI_TUNING, chooseDiscard } from '../src/engine/ai.js';
+
+test('P2-1：missFactor は f^miss（1〜3枚は従来と同じ式、4・6・9枚も正しい累乗）', () => {
+  const f = 0.137;
+  assert.equal(missFactor(f, 1), f);
+  assert.equal(missFactor(f, 2), f * f);
+  assert.equal(missFactor(f, 3), f * f * f, '3枚は従来の式（演算順序も同じ）');
+  for (const m of [4, 5, 6, 7, 8, 9]) {
+    assert.ok(Math.abs(missFactor(f, m) / Math.pow(f, m) - 1) < 1e-12, `${m}枚`);
+    assert.ok(missFactor(f, m) < missFactor(f, m - 1), `${m}枚は${m - 1}枚より小さい`);
+  }
+});
+
+// 別実装：全組合せ（重複あり）を総当たりし、f^miss（Math.pow）で減衰した重みの総和
+function bruteHandValue(r, counts, exposed, unseen, pers) {
+  const { missDecay, availabilitySoftness: s } = AI_TUNING;
+  const closed = exposed.length === 0;
+  const p = PERSONALITIES[pers];
+  const k = 3 - exposed.length;
+  const M = r.melds.length;
+  let total = 0;
+  const rec = (start, acc) => {
+    if (acc.length === k) {
+      const ev = r.evaluateMelds([...exposed, ...acc], closed);
+      if (!closed && !ev.hasYaku) return;
+      const isshoku = ev.yaku.some((y) => /Isshoku$/.test(y.id));
+      let w = p.valueWeight(isshoku ? r.config.scoring.base + 3 : ev.points);
+      if (closed) for (const mi of acc) if (r.melds[mi].kind === 'koutsu') w *= p.koutsuBias;
+      const req = new Array(r.T).fill(0);
+      for (const mi of acc) for (const t of r.melds[mi].tiles) req[t]++;
+      for (let t = 0; t < r.T; t++) {
+        const miss = req[t] - counts[t];
+        if (miss <= 0) continue;
+        if (unseen[t] < miss) return; // 取得不可能
+        w *= Math.pow(missDecay * (unseen[t] / (unseen[t] + s)), miss);
+      }
+      total += w;
+      return;
+    }
+    for (let m = start; m < M; m++) { acc.push(m); rec(m, acc); acc.pop(); }
+  };
+  rec(0, []);
+  return total;
+}
+
+test('P2-1：handValue は総当たりの別実装（f^miss）と一致（門前・ポン後、数学Ⅰ・Ⅱ、不足4〜9枚の形を含む）', () => {
+  for (const r of [M1, M2]) {
+    const sin = r.typeByKey.get('f:sin').idx;
+    const cases = [
+      { hand: ['sin', 'cos', '30', '=1/2', '60', 'tan', '=0', '45'], exposed: [] },
+      { hand: ['sin', 'sin', 'sin', 'cos', 'cos', 'tan', '=0', '45'], exposed: [] }, // sin 刻子2〜3組（不足3〜6枚）を含む
+      { hand: ['cos', 'cos', '30', '=1/2', '=0', '45'], exposed: [koutsu(r, 'sin').idx] }, // ポン後（sin 刻子）
+      { hand: ['tan', 'tan', 'tan', '0'], exposed: [koutsu(r, 'sin').idx, koutsu(r, '=0').idx] },
+    ];
+    for (const c of cases) {
+      const view = { seat: 0, hand: ids(r, c.hand).map((t, i) => ({ id: i, type: t })), melds: [c.exposed.map((mi) => ({ meld: mi, tiles: r.melds[mi].tiles })), [], [], []], rivers: [[], [], [], []] };
+      const counts = r.countsOf(view.hand.map((h) => h.type));
+      const unseen = unseenCounts(r, view);
+      for (const pers of ['speed', 'value']) {
+        const a = handValue(r, counts, c.exposed, unseen, pers);
+        const b = bruteHandValue(r, counts, c.exposed, unseen, pers);
+        assert.ok(Math.abs(a - b) <= 1e-12 * Math.max(1, b), `${r.config.mode} ${c.hand.join(' ')} ${pers}: ${a} vs ${b}`);
+      }
+      // 見えていない sin を減らして取得不可能にすると、その形の価値は 0（総当たりと一致したまま値が下がる）
+      const un2 = unseen.slice();
+      un2[sin] = 0;
+      const a2 = handValue(r, counts, c.exposed, un2, 'speed');
+      assert.ok(Math.abs(a2 - bruteHandValue(r, counts, c.exposed, un2, 'speed')) <= 1e-12 * Math.max(1, a2));
+      assert.ok(a2 <= handValue(r, counts, c.exposed, unseen, 'speed'));
+    }
+  }
+});
+
+test('P2-1：不足が4・6・9枚の完成形の重みが f^4・f^6・f^9（単独の形で確認）', () => {
+  // 数学Ⅱ、sin の刻子3組だけが和了形になる設定：手の内 sin 0枚＋他の牌、見えていない sin を十分に
+  const r = M2;
+  const sin = r.typeByKey.get('f:sin').idx;
+  const kSin = koutsu(r, 'sin').idx;
+  const f = (u) => AI_TUNING.missDecay * (u / (u + AI_TUNING.availabilitySoftness));
+  // ポン後（sin 刻子を公開済み）の手：sin 3枚 → 残り sin 刻子1組は不足0、手の内 sin 0枚なら不足3、
+  // 2組公開済みで手の内 sin 0枚なら不足3。不足 n 枚の単一形の重みを、別の牌の影響がない counts で比べる。
+  const unseen = r.types.map(() => 0);
+  unseen[sin] = 9;
+  for (const [exposed, missing] of [[[kSin, kSin], 3], [[kSin], 6], [[], 9]]) {
+    const counts = new Array(r.T).fill(0);
+    const v = handValue(r, counts, exposed, unseen, 'speed');
+    const isshokuWeight = PERSONALITIES.speed.valueWeight(r.config.scoring.base + 3) * (exposed.length ? 1 : PERSONALITIES.speed.koutsuBias ** 3);
+    const expect = isshokuWeight * Math.pow(f(9), missing);
+    assert.ok(Math.abs(v / expect - 1) < 1e-12, `不足${missing}枚：${v} vs ${expect}`);
+  }
+  // 不足4枚：sin 刻子を1組公開、手の内 sin 2枚 → 残り2組に不足4枚
+  const counts4 = new Array(r.T).fill(0);
+  counts4[sin] = 2;
+  const v4 = handValue(r, counts4, [kSin], unseen, 'speed');
+  const e4 = PERSONALITIES.speed.valueWeight(r.config.scoring.base + 3) * Math.pow(f(9), 4);
+  assert.ok(Math.abs(v4 / e4 - 1) < 1e-12, `不足4枚：${v4} vs ${e4}`);
+  // 残り枚数が足りない（見えていない sin が不足より少ない）→ 0
+  unseen[sin] = 5;
+  assert.equal(handValue(r, new Array(r.T).fill(0), [kSin], unseen, 'speed'), 0, '不足6枚・残り5枚 → 0');
+});
+
+test('P2-1：監査の再現局面（数学Ⅱ・seed 1・親0・乱数51・23行動後の席3）は 60° を捨てる（修正前は cos）', () => {
+  const r = M2;
+  const pers = ['speed', 'value', 'closed', 'speed'];
+  const g = new Game({ rules: r, seed: 1, dealer: 0, players: pers.map((p) => ({ kind: 'ai', personality: p })) });
+  const rng = createRng(51);
+  for (let i = 0; i < 23; i++) { const p = g.pending(); applyAction(g, p.seat, decide(g, p.seat, pers[p.seat], rng)); }
+  const p = g.pending();
+  assert.deepEqual([p.seat, p.type], [3, 'turn']);
+  const view = g.viewFor(3);
+  assert.deepEqual(view.hand.map((h) => r.types[h.type].key).sort(), ['a:225', 'a:360', 'a:60', 'f:cos', 'f:cos', 'f:sin', 'v:-1/√2', 'v:0', 'v:√3/2'].sort());
+  assert.equal(r.types[g.typeOf(chooseDiscard(r, view, 'speed', null).id)].key, 'a:60');
+});

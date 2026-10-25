@@ -118,6 +118,16 @@ export function unseenCounts(rules, view) {
   return u;
 }
 
+// 不足 miss 枚の減衰 f^miss。1〜3枚は従来と同じ式（浮動小数点の演算順序も同じ＝旧規則の判断は不変）。
+// 4枚以上（Ver.0.3：同じ牌の刻子を2〜3組使う完成形）は f*f*f に f を順に掛ける。
+export function missFactor(f, miss) {
+  if (miss === 1) return f;
+  if (miss === 2) return f * f;
+  let w = f * f * f;
+  for (let k = 3; k < miss; k++) w *= f;
+  return w;
+}
+
 // 手の価値。counts: 手の内の牌, exposed: 自分の公開面子, unseen: 見えていない牌
 export function handValue(rules, counts, exposed, unseen, personality) {
   const combos = combosFor(rules, 3 - exposed.length);
@@ -139,7 +149,7 @@ export function handValue(rules, counts, exposed, unseen, personality) {
       if (miss <= 0) continue;
       if (unseen[t] < miss) { w = 0; break; }
       const f = f1[t];
-      w *= miss === 1 ? f : miss === 2 ? f * f : f * f * f;
+      w *= missFactor(f, miss);
     }
     total += w;
   }

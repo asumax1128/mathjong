@@ -3,6 +3,25 @@
 // 数式例は tests/guide.test.js で「既存の役判定で実際にその役が成立する」ことを確認している。
 // 面子は rules.melds の key（数式面子は 'sin30=1/2'、刻子は 'f:sin×3' のように牌の key＋×3）、特殊和了は角度の配列で書く。
 // examples.math1：数学Ⅰ（0°〜180°）に無い角度を使う例の差し替え（tests/guide.test.js で各モードを確認）。
+// 条件文の角度は {a:90}（1つ）・{list:30,45,60}（「・」区切り）・{tanUndefined}（tan が定義されない角度）で書き、
+// guideCondition() がモードの表記（数学Ⅰ・旧規則は度数法、数学Ⅱは弧度法）に変換する。
+
+import { radianParts } from '../engine/rules.js';
+
+// 角度の表記（文字列）：度数法 '90°'、弧度法 'π/2'（0 は '0'）
+export function angleLabel(deg, unit) {
+  if (unit !== 'rad') return `${deg}°`;
+  const r = radianParts(deg);
+  return r.den ? `${r.num}/${r.den}` : r.num;
+}
+
+// 条件文をモードの表記に変換する。unit：'deg' | 'rad'、degs：そのモードの角度（度）の一覧
+export function guideCondition(text, { unit = 'deg', degs = [] } = {}) {
+  return text
+    .replace(/\{a:(\d+)\}/g, (_, d) => angleLabel(Number(d), unit))
+    .replace(/\{list:([\d,]+)\}/g, (_, l) => l.split(',').map((d) => angleLabel(Number(d), unit)).join('・'))
+    .replace(/\{tanUndefined\}/g, () => degs.filter((d) => d % 180 === 90).map((d) => angleLabel(d, unit)).join('・'));
+}
 
 export const YAKU_GUIDE = {
   sankan: {
@@ -14,31 +33,31 @@ export const YAKU_GUIDE = {
     example: ['cos0=1', 'cos90=0', 'cos180=-1'],
   },
   yokaku: {
-    condition: 'sin θ と cos(90°−θ) の2組を含む（0°≦θ≦90°）。sin θ = cos(90°−θ) の関係。',
+    condition: 'sin θ と cos({a:90}−θ) の2組を含む（{a:0}≦θ≦{a:90}）。sin θ = cos({a:90}−θ) の関係。',
     example: ['sin30=1/2', 'cos60=1/2', 'tan180=0'],
   },
   sanshougen: {
-    condition: '3組の角度が、それぞれ異なる3つの象限にある（0°・90°・180°・270°・360° を含まない）。',
+    condition: '3組の角度が、それぞれ異なる3つの象限にある（{list:0,90,180,270,360} を含まない）。',
     example: ['sin30=1/2', 'cos135=-1/√2', 'tan240=√3'],
   },
   shougen1: {
-    condition: '3組の角度がすべて第1象限（30°・45°・60°）。同じ角度を重ねてもよい。',
+    condition: '3組の角度がすべて第1象限（{list:30,45,60}）。同じ角度を重ねてもよい。',
     example: ['sin30=1/2', 'cos30=√3/2', 'sin60=√3/2'],
   },
   shougen2: {
-    condition: '3組の角度がすべて第2象限（120°・135°・150°）。同じ角度を重ねてもよい。',
+    condition: '3組の角度がすべて第2象限（{list:120,135,150}）。同じ角度を重ねてもよい。',
     example: ['sin120=√3/2', 'cos120=-1/2', 'sin150=1/2'],
   },
   shougen3: {
-    condition: '3組の角度がすべて第3象限（210°・225°・240°）。同じ角度を重ねてもよい。',
+    condition: '3組の角度がすべて第3象限（{list:210,225,240}）。同じ角度を重ねてもよい。',
     example: ['sin210=-1/2', 'cos210=-√3/2', 'tan225=1'],
   },
   shougen4: {
-    condition: '3組の角度がすべて第4象限（300°・315°・330°）。同じ角度を重ねてもよい。',
+    condition: '3組の角度がすべて第4象限（{list:300,315,330}）。同じ角度を重ねてもよい。',
     example: ['sin300=-√3/2', 'cos300=1/2', 'cos330=√3/2'],
   },
   shougenSankaku: {
-    condition: '1つの象限の3つの角度を1回ずつ使う（例：30°・45°・60°）。その象限の象限一色も同時に成立。',
+    condition: '1つの象限の3つの角度を1回ずつ使う（例：{list:30,45,60}）。その象限の象限一色も同時に成立。',
     example: ['sin30=1/2', 'cos45=1/√2', 'tan60=√3'],
   },
   douchi: {
@@ -46,7 +65,7 @@ export const YAKU_GUIDE = {
     example: ['sin30=1/2', 'cos60=1/2', 'sin150=1/2'],
   },
   doukaku: {
-    condition: '同じ角度で sin・cos・tan の3組を作る（90°・270° は tan がないので不可）。',
+    condition: '同じ角度で sin・cos・tan の3組を作る（{tanUndefined} は tan がないので不可）。',
     example: ['sin225=-1/√2', 'cos225=-1/√2', 'tan225=1'],
     examples: { math1: ['sin45=1/√2', 'cos45=1/√2', 'tan45=1'] },
   },
@@ -76,11 +95,11 @@ export const YAKU_GUIDE = {
     example: ['f:tan×3', 'f:tan×3', 'f:tan×3'],
   },
   kyukaku: {
-    condition: '角度牌 0°・30°・45°・60°・90°・120°・135°・150°・180°（弧度法では 0〜π の9種類）を1枚ずつ、計9枚（面子は不要）。',
+    condition: '角度牌 {list:0,30,45,60,90,120,135,150,180} を1枚ずつ、計9枚（面子は不要）。',
     exampleAngles: [0, 30, 45, 60, 90, 120, 135, 150, 180],
   },
   urakyukaku: {
-    condition: '角度牌 180°〜360° の9種類を1枚ずつ（Ver.0.1・0.2 では無効）。',
+    condition: '角度牌 {list:180,210,225,240,270,300,315,330,360} を1枚ずつ（Ver.0.1・0.2 では無効）。',
     exampleAngles: [180, 210, 225, 240, 270, 300, 315, 330, 360],
   },
 };

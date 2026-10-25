@@ -52,3 +52,39 @@ test('特殊和了の例：九角無双は成立、裏九角無双は有効化�
   assert.equal(on.analyzeWin(on.countsOf(u)).yaku[0].id, 'urakyukaku');
   assert.equal(rules.analyzeWin(rules.countsOf(u.map((i) => i))), null);
 });
+
+// ---- 監査 P3-1：条件文の角度表記をモードに合わせる（数学Ⅰ・旧規則は度数法、数学Ⅱは弧度法） ----
+import { guideCondition, angleLabel } from '../src/ui/guide.js';
+
+const condOf = (cfg, id) => {
+  const r = createRules(cfg);
+  return guideCondition(YAKU_GUIDE[id].condition, { unit: cfg.angleUnit, degs: r.types.filter((t) => t.kind === 'angle').map((t) => t.deg) });
+};
+
+test('P3-1：角度の表記（度数法・弧度法）', () => {
+  assert.deepEqual([0, 30, 45, 60, 90, 180, 270, 360].map((d) => angleLabel(d, 'rad')), ['0', 'π/6', 'π/4', 'π/3', 'π/2', 'π', '3π/2', '2π']);
+  assert.deepEqual([0, 30, 90, 180].map((d) => angleLabel(d, 'deg')), ['0°', '30°', '90°', '180°']);
+});
+
+test('P3-1：数学Ⅱの条件文は弧度法（度数法が残らない）、数学Ⅰ・旧規則は度数法（π が出ない）', () => {
+  for (const [label, cfg] of CONFIGS) {
+    for (const y of [...cfg.yaku, ...cfg.specialHands].filter((x) => x.enabled)) {
+      const text = condOf(cfg, y.id);
+      assert.ok(!/[{}]/.test(text), `${label} ${y.name}: 置換漏れ ${text}`);
+      if (cfg.angleUnit === 'rad') assert.ok(!/°/.test(text), `${label} ${y.name}: 度数法が残る ${text}`);
+      else assert.ok(!/π/.test(text), `${label} ${y.name}: 弧度法が混ざる ${text}`);
+    }
+  }
+  const m1 = makeConfig({ mode: 'math1' });
+  const m2 = makeConfig({ mode: 'math2' });
+  assert.match(condOf(m2, 'yokaku'), /sin θ と cos\(π\/2−θ\) の2組を含む（0≦θ≦π\/2）/);
+  assert.match(condOf(m1, 'yokaku'), /sin θ と cos\(90°−θ\) の2組を含む（0°≦θ≦90°）/);
+  assert.match(condOf(m2, 'shougen1'), /第1象限（π\/6・π\/4・π\/3）/);
+  assert.match(condOf(m1, 'shougen2'), /第2象限（120°・135°・150°）/);
+  assert.match(condOf(m2, 'shougen3'), /第3象限（7π\/6・5π\/4・4π\/3）/);
+  assert.match(condOf(m2, 'sanshougen'), /（0・π\/2・π・3π\/2・2π を含まない）/);
+  assert.match(condOf(m2, 'doukaku'), /（π\/2・3π\/2 は tan がないので不可）/);
+  assert.match(condOf(m1, 'doukaku'), /（90° は tan がないので不可）/, '数学Ⅰに 270° はない');
+  assert.match(condOf(m2, 'kyukaku'), /0・π\/6・π\/4・π\/3・π\/2・2π\/3・3π\/4・5π\/6・π を1枚ずつ/);
+  assert.match(condOf(m1, 'kyukaku'), /0°・30°・45°・60°・90°・120°・135°・150°・180° を1枚ずつ/);
+});

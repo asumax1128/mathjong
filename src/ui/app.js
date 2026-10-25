@@ -11,7 +11,7 @@ import { hintKey } from './hintstate.js';
 import { reconcileOrder, defaultOrder } from './handorder.js';
 import { createHandDrag } from './handdrag.js';
 import { CHI_AUTOPASS_KEY, parseChiAutoPass, visibleClaimActions, claimPendingForHint, claimPolicy, autoPassDue } from './autopass.js';
-import { YAKU_GUIDE, GUIDE_NOTES } from './guide.js';
+import { YAKU_GUIDE, GUIDE_NOTES, guideCondition } from './guide.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, intParam } from './params.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
@@ -472,6 +472,8 @@ function guideHTML() {
 function yakuGuideHTML() {
   const c = rules.config;
   const meldByKey = new Map(rules.melds.map((m) => [m.key, m]));
+  // 条件文の角度はモードの表記（数学Ⅰ・旧規則は度数法、数学Ⅱは弧度法）
+  const condFmt = { unit: c.angleUnit, degs: rules.types.filter((t) => t.kind === 'angle').map((t) => t.deg) };
   const card = (y, isSpecial) => {
     const g = YAKU_GUIDE[y.id] || { condition: '' };
     const pts = y.yakuman ? `役満 ${y.points}` : `+${y.points}`;
@@ -485,7 +487,7 @@ function yakuGuideHTML() {
       ex = `<div class="gy-tiles">${g.exampleAngles.map((d) => tileHTML(rules.typeByKey.get(`a:${d}`), { size: 's' })).join('')}</div>`;
     }
     return `<li class="gy" data-yaku="${y.id}"><div class="gy-head"><b>${y.name}</b>${isSpecial ? '<span class="tag sp">特殊和了</span>' : ''}${naki}<span class="gy-pts">${pts}</span></div>
-      <p class="gy-cond">${g.condition}</p>${ex}</li>`;
+      <p class="gy-cond">${guideCondition(g.condition, condFmt)}</p>${ex}</li>`;
   };
   const list = [
     ...c.yaku.filter((y) => y.enabled).map((y) => card(y, false)),

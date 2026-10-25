@@ -26,17 +26,18 @@ function combosFor(rules, k) {
 }
 
 // 公開面子ごとの評価結果（成立役と点数）。必要になった組合せだけを評価してキャッシュする。
+// ron: ロン和了としての評価（三暗刻の暫定規則 sanankouRonCounts が効く）。キャッシュはロンかどうかで分ける。
 const evalCache = new WeakMap();
-function evaluatorFor(rules, exposed) {
+function evaluatorFor(rules, exposed, ron = false) {
   let cache = evalCache.get(rules);
   if (!cache) evalCache.set(rules, (cache = new Map()));
-  const key = exposed.slice().sort((a, b) => a - b).join(',');
+  const key = (ron ? 'ron:' : '') + exposed.slice().sort((a, b) => a - b).join(',');
   let ev = cache.get(key);
   if (ev) return ev;
   const closed = exposed.length === 0;
   const combos = combosFor(rules, 3 - exposed.length);
   const memo = new Array(combos.length);
-  ev = (i) => memo[i] || (memo[i] = rules.evaluateMelds([...exposed, ...combos[i].melds], closed));
+  ev = (i) => memo[i] || (memo[i] = rules.evaluateMelds([...exposed, ...combos[i].melds], closed, { ron }));
   cache.set(key, ev);
   return ev;
 }
@@ -100,18 +101,14 @@ function riversWithout(rivers, from, type) {
 //        その宣言を行った後の局面として評価する（1枚だけ。宣言しなければ取得不能）。
 export function yakuCandidates(rules, view, { limit = 3, claim = null } = {}) {
   const order = orderOf(rules);
-  const ronCountsSanankou = rules.config.rules.sanankouRonCounts !== false;
   const routes = baseCandidates(rules, view, limit).map((c) => ({ ...c, via: null }));
   if (claim) {
     const rivers = riversWithout(view.rivers, claim.from, claim.type);
     if (claim.ron) {
       // ロン：手牌＋対象牌でいま完成している形（あと0枚）だけが、この宣言で実現できる
       const v = { seat: view.seat, melds: view.melds, rivers, hand: [...view.hand, { id: -1, type: claim.type }] };
-      for (const c of baseCandidates(rules, v, limit)) {
-        if (c.missing !== 0) continue;
-        if (c.id === 'sanankou' && !ronCountsSanankou) continue; // ロンで完成した刻子を暗刻に数えない設定
-        routes.push({ ...c, via: 'ron' });
-      }
+      // ロン和了として評価する（成立役・代表得点ともエンジンのロン判定と同じ。三暗刻の設定も反映）
+      for (const c of baseCandidates(rules, v, limit, { ron: true })) if (c.missing === 0) routes.push({ ...c, via: 'ron' });
     }
     const calls = claim.chiMelds.map((mi) => ['chi', mi]);
     if (claim.ponMeld !== null && claim.ponMeld !== undefined) calls.push(['pon', claim.ponMeld]);
@@ -140,14 +137,14 @@ export function yakuCandidates(rules, view, { limit = 3, claim = null } = {}) {
   return [...best.values()].sort(cmp).slice(0, limit);
 }
 
-// 宣言を考慮しない基本の役候補（河の牌はすべて取得不能）
-function baseCandidates(rules, view, limit) {
+// 宣言を考慮しない基本の役候補（河の牌はすべて取得不能）。ron: ロン和了として評価する（ロン経路）
+function baseCandidates(rules, view, limit, { ron = false } = {}) {
   const counts = rules.countsOf(view.hand.map((h) => h.type));
   const exposed = view.melds[view.seat].map((m) => m.meld);
   const closed = exposed.length === 0;
   const unseen = unseenFromView(rules, view);
   const combos = combosFor(rules, 3 - exposed.length);
-  const evaluate = evaluatorFor(rules, exposed);
+  const evaluate = evaluatorFor(rules, exposed, ron);
   const order = orderOf(rules);
   const best = new Map();
 
