@@ -225,6 +225,11 @@ table.values th, table.values td { border: 1px solid #ddd5c0; padding: 5px; text
 table.values td.undef { color: #999; font-size: 12px; }
 .setting { display: flex; align-items: center; gap: 10px; }
 .setting select { font: inherit; min-height: 40px; }
+.setting.toggle { min-height: 44px; padding: 4px 0; cursor: pointer; }
+.setting.toggle input { width: 24px; height: 24px; margin: 0; accent-color: var(--gold, #c9a227); flex-shrink: 0; }
+.setting-note { margin: 0 0 8px; }
+.pass-with-note { display: inline-flex; flex-direction: column; align-items: center; line-height: 1.2; }
+.pass-note { font-size: 11px; opacity: 0.8; font-weight: normal; }
 
 @media (max-width: 420px) {
   .logo { font-size: 13px; }

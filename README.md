@@ -18,6 +18,7 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 スマホ向けには GitHub Pages での公開を予定しています。**公開予定URL：https://asumax1128.github.io/mathjong/**（2026-10-24 時点で未公開・動作未確認。公開設定と確認手順は [iPhone 実機テスト手順](docs/12-iphone-test-guide.md)）。
 公開前に iPhone で試す場合は、同じ Wi-Fi の PC で `node tools/serve.mjs 8080 --lan` を実行し、表示される `http://<PCのIP>:8080/` を開きます（`--lan` を付けたときだけ LAN に公開。テスト後は Ctrl+C で停止）。`--base /mathjong/` を付けると Pages と同じサブパスを再現できます。
 実装仕様・暫定ルール・テスト結果は [Ver.0.1 実装記録](docs/10-ver0.1-implementation.md)。
+現在の画面は **Ver.0.2.1**（エンジン v0.1.0）：役ガイド・役候補ヒント（0.2-A）、手牌の長押し並び替え（0.2-D）、設定の「チーのオートパス」（0.2-B、初期値 OFF）。詳細は [Ver.0.2 開発仕様](docs/13-ver0.2-spec.md)。
 
 ## ゲームの核
 
