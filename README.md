@@ -19,6 +19,7 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 公開前に iPhone で試す場合は、同じ Wi-Fi の PC で `node tools/serve.mjs 8080 --lan` を実行し、表示される `http://<PCのIP>:8080/` を開きます（`--lan` を付けたときだけ LAN に公開。テスト後は Ctrl+C で停止）。`--base /mathjong/` を付けると Pages と同じサブパスを再現できます。
 実装仕様・暫定ルール・テスト結果は [Ver.0.1 実装記録](docs/10-ver0.1-implementation.md)。
 現在の画面は **Ver.0.2.1**（エンジン v0.1.0）：役ガイド・役候補ヒント（0.2-A）、手牌の長押し並び替え（0.2-D）、設定の「チーのオートパス」（0.2-B、初期値 OFF）。詳細は [Ver.0.2 開発仕様](docs/13-ver0.2-spec.md)。
+開発中の **Ver.0.3-A**（ブランチ `feature/v0.3-a-rules-pon`、未公開）：9枚制のまま、数学Ⅰ（度数法・124枚）／数学Ⅱ（弧度法・168枚）の2モード、刻子・ポン（ロン＞ポン＞チー）、新役（対々和・三暗刻・正弦/余弦/正接一色）。詳細は [Ver.0.3-A 実装記録](docs/14-ver0.3-a.md)。`node tools/simulate.mjs --legacy` で Ver.0.2.1 までの規則。
 
 ## ゲームの核
 
@@ -46,6 +47,7 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 | [実機テストと独立監査](docs/11-audit-and-device-testing.md) | iPhoneでのテスト手順、Claude→CodexのPR監査フロー |
 | [Codex監査ガイド](AGENTS.md) | 独立監査の重点項目と報告形式 |
 | [Ver.0.2 開発仕様](docs/13-ver0.2-spec.md) | 役ガイド・役候補ヒント・牌表示（A）、チーのオートパス（B）、横画面（C） |
+| [Ver.0.3-A 実装記録](docs/14-ver0.3-a.md) | 9枚制・数学Ⅰ／Ⅱ・刻子・ポン・新役（開発中） |
 | [iPhone 実機テスト手順](docs/12-iphone-test-guide.md) | テストURL、Pages 設定、固定seed、報告方法 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |
