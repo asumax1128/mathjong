@@ -63,12 +63,12 @@ export function decideBeginner(game, seat, rng) {
 // 中級の「手の価値」（攻め）を改良し、公開情報だけから見積もる「放銃の危険度」（守り）を加えて打牌を選ぶ。
 // 詳細は docs/17-ver0.4-b-ai-autopass.md。係数は tools/simulate-levels.mjs の対戦結果で調整した。
 export const ADVANCED = {
-  missDecay: 0.22, // 足りない牌1枚ごとの減衰（中級と同じ値から調整）
+  missDecay: 0.15, // 足りない牌1枚ごとの減衰（中級は 0.22。対戦結果から 0.15 に調整）
   softness: 3, // 残り枚数 u の係数 u/(u+s)
   valueExp: null, // 完成形の重み：null＝性格の重み、数値 e＝点数^e
   koutsuBias: null, // null＝性格の値
   wallScale: 0, // 山の残りが少ないほど遠い形を減衰（0＝しない）
-  defense: 0, // 危険度（点）の重み（0＝守らない）
+  defense: 1, // 放銃の見込み（点）の重み（0＝守らない。対戦結果から 1 に調整）
   callScale: 1, // 鳴きのしきい値の倍率（1＝中級と同じ）。calls: false で鳴かない
   calls: true,
 };
