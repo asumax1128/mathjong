@@ -1,0 +1,156 @@
+{
+  "notes": "Independent simplified simulation, NOT official engine",
+  "gamesPerPolicy": 20000,
+  "results": [
+    {
+      "policy": "off",
+      "games": 20000,
+      "wins": 19971,
+      "draws": 29,
+      "winRate": 99.86,
+      "avgMoves": 25.338,
+      "avgPons": 0,
+      "avgChis": 0.712,
+      "ron": 15459,
+      "tsumo": 4512,
+      "compositions": {
+        "formula3_triplet0": 14418,
+        "formula2_triplet1": 4877,
+        "formula1_triplet2": 651,
+        "formula0_triplet3": 25
+      },
+      "roles": {
+        "toitoi": 25,
+        "sanankou": 25,
+        "sankan": 6043,
+        "shougen2": 636,
+        "doukan": 627,
+        "yokaku": 358,
+        "shougen1": 429,
+        "shougenSankaku": 485,
+        "doukaku": 4,
+        "douchi": 12,
+        "sanjuu": 1
+      },
+      "winByExposed": [
+        18106,
+        1700,
+        165
+      ],
+      "winsWithPon": 0,
+      "winsWithChi": 1865
+    },
+    {
+      "policy": "eager",
+      "games": 20000,
+      "wins": 19941,
+      "draws": 59,
+      "winRate": 99.7,
+      "avgMoves": 26.83,
+      "avgPons": 0.939,
+      "avgChis": 0.632,
+      "ron": 15356,
+      "tsumo": 4585,
+      "compositions": {
+        "formula3_triplet0": 13682,
+        "formula2_triplet1": 3655,
+        "formula1_triplet2": 347,
+        "formula0_triplet3": 2257
+      },
+      "roles": {
+        "toitoi": 2256,
+        "sankan": 6017,
+        "doukan": 540,
+        "sanankou": 12,
+        "shougen2": 561,
+        "yokaku": 341,
+        "shougen1": 392,
+        "shougenSankaku": 493,
+        "doukaku": 8,
+        "douchi": 4,
+        "sesshoku": 1
+      },
+      "winByExposed": [
+        15856,
+        2404,
+        1681
+      ],
+      "winsWithPon": 2245,
+      "winsWithChi": 1840
+    },
+    {
+      "policy": "cautious",
+      "games": 20000,
+      "wins": 19967,
+      "draws": 33,
+      "winRate": 99.83,
+      "avgMoves": 25.443,
+      "avgPons": 0.108,
+      "avgChis": 0.698,
+      "ron": 15419,
+      "tsumo": 4548,
+      "compositions": {
+        "formula3_triplet0": 14279,
+        "formula2_triplet1": 4745,
+        "formula1_triplet2": 577,
+        "formula0_triplet3": 366
+      },
+      "roles": {
+        "toitoi": 366,
+        "sanankou": 15,
+        "sankan": 6021,
+        "shougen2": 638,
+        "doukan": 605,
+        "shougen1": 411,
+        "shougenSankaku": 493,
+        "yokaku": 347,
+        "doukaku": 5,
+        "douchi": 10
+      },
+      "winByExposed": [
+        17789,
+        2022,
+        156
+      ],
+      "winsWithPon": 351,
+      "winsWithChi": 1827
+    },
+    {
+      "policy": "aware",
+      "games": 20000,
+      "wins": 19966,
+      "draws": 34,
+      "winRate": 99.83,
+      "avgMoves": 25.639,
+      "avgPons": 0.282,
+      "avgChis": 0.689,
+      "ron": 15423,
+      "tsumo": 4543,
+      "compositions": {
+        "formula3_triplet0": 14346,
+        "formula2_triplet1": 4296,
+        "formula1_triplet2": 416,
+        "formula0_triplet3": 908
+      },
+      "roles": {
+        "toitoi": 908,
+        "sanankou": 11,
+        "sankan": 6055,
+        "shougen2": 632,
+        "doukan": 586,
+        "shougen1": 417,
+        "shougenSankaku": 497,
+        "yokaku": 360,
+        "doukaku": 6,
+        "douchi": 10
+      },
+      "winByExposed": [
+        17230,
+        2082,
+        654
+      ],
+      "winsWithPon": 897,
+      "winsWithChi": 1839
+    }
+  ]
+}
