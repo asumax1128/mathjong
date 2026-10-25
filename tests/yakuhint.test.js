@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRules } from '../src/engine/rules.js';
-import { DEFAULT_CONFIG } from '../src/engine/config.js';
+import { LEGACY_V02_CONFIG as DEFAULT_CONFIG } from '../src/engine/config.js'; // 互換テスト（Ver.0.2.1 の規則）
 import { Game } from '../src/engine/game.js';
 import { createRng } from '../src/engine/rng.js';
 import { decide, applyAction } from '../src/engine/ai.js';
@@ -253,7 +253,7 @@ test('九角無双：最後の180°をロンできる局面で候補に残り、
   const p = g.pending();
   assert.ok(p.type === 'claim' && p.seat === 0 && p.ron);
   const claim = claimOf(g, 0);
-  assert.deepEqual(claim, { type: idx('180'), from: 1, ron: true, chiMelds: [] });
+  assert.deepEqual(claim, { type: idx('180'), from: 1, ron: true, chiMelds: [], ponMeld: null });
   // 宣言を考慮しない基本評価では、180°が4枚とも見えているので不可能
   assert.ok(!names(yakuCandidates(rules, g.viewFor(0), { limit: 99 })).includes('九角無双'));
   // 宣言対象牌を考慮すると「完成」（ロンで実現できる）
@@ -426,7 +426,7 @@ test('非公開情報にアクセスしない：view・claim の読み取りは�
   });
   const v = g.viewFor(0);
   yakuCandidates(rules, track(v, 'view'), { claim: track(claimOf(g, 0), 'claim') });
-  const allowed = /^(view\.(seat|hand|melds|rivers)(\.#)*(\.(type|id|meld|tiles|from))?|claim\.(type|from|ron|chiMelds))$/;
+  const allowed = /^(view\.(seat|hand|melds|rivers)(\.#)*(\.(type|id|meld|tiles|from))?|claim\.(type|from|ron|chiMelds|ponMeld))$/; // ponMeld：自分のポンの選択肢（Ver.0.3）
   for (const a of accessed) assert.match(a, allowed, `想定外の参照: ${a}`);
   assert.ok(!('hands' in v) && !('wall' in v) && !('tileType' in v));
 });

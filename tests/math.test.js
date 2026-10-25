@@ -67,7 +67,7 @@ test('結果牌の厳密値は表記と数値的に一致する（1/√2 = √2/
 test('有効な面子は49種類（360°なしなら46種類）、tan90°・tan270°は存在しない', () => {
   assert.equal(rules.melds.length, 49);
   assert.ok(!rules.melds.some((m) => m.fn === 'tan' && (m.deg === 90 || m.deg === 270)));
-  const no360 = createRules(makeConfig({ disableAngles: [360] }));
+  const no360 = createRules(makeConfig({ legacy: true, disableAngles: [360] }));
   assert.equal(no360.melds.length, 46);
   assert.equal(no360.deckSize, 164);
 });

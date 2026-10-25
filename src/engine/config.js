@@ -1,10 +1,18 @@
-// MATHJONG Ver.0.1 の設定データ。
+// MATHJONG の設定データ。
 // 牌の枚数・角度の採否・役の点数などはすべてここで管理し、ロジックにハードコードしない。
-// 「provisional: true」は Ver.0.1 の暫定採用（未承認・後日変更前提）を表す。
+// 「provisional: true」は暫定採用（未承認・後日変更前提）を表す。
+//
+// Ver.0.3-A：9枚制（配牌8枚＋ツモ1枚、3面子で和了、雀頭なし）に「刻子」「ポン」と新役を追加し、
+// 数学Ⅰ（度数法・0°〜180°・124枚）と数学Ⅱ（弧度法・0〜2π・168枚）の2モードを持つ。
+// 内部の角度は常に度（deg）で持ち、弧度法は画面表示だけで切り替える（angleUnit）。
 
-export const ENGINE_VERSION = '0.1.0';
+export const ENGINE_VERSION = '0.3.0-a';
 
-export const DEFAULT_CONFIG = {
+// Ver.0.1〜0.2.1 の規則（刻子・ポンなし、数式面子のみ、関数牌各16枚・0°〜360°）。
+// 互換テストと tools/simulate.mjs --legacy で使う（Ver.0.1 と同じ結果になることを確認する）。
+export const LEGACY_V02_CONFIG = {
+  mode: 'legacy',
+  angleUnit: 'deg',
   handSize: 8,
 
   // 関数牌（各16枚：暫定採用。旧比較の有力候補）
@@ -96,13 +104,69 @@ export const DEFAULT_CONFIG = {
   ],
 };
 
+
+// ---- Ver.0.3 の新役（刻子系）。点数は Ver.0.3 試作段階の暫定値 ----
+// category: 'formula'＝数式系（3組とも数式面子のときだけ評価）／'koutsu'＝刻子系。役候補ヒントの並び順に使う。
+const KOUTSU_YAKU = [
+  { id: 'toitoi', name: '対々和', points: 3, closedOnly: false, enabled: true, category: 'koutsu', provisional: true },
+  // 三暗刻：門前の刻子3組。ロンで最後の刻子を完成させた場合も成立（rules.sanankouRonCounts、暫定）。
+  { id: 'sanankou', name: '三暗刻', points: 5, closedOnly: true, enabled: true, category: 'koutsu', provisional: true },
+  { id: 'sinIsshoku', name: '正弦一色', points: 16, yakuman: true, closedOnly: false, enabled: true, category: 'koutsu', fn: 'sin', provisional: true },
+  { id: 'cosIsshoku', name: '余弦一色', points: 16, yakuman: true, closedOnly: false, enabled: true, category: 'koutsu', fn: 'cos', provisional: true },
+  { id: 'tanIsshoku', name: '正接一色', points: 16, yakuman: true, closedOnly: false, enabled: true, category: 'koutsu', fn: 'tan', provisional: true },
+];
+
+// 数学Ⅰでは 0°〜180° しかないため、第3・第4象限を使う役は成立しない（tests/modes.test.js で全組合せを確認）
+const MATH1_IMPOSSIBLE = ['sanshougen', 'shougen3', 'shougen4'];
+
+export const MODES = {
+  math1: { id: 'math1', label: '数学Ⅰ', unit: 'deg', maxDeg: 180, functionCopies: 12 },
+  math2: { id: 'math2', label: '数学Ⅱ', unit: 'rad', maxDeg: 360, functionCopies: 16 },
+};
+export const DEFAULT_MODE = 'math2'; // 既存版との継続性のため暫定で数学Ⅱ
+
+// Ver.0.3 の設定（mode: 'math1' | 'math2'）
+export function modeConfig(mode = DEFAULT_MODE) {
+  const m = MODES[mode];
+  if (!m) throw new Error(`unknown mode ${mode}`);
+  const c = clone(LEGACY_V02_CONFIG);
+  c.mode = m.id;
+  c.angleUnit = m.unit;
+  for (const f of c.functions) f.copies = m.functionCopies;
+  c.angles = c.angles.filter((a) => a.deg <= m.maxDeg);
+  c.rules = {
+    ...c.rules,
+    koutsu: true, // 同じ種類の牌3枚を面子（刻子）として認める
+    pon: true, // ポン（他家3人の打牌）。優先順位はロン＞ポン＞チー
+    maxCalls: 2, // チーとポンの合計
+    calledHandNeedsYaku: true, // チー・ポンをした手は役が必要
+    sanankouRonCounts: true, // 三暗刻：ロンで完成した刻子も暗刻に数える（暫定。通常の麻雀とは異なる）
+  };
+  delete c.rules.maxChi;
+  // 既存の役は数式系：3組とも数式面子のときだけ評価する
+  for (const y of c.yaku) {
+    y.formulaOnly = true;
+    y.category = 'formula';
+    if (mode === 'math1' && MATH1_IMPOSSIBLE.includes(y.id)) { y.enabled = false; y.disabledReason = '数学Ⅰ（0°〜180°）では成立しない'; }
+  }
+  c.yaku.push(...clone(KOUTSU_YAKU));
+  // 役候補ヒント：刻子系の役は「あと何枚」に1枚分を足した順位で並べる（数式系を優先。表示する枚数は正確な値）
+  c.hint = { koutsuPenalty: 1 };
+  for (const s of c.specialHands) s.category = 'formula';
+  return c;
+}
+
+export const DEFAULT_CONFIG = modeConfig(DEFAULT_MODE);
+
 function clone(x) {
   return JSON.parse(JSON.stringify(x));
 }
 
-// 設定の上書き。例: makeConfig({ disableAngles: [360], enableSpecial: ['urakyukaku'] })
-export function makeConfig({ disableAngles = [], enableSpecial = [], functionCopies, yakuPoints = {} } = {}) {
-  const c = clone(DEFAULT_CONFIG);
+// 設定の上書き。例: makeConfig({ mode: 'math1' }) / makeConfig({ legacy: true, disableAngles: [360] })
+// mode: 'math1' | 'math2'（既定は DEFAULT_MODE）、legacy: true で Ver.0.2.1 までの規則
+export function makeConfig({ mode = DEFAULT_MODE, legacy = false, disableAngles = [], enableSpecial = [], functionCopies, yakuPoints = {}, rules: ruleFlags = {} } = {}) {
+  const c = legacy ? clone(LEGACY_V02_CONFIG) : modeConfig(mode);
+  Object.assign(c.rules, ruleFlags);
   for (const a of c.angles) if (disableAngles.includes(a.deg)) a.enabled = false;
   for (const s of c.specialHands) if (enableSpecial.includes(s.id)) s.enabled = true;
   if (functionCopies) for (const f of c.functions) f.copies = functionCopies;

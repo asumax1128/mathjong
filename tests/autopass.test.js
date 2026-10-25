@@ -51,18 +51,16 @@ test('ON：ツモ番（ツモ可能・不可能）・終局・他家の宣言は
 });
 
 test('表示する宣言ボタン：OFF は従来どおり全部', () => {
-  assert.deepEqual(visibleClaimActions(claim(), false), {
-    ron: false, chi: [{ index: 0, meld: 10 }, { index: 1, meld: 20 }], passLabel: '見送る', passNote: null,
+  assert.deepEqual(visibleClaimActions(claim(), false), { ron: false, pon: null, chi: [{ index: 0, meld: 10 }, { index: 1, meld: 20 }], passLabel: '見送る', passNote: null,
   });
-  assert.deepEqual(visibleClaimActions(claim({ ron: true }), false), {
-    ron: true, chi: [{ index: 0, meld: 10 }, { index: 1, meld: 20 }], passLabel: 'ロンしない', passNote: null,
+  assert.deepEqual(visibleClaimActions(claim({ ron: true }), false), { ron: true, pon: null, chi: [{ index: 0, meld: 10 }, { index: 1, meld: 20 }], passLabel: 'ロンしない', passNote: null,
   });
-  assert.deepEqual(visibleClaimActions(claim({ ron: true, chi: [] }), false), { ron: true, chi: [], passLabel: 'ロンしない', passNote: null });
+  assert.deepEqual(visibleClaimActions(claim({ ron: true, pon: null, chi: [] }), false), { ron: true, pon: null, chi: [], passLabel: 'ロンしない', passNote: null });
 });
 
 test('表示する宣言ボタン：ON・ロン＋チーはチーを出さず「ロンしない」に「チーも見送ります」', () => {
-  assert.deepEqual(visibleClaimActions(claim({ ron: true }), true), { ron: true, chi: [], passLabel: 'ロンしない', passNote: 'チーも見送ります' });
-  assert.deepEqual(visibleClaimActions(claim({ ron: true, chi: [] }), true), { ron: true, chi: [], passLabel: 'ロンしない', passNote: null }, 'ロンのみ');
+  assert.deepEqual(visibleClaimActions(claim({ ron: true }), true), { ron: true, pon: null, chi: [], passLabel: 'ロンしない', passNote: 'チーも見送ります' });
+  assert.deepEqual(visibleClaimActions(claim({ ron: true, pon: null, chi: [] }), true), { ron: true, pon: null, chi: [], passLabel: 'ロンしない', passNote: null }, 'ロンのみ');
   // チーのみ（自動パスに失敗したときの手動表示）：チーの選択肢を出す。index はエンジンの候補番号のまま
   assert.deepEqual(visibleClaimActions(claim(), true).chi, [{ index: 0, meld: 10 }, { index: 1, meld: 20 }]);
   assert.equal(visibleClaimActions(turn(true), true), null);
@@ -211,12 +209,12 @@ test('120局：判定関数による自動パスと独立実装の見送りで�
   assert.ok(ronSeen > 0 && tsumoSeen > 0, `ロン ${ronSeen}・ツモ ${tsumoSeen} の局面を確認`);
 });
 
-test('バージョン：画面 0.2.1（ヘッダー・title は同じ値）、エンジン 0.1.0', () => {
+test('バージョン：画面 0.3.0-a（ヘッダー・title は同じ値）、エンジン 0.3.0-a', () => {
   const app = readFileSync(new URL('../src/ui/app.js', import.meta.url), 'utf8');
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const v = app.match(/const APP_VERSION = '([^']+)';/)[1];
-  assert.equal(v, '0.2.1');
-  assert.equal(ENGINE_VERSION, '0.1.0');
+  assert.equal(v, '0.3.0-a');
+  assert.equal(ENGINE_VERSION, '0.3.0-a');
   assert.match(html, new RegExp(`<title>[^<]*Ver\\.${v.replace(/\./g, '\\.')}</title>`), 'index.html の title が画面の版と一致');
   assert.ok(app.includes('<small>Ver.${APP_VERSION}</small>'), 'ヘッダーは APP_VERSION から表示');
   assert.ok(!/Ver\.0\.1</.test(app), '固定の Ver.0.1 表記が残っていない');

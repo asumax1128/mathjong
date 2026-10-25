@@ -17,10 +17,27 @@ export function valueHTML(d) {
   return `<span class="val">${sign}${body}</span>`;
 }
 
+// 角度：度数法（30°）または弧度法（π/6 を縦組みの分数で）。数学Ⅱ（unit 'rad'）は弧度法。
+export function angleHTML(t) {
+  if (t.unit === 'rad') {
+    const r = t.rad;
+    return r.den
+      ? `<span class="frac afrac"><span class="num"><span class="int">${esc(r.num)}</span></span><span class="den"><span class="int">${esc(r.den)}</span></span></span>`
+      : `<span class="int">${esc(r.num)}</span>`;
+  }
+  return `${t.deg}<span class="deg">°</span>`;
+}
+
 export function tileFaceHTML(t) {
   if (t.kind === 'func') return `<span class="fn">${t.fn}</span>`;
-  if (t.kind === 'angle') return `<span class="ang">${t.deg}<span class="deg">°</span></span>`;
+  if (t.kind === 'angle') return `<span class="ang${t.unit === 'rad' ? ' rad' : ''}">${angleHTML(t)}</span>`;
   return `<span class="eq">=</span>${valueHTML(t.display)}`;
+}
+
+// 角度の文字表記（読み上げ・title 用）：30° / π/6
+export function angleText(t) {
+  if (t.unit === 'rad') return t.rad.den ? `${t.rad.num}/${t.rad.den}` : t.rad.num;
+  return `${t.deg}°`;
 }
 
 // 牌（type: rules.types の要素）
@@ -33,15 +50,26 @@ export function tileHTML(t, { size = 'm', id, cls = '', attrs = '' } = {}) {
 
 export function tileLabel(t) {
   if (t.kind === 'func') return t.fn;
-  if (t.kind === 'angle') return `${t.deg}°`;
+  if (t.kind === 'angle') return angleText(t);
   return `=${t.value.replace('-', '−')}`;
 }
 
-// 面子を数式として表示: sin 30° = 1/2
+// 牌1枚を数式の中に置く表記（関数名・角度・= 値）
+function inlineFace(t) {
+  if (t.kind === 'func') return `<span class="fn f-${t.fn}">${t.fn}</span>`;
+  if (t.kind === 'angle') return `<span class="ang-in">${angleHTML(t)}</span>`;
+  return `<span class="op">=</span>${valueHTML(t.display)}`;
+}
+
+// 面子を数式として表示: sin 30° = 1/2（数学Ⅱは sin π/6 = 1/2）。刻子は「sin ×3 刻子」。
 export function formulaHTML(rules, meldIdx) {
   const m = rules.melds[meldIdx];
+  if (m.kind === 'koutsu') {
+    return `<span class="formula koutsu">${inlineFace(rules.types[m.type])}<span class="op">×3</span><span class="kt">刻子</span></span>`;
+  }
+  const a = rules.types[m.tiles[1]];
   const v = rules.types[m.tiles[2]];
-  return `<span class="formula"><span class="fn f-${m.fn}">${m.fn}</span>&thinsp;${m.deg}°<span class="op">=</span>${valueHTML(v.display)}</span>`;
+  return `<span class="formula"><span class="fn f-${m.fn}">${m.fn}</span>&thinsp;<span class="ang-in">${angleHTML(a)}</span><span class="op">=</span>${valueHTML(v.display)}</span>`;
 }
 
 export function backHTML(n) {

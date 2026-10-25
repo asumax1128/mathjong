@@ -1,7 +1,12 @@
 import { createRules } from '../src/engine/rules.js';
 import { Game } from '../src/engine/game.js';
+import { LEGACY_V02_CONFIG, makeConfig } from '../src/engine/config.js';
 
-export const rules = createRules();
+// 既存（Ver.0.1〜0.2.1）のテストは、その規則（刻子・ポンなし、数式面子のみ）を明示した互換テストとして実行する。
+// Ver.0.3 の規則のテストは rulesFor('math1' | 'math2') を使う。
+export const rules = createRules(LEGACY_V02_CONFIG);
+const byMode = {};
+export const rulesFor = (mode) => byMode[mode] || (byMode[mode] = createRules(makeConfig({ mode })));
 
 // 牌種類 key の短縮表記: 'sin' / '30' / '=1/2'
 export function k(s) {
