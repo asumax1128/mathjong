@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRules } from '../src/engine/rules.js';
-import { DEFAULT_CONFIG } from '../src/engine/config.js';
+import { LEGACY_V02_CONFIG as DEFAULT_CONFIG } from '../src/engine/config.js'; // 互換テスト（Ver.0.2.1 の規則）
 import { Game } from '../src/engine/game.js';
 import { createRng } from '../src/engine/rng.js';
 import { decide, applyAction } from '../src/engine/ai.js';

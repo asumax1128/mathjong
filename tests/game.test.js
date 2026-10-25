@@ -277,6 +277,6 @@ test('AI 4人の自動対局 60局：毎手の不変条件（牌の保存・手�
 });
 
 test('360°なし設定（164枚）でも自動対局が成立する', () => {
-  const r = createRules(makeConfig({ disableAngles: [360] }));
+  const r = createRules(makeConfig({ legacy: true, disableAngles: [360] }));
   for (let i = 0; i < 10; i++) runAIGame(r, 50 + i, ['speed', 'value', 'closed', 'value']);
 });

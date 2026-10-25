@@ -22,7 +22,7 @@ export class Game {
     this.wall = presetWall ? this._wallFromPreset(presetWall) : shuffle(this.tileType.map((_, i) => i), this.rng);
 
     this.hands = [[], [], [], []];
-    this.melds = [[], [], [], []]; // { meld, tiles: [id×3], claimed: id, from: seat }
+    this.melds = [[], [], [], []]; // { meld, kind: 'formula'|'koutsu', call: 'chi'|'pon', tiles: [id×3], claimed: id, from: seat }
     this.rivers = [[], [], [], []]; // { id, tsumogiri }
     this.events = [];
     this.result = null;
@@ -79,7 +79,15 @@ export class Game {
       return { seat: this.current, type: 'turn', canTsumo: !!this.tsumoAnalysis(this.current) };
     }
     const c = this.claim.queue[this.claim.pos];
-    return { seat: c.seat, type: 'claim', tile: this.claim.tile, from: this.claim.from, ron: c.ron, chi: c.chi };
+    const o = this._claimOptions(c);
+    return { seat: c.seat, type: 'claim', tile: this.claim.tile, from: this.claim.from, ron: o.ron, chi: o.chi, pon: o.pon };
+  }
+
+  // 宣言待ちの席が「いま」選べる選択肢。より近い席がポンを選んでいれば、ポン・チーはもう成立しないので出さない
+  // （ロンだけが残る）。どの席の選択も他の席には知らされない。
+  _claimOptions(c) {
+    const ponTaken = !!(this.claim && this.claim.ponChoice);
+    return { ron: c.ron, chi: ponTaken ? [] : c.chi, pon: ponTaken ? null : c.pon };
   }
 
   tsumoAnalysis(seat) {
@@ -88,15 +96,22 @@ export class Game {
   }
 
   ronAnalysis(seat, tileId) {
-    return this.rules.analyzeWin(this.countsOf([...this.hands[seat], tileId]), this.exposedMelds(seat));
+    return this.rules.analyzeWin(this.countsOf([...this.hands[seat], tileId]), this.exposedMelds(seat), { ron: true });
   }
 
-  // seat が tileId（上家の打牌）でチーできる面子の候補
+  // チーとポンの合計回数の上限（旧設定の maxChi にも対応）
+  get maxCalls() {
+    const r = this.rules.config.rules;
+    return r.maxCalls ?? r.maxChi;
+  }
+
+  // seat が tileId（上家の打牌）でチーできる面子の候補（数式面子のみ）
   chiOptions(seat, tileId) {
-    if (this.melds[seat].length >= this.rules.config.rules.maxChi) return [];
+    if (this.melds[seat].length >= this.maxCalls) return [];
     const t = this.tileType[tileId];
     const out = [];
     for (const mi of this.rules.meldsByTile[t]) {
+      if (this.rules.melds[mi].kind !== 'formula') continue;
       const others = this.rules.melds[mi].tiles.filter((x) => x !== t);
       const use = [];
       const hand = this.hands[seat].slice();
@@ -109,6 +124,16 @@ export class Game {
       if (use.length === 2) out.push({ meld: mi, use });
     }
     return out;
+  }
+
+  // seat が tileId（他家の打牌）でポンできるか。できれば { meld: 刻子の index, use: [手牌の id×2] }、できなければ null。
+  ponOption(seat, tileId) {
+    if (!this.rules.config.rules.pon || this.melds[seat].length >= this.maxCalls) return null;
+    const t = this.tileType[tileId];
+    const k = this.rules.koutsuOf(t);
+    if (!k) return null;
+    const use = this.hands[seat].filter((id) => this.tileType[id] === t).slice(0, 2);
+    return use.length === 2 ? { meld: k.idx, use } : null;
   }
 
   // ---- 手番の行動 ----
@@ -131,61 +156,80 @@ export class Game {
     this._endWin(seat, 'tsumo', this.drawn, null, a);
   }
 
-  // ---- 打牌後の割り込み（ロン → チー の順） ----
+  // ---- 打牌後の割り込み（優先順位：ロン ＞ ポン ＞ チー） ----
+  // 打牌者から手番順に近い席から1人ずつ判断する（各席は自分の選択肢の中から1つ選ぶ）。
+  // ・ロン：その場で和了（より近い席はすでにロンを見送っている＝アタマハネ）。
+  // ・ポン／チー：選択を保留し、後続の席のロン判断（ポンはさらに後続のポンより優先）が終わってから確定する。
+  //   → 別の人にロンの機会がある間は、ポン・チーを確定させない。
+  // ・最も近い席のポンが、チーより優先される。後続の席にはポン・チーを聞かない（ロンだけ聞く）。
   _openClaims(from, tileId) {
     const queue = [];
     for (let k = 1; k < SEAT_COUNT; k++) {
       const s = next(from, k);
       const ron = !!this.ronAnalysis(s, tileId);
       const chi = k === 1 ? this.chiOptions(s, tileId) : [];
-      if (ron || chi.length) queue.push({ seat: s, ron, chi });
+      const pon = this.ponOption(s, tileId);
+      if (ron || chi.length || pon) queue.push({ seat: s, ron, chi, pon });
     }
     if (!queue.length) return this._advance(from);
     this.phase = 'claim';
-    this.claim = { from, tile: tileId, queue, pos: 0, chiChoice: null };
+    this.claim = { from, tile: tileId, queue, pos: 0, chiChoice: null, ponChoice: null };
   }
 
-  // decision: { type: 'ron' } | { type: 'chi', option: index } | { type: 'pass' }
+  // decision: { type: 'ron' } | { type: 'pon' } | { type: 'chi', option: index } | { type: 'pass' }
   respond(seat, decision) {
     this._expect(seat, 'claim');
     const c = this.claim.queue[this.claim.pos];
+    const o = this._claimOptions(c);
     if (decision.type === 'ron') {
-      if (!c.ron) throw new Error('ron not possible');
+      if (!o.ron) throw new Error('ron not possible');
       const a = this.ronAnalysis(seat, this.claim.tile);
       return this._endWin(seat, 'ron', this.claim.tile, this.claim.from, a);
     }
-    if (decision.type === 'chi') {
-      const opt = c.chi[decision.option];
+    if (decision.type === 'pon') {
+      if (!o.pon) throw new Error('pon not possible');
+      // 後続のロン判断が終わるまで保留。最初に選ばれたポン（＝最も近い席）だけが有効。
+      this.claim.ponChoice = { seat, ...o.pon };
+    } else if (decision.type === 'chi') {
+      const opt = o.chi[decision.option];
       if (!opt) throw new Error('invalid chi option');
-      // ロン優先のため、後続のロン判断が終わるまでチーは保留
+      // ロン・ポン優先のため、後続の判断が終わるまでチーは保留
       this.claim.chiChoice = { seat, ...opt };
     } else if (decision.type !== 'pass') {
       throw new Error('unknown decision');
     }
     this.claim.pos++;
     while (this.claim.pos < this.claim.queue.length) {
-      const q = this.claim.queue[this.claim.pos];
-      if (q.ron) return; // 次の人のロン判断を待つ
-      this.claim.pos++; // チー候補だけの人（=既に判断済み or 下家以外）は飛ばす
+      const q = this._claimOptions(this.claim.queue[this.claim.pos]);
+      if (q.ron || q.pon) return; // 次の人のロン（またはまだ有効なポン）の判断を待つ
+      this.claim.pos++; // ロンもポンもない人（チーは下家＝先頭だけ）は飛ばす
     }
-    const { from, tile, chiChoice } = this.claim;
+    const { from, tile, chiChoice, ponChoice } = this.claim;
     this.claim = null;
-    if (chiChoice) return this._doChi(chiChoice, from, tile);
+    if (ponChoice) return this._doCall('pon', ponChoice, from, tile);
+    if (chiChoice) return this._doCall('chi', chiChoice, from, tile);
     this._advance(from);
   }
 
-  _doChi(choice, from, tileId) {
+  // チー・ポンの確定：打牌を河から公開面子へ移し、手牌2枚を公開する。鳴いた人の打牌番になる（間の席は飛ばす）。
+  _doCall(call, choice, from, tileId) {
     const { seat, meld, use } = choice;
     const river = this.rivers[from];
     const ri = river.findIndex((r) => r.id === tileId);
+    if (ri < 0) throw new Error('claimed tile is not in the river');
     river.splice(ri, 1);
-    for (const id of use) this.hands[seat].splice(this.hands[seat].indexOf(id), 1);
-    this.melds[seat].push({ meld, tiles: [...use, tileId], claimed: tileId, from });
-    this.log({ type: 'chi', seat, from, tile: tileId, meld });
+    for (const id of use) {
+      const i = this.hands[seat].indexOf(id);
+      if (i < 0) throw new Error('call tile is not in the hand');
+      this.hands[seat].splice(i, 1);
+    }
+    const kind = this.rules.melds[meld].kind;
+    this.melds[seat].push({ meld, kind, call, tiles: [...use, tileId], claimed: tileId, from });
+    this.log({ type: call, seat, from, tile: tileId, meld });
     this.current = seat;
     this.phase = 'turn';
     this.drawn = null;
-    this.justDrew = false; // チー直後はツモ和了不可。打牌のみ。
+    this.justDrew = false; // 鳴いた直後はツモ和了不可。打牌のみ。
   }
 
   _advance(from) {
@@ -223,7 +267,7 @@ export class Game {
       seat,
       hand: this.hands[seat].map((id) => ({ id, type: this.tileType[id] })),
       drawn: this.current === seat ? this.drawn : null,
-      melds: this.melds.map((ms) => ms.map((m) => ({ meld: m.meld, tiles: m.tiles.map((id) => this.tileType[id]), from: m.from }))),
+      melds: this.melds.map((ms) => ms.map((m) => ({ meld: m.meld, kind: m.kind, call: m.call, tiles: m.tiles.map((id) => this.tileType[id]), from: m.from }))),
       rivers: this.rivers.map((r) => r.map((x) => this.tileType[x.id])),
       handCounts: this.hands.map((h) => h.length),
       wallCount: this.wall.length,

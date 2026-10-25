@@ -31,12 +31,23 @@ export function createRules(config = DEFAULT_CONFIG) {
       if (v === null) continue; // tan90°, tan270° は定義なし
       const val = valueByExact.get(exactKey(v));
       if (!val) throw new Error(`no value tile for ${fn.fn}${ang.deg}`);
-      melds.push({ fn: fn.fn, deg: ang.deg, value: val.value, quadrant: ang.quadrant, tiles: [fn.idx, ang.idx, val.idx] });
+      melds.push({ kind: 'formula', fn: fn.fn, deg: ang.deg, value: val.value, quadrant: ang.quadrant, tiles: [fn.idx, ang.idx, val.idx] });
     }
   }
   melds.forEach((m, i) => { m.idx = i; m.key = `${m.fn}${m.deg}=${m.value}`; });
+  const formulaCount = melds.length;
+  // ---- 刻子（Ver.0.3）：同じ種類の牌3枚。数式面子の後ろに追加する（数式面子の index は従来と同じ） ----
+  // 刻子には fn / deg / value を持たせない（数式系の役の判定で誤って使われないように）。牌の種類は type。
+  if (config.rules.koutsu) {
+    for (const t of types) {
+      if (t.copies < 3) continue;
+      melds.push({ kind: 'koutsu', type: t.idx, tiles: [t.idx, t.idx, t.idx], idx: melds.length, key: `${t.key}×3` });
+    }
+  }
   const meldsByTile = Array.from({ length: T }, () => []);
-  for (const m of melds) for (const t of m.tiles) meldsByTile[t].push(m.idx);
+  for (const m of melds) for (const t of new Set(m.tiles)) meldsByTile[t].push(m.idx);
+  const koutsuByType = new Array(T).fill(null);
+  for (const m of melds) if (m.kind === 'koutsu') koutsuByType[m.type] = m;
   const meldByTriple = new Map(melds.map((m) => [[...m.tiles].sort((a, b) => a - b).join(','), m]));
 
   // 3枚の牌種類から面子を引く（順不同）。不正なら null。
@@ -61,13 +72,18 @@ export function createRules(config = DEFAULT_CONFIG) {
       }
       for (const mi of meldsByTile[first]) {
         const tl = melds[mi].tiles;
-        if (tl.every((t) => c[t] > 0)) {
-          for (const t of tl) c[t]--;
+        // 刻子は同じ牌を3枚使うので、1枚ずつ減らして枚数を確かめる
+        let j = 0;
+        for (; j < tl.length; j++) {
+          if (c[tl[j]] <= 0) break;
+          c[tl[j]]--;
+        }
+        if (j === tl.length) {
           cur.push(mi);
           rec();
           cur.pop();
-          for (const t of tl) c[t]++;
         }
+        for (let x = 0; x < j; x++) c[tl[x]]++;
       }
     })();
     return [...out.values()];
@@ -93,7 +109,18 @@ export function createRules(config = DEFAULT_CONFIG) {
     douchi: (ms) => new Set(ms.map((m) => m.value)).size === 1,
     doukaku: (ms) => new Set(ms.map((m) => m.deg)).size === 1 && new Set(ms.map((m) => m.fn)).size === 3,
     sanjuu: (ms) => new Set(ms.map((m) => m.key)).size === 1,
+    // ---- 刻子系（Ver.0.3） ----
+    toitoi: (ms) => ms.every((m) => m.kind === 'koutsu'),
+    // 門前限定（closedOnly）。ロンで完成した刻子を暗刻に数えるかは設定で切り替える
+    sanankou: (ms, ctx) => ms.every((m) => m.kind === 'koutsu') && (!ctx.ron || config.rules.sanankouRonCounts !== false),
+    sinIsshoku: (ms) => isshoku(ms, 'sin'),
+    cosIsshoku: (ms) => isshoku(ms, 'cos'),
+    tanIsshoku: (ms) => isshoku(ms, 'tan'),
   };
+  // 関数一色：9枚すべて同じ関数牌（＝その関数牌の刻子3組）
+  function isshoku(ms, fn) {
+    return ms.every((m) => m.kind === 'koutsu' && types[m.type].kind === 'func' && types[m.type].fn === fn);
+  }
 
   function scoreYaku(list) {
     const yakuman = list.filter((y) => y.yakuman);
@@ -106,15 +133,19 @@ export function createRules(config = DEFAULT_CONFIG) {
     return { yaku: list, points: config.scoring.base + list.reduce((s, y) => s + y.points, 0), yakuman: yakuman.length > 0 };
   }
 
-  // meldIdxs: 3面子の index。closed: チーなしか。
-  function evaluateMelds(meldIdxs, closed) {
+  // meldIdxs: 3面子の index。closed: チー・ポンなしか。ron: ロン和了か（三暗刻の暫定規則で使う）。
+  // 数式系の役（formulaOnly）は3組とも数式面子のときだけ評価する（刻子を含む混合形には付かない）。
+  function evaluateMelds(meldIdxs, closed, { ron = false } = {}) {
     const ms = meldIdxs.map((i) => melds[i]);
+    const allFormula = ms.every((m) => m.kind === 'formula');
+    const ctx = { closed, ron };
     const found = [];
     for (const y of yakuDefs) {
       if (y.closedOnly && !closed) continue;
+      if (y.formulaOnly && !allFormula) continue;
       const det = detectors[y.id];
       if (!det) throw new Error(`no detector for yaku ${y.id}`);
-      if (det(ms)) found.push({ id: y.id, name: y.name, points: y.points, yakuman: !!y.yakuman });
+      if (det(ms, ctx)) found.push({ id: y.id, name: y.name, points: y.points, yakuman: !!y.yakuman });
     }
     return { ...scoreYaku(found), hasYaku: found.length > 0 };
   }
@@ -142,13 +173,14 @@ export function createRules(config = DEFAULT_CONFIG) {
   // ---- 和了判定 ----
   // counts: 手の内の牌（和了牌を含む） / exposed: 公開面子 index 配列
   // 合法な全和了形を評価し、最高得点の形を返す。和了不可なら null。
-  function analyzeWin(counts, exposed = []) {
+  // opts.ron: ロン和了の判定か（三暗刻の暫定規則）。
+  function analyzeWin(counts, exposed = [], { ron = false } = {}) {
     const closed = exposed.length === 0;
     const k = 3 - exposed.length;
     const candidates = [];
     for (const d of decompose(counts, k)) {
       const all = [...exposed, ...d];
-      const ev = evaluateMelds(all, closed);
+      const ev = evaluateMelds(all, closed, { ron });
       if (!closed && config.rules.calledHandNeedsYaku && !ev.hasYaku) continue;
       candidates.push({ kind: 'normal', melds: all, concealedMelds: d, exposedMelds: exposed.slice(), ...ev });
     }
@@ -167,7 +199,8 @@ export function createRules(config = DEFAULT_CONFIG) {
   }
 
   return {
-    config, types, typeByKey, T, melds, meldsByTile, meldOf,
+    config, types, typeByKey, T, melds, meldsByTile, meldOf, formulaCount,
+    koutsuOf: (t) => koutsuByType[t] || null, // その牌種類の刻子（刻子なしの規則・3枚未満の牌は null）
     decompose, evaluateMelds, detectSpecial, analyzeWin, countsOf,
     deckSize: types.reduce((s, t) => s + t.copies, 0),
   };

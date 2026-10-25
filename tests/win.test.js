@@ -107,14 +107,14 @@ test('九角無双：門前のみ・通常面子とは別判定', () => {
 test('裏九角無双：初期設定では無効、設定で有効化可能、360°無効なら成立不能', () => {
   const ura = ['180', '210', '225', '240', '270', '300', '315', '330', '360'];
   assert.equal(rules.analyzeWin(counts(ura)), null);
-  const on = createRules(makeConfig({ enableSpecial: ['urakyukaku'] }));
+  const on = createRules(makeConfig({ legacy: true, enableSpecial: ['urakyukaku'] }));
   assert.deepEqual(names(on.analyzeWin(counts(ura, on))), ['裏九角無双']);
-  const no360 = createRules(makeConfig({ enableSpecial: ['urakyukaku'], disableAngles: [360] }));
+  const no360 = createRules(makeConfig({ legacy: true, enableSpecial: ['urakyukaku'], disableAngles: [360] }));
   assert.equal(no360.detectSpecial(new Array(no360.T).fill(0), true).length, 0);
 });
 
 test('得点設定はデータで変更できる', () => {
-  const r = createRules(makeConfig({ yakuPoints: { sankan: 5 } }));
+  const r = createRules(makeConfig({ legacy: true, yakuPoints: { sankan: 5 } }));
   const tiles = tilesOf([['sin', 30, '=1/2'], ['cos', 180, '=-1'], ['tan', 0, '=0']]);
   assert.equal(r.analyzeWin(counts(tiles, r)).points, 6);
 });
