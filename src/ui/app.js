@@ -8,6 +8,7 @@ import { trigExact } from '../engine/exact.js';
 import { tileHTML, formulaHTML, backHTML, valueHTML, angleHTML, angleText } from './render.js';
 import { yakuCandidates, warmUp, claimForSeat } from '../engine/yakuhint.js';
 import { hintKey } from './hintstate.js';
+import { analyzeFormulas, initialSelection, assignColors, exposedSummary } from '../engine/formulahint.js';
 import { reconcileOrder, defaultOrder } from './handorder.js';
 import { createHandDrag } from './handdrag.js';
 import { CHI_AUTOPASS_KEY, parseChiAutoPass, visibleClaimActions, claimPendingForHint, claimPolicy, autoPassDue } from './autopass.js';
@@ -94,12 +95,12 @@ function startRound() {
   S.aiRng = createRng(seed ^ 0x5bd1e995);
   warmUp(rules); // 役候補ヒント用の評価を少しずつ事前計算（判定・進行には影響しない）
   S.selected = null;
-  S.hintsUsed = 0;
   // ヒントは局ごとに閉じた状態から始める（使用回数も局ごと）
-  S.hintOpen = false;
-  S.hintKey = null;
-  S.hintText = null;
-  S.hintHighlight = null;
+  // 回数：発見（第1段階）・確認（第2段階）は「同じ手牌の状態」では1回だけ。値表は従来どおり開くたび。
+  S.hintStats = { discover: 0, confirm: 0, table: 0 };
+  S.hintCounted = { discover: new Set(), confirm: new Set() };
+  S.hintsUsed = 0; // 互換：上の3つの合計
+  closeHint();
   S.modal = null;
   S.scored = false;
   S.claimPolicy = null; // 宣言ごとの表示方針（局ごとに初期化）
@@ -178,6 +179,7 @@ function finishRound() {
     if (g.result.type === 'win') S.scores[g.result.winner] += g.result.points;
     S.history.push({ round: S.round, result: g.result.type === 'win' ? { ...g.result, analysis: undefined } : g.result });
   }
+  closeHint(); // 和了・流局でヒントを閉じる
   S.modal = 'result';
   render();
 }
@@ -278,10 +280,16 @@ function handHTML() {
   const order = currentOrder();
   // ツモ牌：右端にあれば従来どおり隙間で区別、並び替えで移動したら金色の点で示す
   const drawnAtEnd = drawn !== null && order[order.length - 1] === drawn;
-  const hl = S.hintHighlight || new Set();
+  // 数式の確認（第2段階）の色枠：物理牌 id ごとに 黄／赤／青／赤青（共有）
+  const fc = S.hintColors || new Map();
+  const frame = (id) => {
+    const c = fc.get(id);
+    if (!c) return '';
+    return c.length === 2 ? 'fhf fhf-rb' : `fhf fhf-${c[0]}`;
+  };
   const tile = (id) => tileHTML(T(g.typeOf(id)), {
     size: 'l', id,
-    cls: [myTurn ? 'tap' : '', S.selected === id ? 'selected' : '', hl.has(id) ? 'hint' : '',
+    cls: [myTurn ? 'tap' : '', S.selected === id ? 'selected' : '', frame(id),
       id === drawn ? (drawnAtEnd ? 'drawn' : 'drawn drawn-mark') : ''].join(' '),
     attrs: myTurn ? `data-action="tile" tabindex="0"` : '',
   });
@@ -443,7 +451,8 @@ function resultHTML() {
   }
   const scores = `<table class="scores"><tr>${[0, 1, 2, 3].map((s) => `<th>${POS[s]}<br>${PLAYERS[s].name}</th>`).join('')}</tr>
     <tr>${[0, 1, 2, 3].map((s) => `<td class="${r.winner === s ? 'win' : ''}">${S.scores[s]}</td>`).join('')}</tr></table>`;
-  const hints = S.hintsUsed ? `<p class="note">この局のヒント使用：${S.hintsUsed}回</p>` : '';
+  const hs = S.hintStats;
+  const hints = S.hintsUsed ? `<p class="note hint-stats">この局のヒント：発見 ${hs.discover}回・確認 ${hs.confirm}回・値表 ${hs.table}回</p>` : '';
   return `<div class="result">${head}${detail}
     <h3>累計得点（仮）</h3>${scores}${hints}
     <details><summary>全員の手牌を見る</summary>${[0, 1, 2, 3].map(revealHTML).join('')}</details>
@@ -567,6 +576,35 @@ function settingsHTML() {
 }
 
 // ---------- ヒント ----------
+// Ver.0.3-B：2段階のヒント。
+//   第1段階（発見）：完成している数式の通り数・あと1枚の組合せ・狙える役・公開済み面子。式や枠は出さない。
+//   第2段階（確認）：完成数式の全候補・手牌の色枠（最大2色）・同時に使える最大組数・共有の説明・表示の切替。
+// 数式の整理は src/engine/formulahint.js（純粋関数）。役候補・得点・AI・進行には影響しない。
+function closeHint() {
+  S.hintOpen = false;
+  S.hintKey = null;
+  S.hintText = null;
+  S.hintColors = null;
+  S.hintStage = 1;
+  S.hintHandKey = null;
+  S.hintSel = null;
+  S.hintMode = 'both';
+}
+
+// 自分の手牌の構成（物理牌 id の集合＋自分の公開面子）。表示順は含めない（並び替えでは変わらない）
+function handStateKey() {
+  const g = S.game;
+  return `${S.gameSerial}|${g.hands[HUMAN].slice().sort((a, b) => a - b).join(',')}|${g.melds[HUMAN].map((m) => m.meld).join(',')}`;
+}
+
+function countHint(kind) {
+  const key = handStateKey();
+  if (S.hintCounted[kind].has(key)) return;
+  S.hintCounted[kind].add(key);
+  S.hintStats[kind]++;
+  S.hintsUsed++;
+}
+
 function hintInputs() {
   const g = S.game;
   const view = g.viewFor(HUMAN);
@@ -576,42 +614,101 @@ function hintInputs() {
 }
 
 function refreshHintIfChanged() {
+  const g = S.game;
+  // 自分の手牌の構成が変わったら（打牌・ツモ・チー・ポン）第1段階へ戻す。他家の打牌・並び替えでは維持。
+  const hk = handStateKey();
+  if (hk !== S.hintHandKey) {
+    S.hintHandKey = hk;
+    S.hintStage = 1;
+    S.hintSel = null;
+    S.hintMode = 'both';
+    S.hintFormulas = analyzeFormulas(rules, g.hands[HUMAN].map((id) => ({ id, type: g.typeOf(id) })));
+  }
   const { view, claim } = hintInputs();
   const key = hintKey(view, claim);
-  if (key === S.hintKey) return;
-  S.hintKey = key;
-  computeHint(view, claim);
+  if (key !== S.hintKey) {
+    S.hintKey = key;
+    computeHint(view, claim);
+  }
+  buildHintText();
 }
 
+// 役候補などの公開情報に依存する部分（公開情報が変わったときだけ再計算）
 function computeHint(view, claim) {
   const g = S.game;
   S.hintComputations = (S.hintComputations || 0) + 1;
   const ids = g.hands[HUMAN];
-  // 手牌から同時に取れる完成面子の最大数（重複利用なし）
-  const best = { n: 0, used: [] };
-  (function rec(pool, used) {
-    if (used.length / 3 > best.n) { best.n = used.length / 3; best.used = used.slice(); }
-    for (let i = 0; i < pool.length; i++) for (let j = i + 1; j < pool.length; j++) for (let k = j + 1; k < pool.length; k++) {
-      if (!rules.meldOf(g.typeOf(pool[i]), g.typeOf(pool[j]), g.typeOf(pool[k]))) continue;
-      const rest = pool.filter((_, x) => x !== i && x !== j && x !== k);
-      rec(rest, [...used, pool[i], pool[j], pool[k]]);
-      if (best.n === 3) return;
-    }
-  })(ids, []);
   const types = new Set(ids.map((id) => g.typeOf(id)));
   const handCounts = rules.countsOf(ids.map((id) => g.typeOf(id)));
   // あと1枚で完成する組合せ：数式面子は3種のうち2種が手にある、刻子は同じ牌が2枚ある
   const partial = rules.melds.filter((m) => (m.kind === 'koutsu' ? handCounts[m.type] === 2 : m.tiles.filter((t) => types.has(t)).length === 2)).length;
-  S.hintHighlight = new Set(best.used);
   // 役候補（公開情報のみ。必要な牌の種類や捨て牌は表示しない）
   const cands = yakuCandidates(rules, view, { claim });
   const candHTML = cands.length
     ? `<ol class="yaku-cands">${cands.map((c) => `<li><b>${c.name}</b><span class="yc-pts">${c.yakuman ? '役満' : `+${c.yakuPoints}`}</span>${c.closedOnly ? '<span class="tag closed">門前限定</span>' : ''}<span class="yc-miss">${c.missing === 0 ? '完成！' : `あと${c.missing}枚`}</span></li>`).join('')}</ol>`
     : '<p class="yc-none">いま狙える役は見つかりません</p>';
-  S.hintText = `<div class="hint-basic">完成している面子：<b>${best.n}組</b>（黄色の枠）／ あと1枚で完成する組み合わせ：<b>${partial}通り</b></div>
-    <div class="hint-yaku"><span class="hy-title">狙える役（近い順）</span>${candHTML}
+  S.hintPartial = partial;
+  S.hintYakuHTML = `<div class="hint-yaku"><span class="hy-title">狙える役（近い順）</span>${candHTML}
       <p class="yc-note" title="「あと◯枚」は目標の完成形に不足する牌の枚数です。和了までのツモ回数や巡数ではありません。">※あと◯枚＝完成形に足りない牌の数（ツモ回数・巡数ではない）</p></div>
     <div class="hint-tools"><button data-action="table" class="small">値表を見る</button><button data-action="guide" class="small">役ガイド</button></div>`;
+}
+
+const FH_COLOR = { a: '赤', b: '青' };
+// ヒント欄の HTML（段階と表示対象から毎回作る。計算は軽い）
+function buildHintText() {
+  const g = S.game;
+  const fa = S.hintFormulas;
+  const n = fa.formulas.length;
+  const ex = exposedSummary(rules, g.melds[HUMAN]);
+  const exLine = ex.formula || ex.koutsu
+    ? `<div class="hb-row">公開済み：数式面子 <b>${ex.formula}組</b>・刻子 <b>${ex.koutsu}組</b></div>` : '';
+  let basic = `<div class="hint-basic">
+      <div class="hb-row">${g.melds[HUMAN].length ? '手牌内の' : ''}完成している数式：<b>${n}通り</b></div>
+      <div class="hb-row">あと1枚で完成する組み合わせ：<b>${S.hintPartial}通り</b></div>${exLine}
+      ${n > 0 && S.hintStage === 1 ? '<button data-action="fh-confirm" class="small fh-confirm">数式を確認する</button>' : ''}
+    </div>`;
+  S.hintColors = null;
+  if (S.hintStage === 2 && n > 0) basic += formulaPanelHTML(fa);
+  S.hintText = basic + S.hintYakuHTML;
+}
+
+function formulaPanelHTML(fa) {
+  const g = S.game;
+  const single = fa.formulas.length === 1;
+  if (!S.hintSel) S.hintSel = initialSelection(rules, fa);
+  const sel = S.hintSel;
+  const hand = g.hands[HUMAN].map((id) => ({ id, type: g.typeOf(id) }));
+  const res = assignColors(rules, hand, fa, sel, { mode: S.hintMode, single });
+  S.hintColors = res.colors;
+  const showA = S.hintMode !== 'b';
+  const showB = S.hintMode !== 'a' && sel.b !== null;
+  const role = (mi) => {
+    if (single) return '<span class="fh-role fh-yellow">黄</span>';
+    if (mi === sel.a) return `<span class="fh-role fh-red${showA ? '' : ' off'}">赤</span>`;
+    if (mi === sel.b) return `<span class="fh-role fh-blue${showB ? '' : ' off'}">青</span>`;
+    return '';
+  };
+  const items = fa.formulas.map((f, i) => {
+    const picks = single ? '' : `<span class="fh-picks">
+        <button data-action="fh-pick" data-slot="a" data-meld="${f.meld}" class="fh-pick fh-red" aria-pressed="${f.meld === sel.a}" aria-label="${i + 1}番を赤で表示">赤</button>
+        <button data-action="fh-pick" data-slot="b" data-meld="${f.meld}" class="fh-pick fh-blue" aria-pressed="${f.meld === sel.b}" aria-label="${i + 1}番を青で表示">青</button></span>`;
+    const copies = f.copies > 1 ? `<span class="fh-copies">×${f.copies}組</span>` : '';
+    return `<li class="fh-item${f.meld === sel.a ? ' is-a' : ''}${f.meld === sel.b ? ' is-b' : ''}" data-meld="${f.meld}"><span class="fh-no">${i + 1}</span>${formulaHTML(rules, f.meld)}${copies}${role(f.meld)}${picks}</li>`;
+  }).join('');
+  const no = (mi) => fa.formulas.findIndex((f) => f.meld === mi) + 1;
+  const modes = single || sel.b === null ? '' : `<div class="fh-modes" role="group" aria-label="表示する数式">
+      <button data-action="fh-mode" data-mode="both" class="small" aria-pressed="${S.hintMode === 'both'}">2式（赤${no(sel.a)}・青${no(sel.b)}）</button>
+      <button data-action="fh-mode" data-mode="a" class="small" aria-pressed="${S.hintMode === 'a'}">赤${no(sel.a)}だけ</button>
+      <button data-action="fh-mode" data-mode="b" class="small" aria-pressed="${S.hintMode === 'b'}">青${no(sel.b)}だけ</button></div>`;
+  const legend = single
+    ? `<p class="fh-note">黄色の枠：${no(sel.a)}番の数式（${res.sets.a}組）</p>`
+    : `<p class="fh-note">${showA ? `<span class="fh-red-t">赤の枠＝${no(sel.a)}番（${res.sets.a}組）</span>` : ''}${showA && showB ? '／' : ''}${showB ? `<span class="fh-blue-t">青の枠＝${no(sel.b)}番（${res.sets.b}組）</span>` : ''}</p>`;
+  const shared = res.shared
+    ? `<p class="fh-note fh-shared">赤と青の数式は牌を共有するため、同時には使用できません（2色の枠の牌）。手牌全体では、同時に最大${fa.max}組の数式を作れます。</p>` : '';
+  return `<div class="fh">
+      <div class="hb-row">同時に使える数式面子：<b>最大${fa.max}組</b>（手牌全体）</div>
+      <ol class="fh-list">${items}</ol>${modes}${legend}${shared}
+    </div>`;
 }
 
 // ---------- 入力 ----------
@@ -644,10 +741,39 @@ app.addEventListener('click', (ev) => {
     case 'pass': humanAct({ type: 'pass' }); break;
     case 'hint':
       if (S.hintOpen) {
-        S.hintOpen = false; S.hintKey = null; S.hintText = null; S.hintHighlight = null;
+        closeHint(); // 閉じると色枠も解除。次に開くときは第1段階から
       } else {
-        S.hintsUsed++; S.hintOpen = true; S.hintKey = null; // render() で最新の局面から計算
+        closeHint();
+        S.hintOpen = true; // render() で最新の局面から計算（第1段階）
+        countHint('discover');
       }
+      render();
+      break;
+    case 'fh-confirm':
+      // 第2段階（数式の確認）へ。同じ手牌の状態では回数を1回だけ数える
+      if (!S.hintOpen) break;
+      S.hintStage = 2;
+      S.hintSel = null;
+      S.hintMode = 'both';
+      countHint('confirm');
+      render();
+      break;
+    case 'fh-pick': {
+      // 一覧の数式を赤（a）または青（b）に割り当てる（もう一方と同じなら入れ替え）。回数は数えない
+      if (!S.hintOpen || S.hintStage !== 2 || !S.hintSel) break;
+      const slot = el.dataset.slot === 'b' ? 'b' : 'a';
+      const other = slot === 'a' ? 'b' : 'a';
+      const mi = Number(el.dataset.meld);
+      if (!S.hintFormulas.formulas.some((f) => f.meld === mi)) break;
+      if (S.hintSel[other] === mi) S.hintSel[other] = S.hintSel[slot];
+      S.hintSel[slot] = mi;
+      if (S.hintMode !== 'both' && S.hintMode !== slot) S.hintMode = 'both';
+      render();
+      break;
+    }
+    case 'fh-mode':
+      if (!S.hintOpen || S.hintStage !== 2) break;
+      S.hintMode = ['both', 'a', 'b'].includes(el.dataset.mode) ? el.dataset.mode : 'both';
       render();
       break;
     case 'guide-tab':
@@ -655,7 +781,7 @@ app.addEventListener('click', (ev) => {
       render();
       break;
     case 'guide': case 'table': case 'settings':
-      if (act === 'table' && S.modal !== 'table') S.hintsUsed++;
+      if (act === 'table' && S.modal !== 'table') { S.hintStats.table++; S.hintsUsed++; }
       S.modal = act; render(); break;
     case 'close': S.modal = g.pending() ? null : 'result'; render(); break;
     case 'close-result': S.modal = null; render(); break;

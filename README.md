@@ -48,6 +48,7 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 | [Codex監査ガイド](AGENTS.md) | 独立監査の重点項目と報告形式 |
 | [Ver.0.2 開発仕様](docs/13-ver0.2-spec.md) | 役ガイド・役候補ヒント・牌表示（A）、チーのオートパス（B）、横画面（C） |
 | [Ver.0.3-A 実装記録](docs/14-ver0.3-a.md) | 9枚制・数学Ⅰ／Ⅱ・刻子・ポン・新役（開発中） |
+| [Ver.0.3-B ヒント実装記録](docs/15-ver0.3-b-hints.md) | 2段階ヒント（発見・確認）・数式のカラー表示（開発中） |
 | [iPhone 実機テスト手順](docs/12-iphone-test-guide.md) | テストURL、Pages 設定、固定seed、報告方法 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |

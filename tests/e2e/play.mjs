@@ -478,7 +478,7 @@ async function v02aFeatures(browser) {
   assert.equal(await page.locator('.hint-yaku .tile').count(), 0, 'ヒントに牌を表示しない');
   assert.ok(!/[°√]|sin|cos|tan/.test(yakuArea), `ヒントに必要牌の情報がある: ${yakuArea}`);
   // 既存のヒント（完成面子・あと1枚）は維持
-  assert.match(await page.locator('.hint-basic').innerText(), /完成している面子：\d組.*あと1枚で完成する組み合わせ：\d+通り/s);
+  assert.match(await page.locator('.hint-basic').innerText(), /完成している数式：\d+通り.*あと1枚で完成する組み合わせ：\d+通り/s); // Ver.0.3-B の表記
 
   // (2) 役ガイド：有効な役・特殊和了すべて、得点・鳴き可否は設定データと一致、数式例あり
   await page.locator('.hint-tools [data-action="guide"]').tap();
@@ -652,7 +652,7 @@ async function v02aAuditFixes(browser) {
     for (let i = 0; i < 7; i++) await page.touchscreen.tap(btn.x + btn.width / 2, btn.y + btn.height / 2);
     const st = await hintMatchesEngine(page);
     assert.ok(st.open, '7回押すと開いた状態');
-    assert.equal(st.used, 4, '開いた回数だけ数える');
+    assert.equal(st.used, 1, '同じ手牌の状態では開閉を繰り返しても1回（Ver.0.3-B）');
     assert.deepEqual(st.shown, st.exp);
     // 事前計算の途中で局切替を20回
     const state = await page.evaluate(async (base) => {
@@ -2534,6 +2534,217 @@ async function v03Rules(browser) {
   console.log('✓ Ver.0.3：数学Ⅰ・Ⅱで長押し並び替え・自動整列・通常の打牌');
 }
 
+
+// ---- Ver.0.3-B：2段階ヒント（発見・確認）と数式の色枠 ----
+const hintState = (page) => page.evaluate(() => {
+  const { S } = window.__mathjong;
+  const frames = {};
+  document.querySelectorAll('.hand .tile.fhf').forEach((t) => { frames[t.dataset.id] = [...t.classList].find((c) => /^fhf-/.test(c)); });
+  const clean = (el) => (el ? el.textContent.replace(/\s+/g, ' ').trim() : null);
+  return {
+    open: S.hintOpen, stage: S.hintStage, frames, panel: !!document.querySelector('.hint-box .fh'),
+    confirm: !!document.querySelector('.hint-box [data-action="fh-confirm"]'),
+    list: [...document.querySelectorAll('.fh-item')].map(clean), basic: clean(document.querySelector('.hint-basic')),
+    fh: clean(document.querySelector('.hint-box .fh')), stats: { ...S.hintStats }, used: S.hintsUsed, comps: S.hintComputations || 0,
+  };
+});
+const idOf = (page, key, nth = 0) => page.evaluate(([k, n]) => {
+  const { S, rules } = window.__mathjong;
+  return S.game.hands[0].filter((x) => rules.types[S.game.typeOf(x)].key === k).sort((a, b) => a - b)[n];
+}, [key, nth]);
+
+async function v03bHints(browser) {
+  // (1) 2通り（30°が2枚）：第1段階 → 確認 → 赤・青を別々の牌に。並び替え・閉じて開く・打牌・他家の打牌・ツモ
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math2');
+    const cdp = await ctx.newCDPSession(page);
+    await v3Scene(page, presetWall(['sin', 'cos', '30', '30', '=1/2', '=√3/2', '0', '0'],
+      ['=-√3/2', '=-1/√3', '=1/√3', '45', '=-1/2'], [V3_O1, V3_O2, V3_O3]));
+    await page.locator('button[data-action="hint"]').tap();
+    let st = await hintState(page);
+    assert.equal(st.stage, 1, 'ヒント初回は第1段階');
+    assert.deepEqual(st.frames, {}, '第1段階では枠を出さない');
+    assert.equal(st.panel, false);
+    assert.equal(st.confirm, true);
+    assert.match(st.basic, /完成している数式：2通り/);
+    assert.ok(!/sin|cos|=/.test(st.basic.replace('数式を確認する', '')), '第1段階で具体的な式を出さない');
+    assert.deepEqual(st.stats, { discover: 1, confirm: 0, table: 0 });
+    await page.locator('button[data-action="fh-confirm"]').tap();
+    st = await hintState(page);
+    assert.equal(st.stage, 2);
+    assert.equal(st.confirm, false);
+    assert.deepEqual(st.stats, { discover: 1, confirm: 1, table: 0 });
+    assert.match(st.fh, /同時に使える数式面子：最大2組/);
+    assert.equal(st.list.length, 2);
+    assert.match(st.list[0], /^1\s*sin/);
+    assert.match(st.list[1], /^2\s*cos/);
+    const ids = {
+      sin: await idOf(page, 'f:sin'), cos: await idOf(page, 'f:cos'), a30: await idOf(page, 'a:30', 0), b30: await idOf(page, 'a:30', 1),
+      half: await idOf(page, 'v:1/2'), r32: await idOf(page, 'v:√3/2'),
+    };
+    const expectFrames = { [ids.sin]: 'fhf-red', [ids.a30]: 'fhf-red', [ids.half]: 'fhf-red', [ids.cos]: 'fhf-blue', [ids.b30]: 'fhf-blue', [ids.r32]: 'fhf-blue' };
+    assert.deepEqual(st.frames, expectFrames, '30°は赤と青に1枚ずつ（共有しない）');
+    // 枠の装飾は操作を妨げない（pointer-events: none）、牌の大きさは変わらない
+    const deco = await page.locator(`.hand .tile[data-id="${ids.sin}"]`).evaluate((el) => ({ pe: getComputedStyle(el, '::before').pointerEvents, w: el.getBoundingClientRect().width }));
+    assert.equal(deco.pe, 'none');
+    // 表示の切替：赤だけ → 2式
+    await page.locator('button[data-action="fh-mode"][data-mode="a"]').tap();
+    st = await hintState(page);
+    assert.deepEqual(Object.values(st.frames).sort(), ['fhf-red', 'fhf-red', 'fhf-red']);
+    assert.deepEqual(st.stats, { discover: 1, confirm: 1, table: 0 }, '表示の切替では数えない');
+    await page.locator('button[data-action="fh-mode"][data-mode="both"]').tap();
+    // 並び替え・自動整列：段階・表示対象・色（物理牌 id）を維持
+    const order = await shownOrder(page);
+    await dragToIndex(page, cdp, order[0], 5);
+    st = await hintState(page);
+    assert.equal(st.stage, 2, '並び替えでは第2段階を維持');
+    assert.deepEqual(st.frames, expectFrames, '色は物理牌 id に対応');
+    await page.locator('button[data-action="autosort"]').tap();
+    assert.deepEqual((await hintState(page)).frames, expectFrames);
+    // 閉じる → 枠を解除。開き直すと第1段階、同じ手牌なので回数は増えない
+    await page.locator('button[data-action="hint"]').tap();
+    st = await hintState(page);
+    assert.equal(st.open, false);
+    assert.deepEqual(st.frames, {});
+    assert.equal(await page.locator('.hand .tile.fhf').count(), 0);
+    await page.locator('button[data-action="hint"]').tap();
+    await page.locator('button[data-action="fh-confirm"]').tap();
+    st = await hintState(page);
+    assert.equal(st.stage, 2);
+    assert.deepEqual(st.stats, { discover: 1, confirm: 1, table: 0 }, '同じ手牌では重複して数えない');
+    // 打牌 → 第1段階（ヒントは開いたまま）。2回タップの打牌は枠があっても使える
+    await apDiscardDrawn(page);
+    st = await hintState(page);
+    assert.deepEqual([st.open, st.stage, Object.keys(st.frames).length], [true, 1, 0], '打牌で第1段階へ');
+    // 他家の手番に確認（新しい手牌の状態なので確認回数 +1）→ 他家の打牌では第2段階を維持し、役候補だけ更新
+    await page.locator('button[data-action="fh-confirm"]').tap();
+    const before = await hintState(page);
+    assert.equal(before.stats.confirm, 2);
+    await apForce(page, 1);
+    st = await hintState(page);
+    assert.equal(st.stage, 2, '他家の打牌では第2段階を維持');
+    assert.ok(st.comps > before.comps, '役候補は更新');
+    assert.deepEqual(st.frames, before.frames);
+    await apForce(page, 2);
+    await apForce(page, 3);
+    // 自分のツモ → 第1段階
+    await page.waitForSelector('.hand .tile.tap');
+    st = await hintState(page);
+    assert.deepEqual([st.stage, Object.keys(st.frames).length], [1, 0], 'ツモで第1段階へ');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (2) 0通り：確認ボタンなし
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(['sin', 'sin', 'sin', '0', '0', '90', '=-√3', '=√3'], ['=-1'], [['cos', 'cos', 'cos', '180', '150', '150', '=1/2', '=1/2'], V3_O2, V3_O3]));
+    await page.locator('button[data-action="hint"]').tap();
+    const st = await hintState(page);
+    assert.match(st.basic, /完成している数式：0通り/);
+    assert.equal(st.confirm, false, '0通りなら確認ボタンなし');
+    assert.deepEqual(st.frames, {});
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (3) 牌を共有する2式（sin45°・cos45°、45°と 1/√2 が1枚）：2色の枠と説明。表示の切替
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(['sin', 'cos', '45', '=1/√2', '0', '0', '135', '=-√3'], ['=-√3/2'], [V3_O1, V3_O2, V3_O3]));
+    await page.locator('button[data-action="hint"]').tap();
+    await page.locator('button[data-action="fh-confirm"]').tap();
+    let st = await hintState(page);
+    assert.equal(st.list.length, 3, 'sin45・cos45・sin135');
+    const a45 = await idOf(page, 'a:45');
+    const v = await idOf(page, 'v:1/√2');
+    assert.equal(st.frames[a45], 'fhf-rb');
+    assert.equal(st.frames[v], 'fhf-rb');
+    assert.equal(st.frames[await idOf(page, 'f:sin')], 'fhf-red');
+    assert.equal(st.frames[await idOf(page, 'f:cos')], 'fhf-blue');
+    assert.match(st.fh, /牌を共有するため、同時には使用できません/);
+    assert.match(st.fh, /最大1組/);
+    // 青を3番（sin135°）に切り替え：sin は1枚なので共有、1/√2 も共有
+    await page.locator('.fh-item:nth-child(3) button[data-slot="b"]').tap();
+    st = await hintState(page);
+    assert.equal(st.frames[await idOf(page, 'a:135')], 'fhf-blue');
+    assert.equal(st.frames[await idOf(page, 'f:sin')], 'fhf-rb');
+    assert.equal(st.frames[a45], 'fhf-red');
+    assert.match(st.list[2], /青/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (4) 1通りを3組（sin30°=1/2 ×3）：黄色の枠で9枚すべて、×3組。和了でヒントを閉じ、結果に回数。次局で初期化
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(['sin', 'sin', 'sin', '30', '30', '30', '=1/2', '=1/2'], ['=1/2'], [V3_O1, ['=-1/2', 'cos', '135', '180', '150', '150', '=√3', '=√3'], V3_O3]));
+    await page.locator('button[data-action="hint"]').tap();
+    await page.locator('button[data-action="fh-confirm"]').tap();
+    const st = await hintState(page);
+    assert.equal(Object.keys(st.frames).length, 9);
+    assert.ok(Object.values(st.frames).every((c) => c === 'fhf-yellow'));
+    assert.match(st.list[0], /×3組/);
+    assert.match(st.fh, /最大3組/);
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.waitForSelector('.overlay .result');
+    assert.equal((await hintState(page)).open, false, '和了でヒントを閉じる');
+    assert.match(await page.locator('.hint-stats').innerText(), /発見 1回・確認 1回・値表 0回/);
+    await page.locator('button[data-action="next"]').tap();
+    const n = await hintState(page);
+    assert.deepEqual([n.open, n.used, n.stats.discover], [false, 0, 0], '次局は閉じた状態・回数も初期化');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (5) ポンで第1段階へ戻る（宣言待ちの間に確認していた場合）
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(['=1/2', '=1/2', 'sin', '30', '0', '0', '135', '=-√3'], ['45', '=-1/√3', '=-√3/2'], [V3_O1, V3_O2, V3_O3]));
+    await apDiscardDrawn(page);
+    await apForce(page, 1);
+    await apForce(page, 2, 'v:1/2');
+    await page.locator('button[data-action="hint"]').tap();
+    await page.locator('button[data-action="fh-confirm"]').tap();
+    assert.equal((await hintState(page)).stage, 2);
+    await page.locator('button[data-action="pon"]').tap();
+    const st = await hintState(page);
+    assert.deepEqual([st.open, st.stage, Object.keys(st.frames).length], [true, 1, 0], 'ポンで第1段階へ');
+    assert.match(st.basic, /手牌内の完成している数式：0通り/, '1/2 は2枚ともポンで公開（公開面子は手牌内に数えない）');
+    assert.match(st.basic, /公開済み：数式面子 0組・刻子 1組/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (6) 数式が多い場合（数学Ⅱ・6通り）のレイアウト：320〜430px、横スクロールなし、一覧は高さ制限、手牌と重ならない
+  for (const w of [320, 375, 390, 430]) {
+    const { ctx, page, errors } = await v3Page(browser, 'math2', { viewport: { width: w, height: 760 } });
+    await v3Scene(page, presetWall(['sin', 'cos', 'tan', '45', '225', '=1/√2', '=-1/√2', '=1'], ['=-√3/2'], [V3_O1, V3_O2, V3_O3]));
+    await page.locator('button[data-action="hint"]').tap();
+    await page.locator('button[data-action="fh-confirm"]').tap();
+    const m = await page.evaluate(() => {
+      const list = document.querySelector('.fh-list');
+      const hand = document.querySelector('.hand').getBoundingClientRect();
+      const box = document.querySelector('.hint-box').getBoundingClientRect();
+      return { over: document.documentElement.scrollWidth - innerWidth, items: list.children.length, lh: list.getBoundingClientRect().height, fs: parseFloat(getComputedStyle(list).fontSize), handBottom: hand.bottom, boxTop: box.top, colors: new Set([...document.querySelectorAll('.hand .tile.fhf')].map((t) => [...t.classList].find((c) => /^fhf-/.test(c)))).size };
+    });
+    assert.equal(m.items, 6);
+    assert.ok(m.over <= 0, `${w}px: 横スクロール ${m.over}`);
+    assert.ok(m.lh <= 11.5 * 16 + 2, `${w}px: 一覧の高さ ${m.lh}`);
+    assert.ok(m.boxTop >= m.handBottom - 1, `${w}px: ヒント欄が手牌に重ならない`);
+    assert.ok(m.colors <= 3, '赤・青（共有があれば赤青）まで');
+    // 枠がある状態で牌の2回タップによる打牌ができる
+    const t = (await shownOrder(page))[0];
+    await page.locator(`.hand .tile[data-id="${t}"]`).tap();
+    await page.locator(`.hand .tile[data-id="${t}"]`).tap();
+    assert.deepEqual(await page.evaluate(() => window.__mathjong.S.game.rivers[0].map((r) => r.id)), [t], `${w}px: 打牌`);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/hint-many-${w}.png` });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.3-B：2段階ヒント（発見→確認・0通りでボタンなし）・赤青／共有の2色／黄色×3組・表示切替・並び替えで維持・打牌/ツモ/ポンで第1段階・他家の打牌で維持・回数の重複なし・和了で終了・次局で初期化・320〜430px');
+}
+
 const server = await startServer(0, { base: BASE, host: '127.0.0.1' });
 PORT = server.address().port;
 LOCAL = `http://localhost:${PORT}${BASE}`;
@@ -2567,6 +2778,7 @@ try {
   await chiAutoPass(browser);
   await chiAutoPassLayouts(browser);
   await v03Rules(browser);
+  await v03bHints(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
