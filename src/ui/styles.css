@@ -410,32 +410,53 @@ table.values td.undef { color: #999; font-size: 12px; }
    ロン ＞ ポン ＞ チーの順に派手。簡易表示（.lite）・視差の少ない設定では文字だけ。 */
 #fx-layer { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 100; pointer-events: none; overflow: hidden;
   display: none; align-items: center; justify-content: center; }
-#fx-layer.fx-ron, #fx-layer.fx-tsumo, #fx-layer.fx-pon, #fx-layer.fx-chi { display: flex; }
+#fx-layer.fx-ron, #fx-layer.fx-tsumo, #fx-layer.fx-riichi, #fx-layer.fx-pon, #fx-layer.fx-chi { display: flex; }
 #fx-layer .fx-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 100%; padding: 0 8px; text-align: center; }
 #fx-layer .fx-word { font-weight: 900; line-height: 1.05; letter-spacing: 0.04em; white-space: nowrap; }
 #fx-layer .fx-who { font-size: 15px; font-weight: 700; color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7); }
 #fx-layer .fx-tiles, #fx-layer .fx-wintile { display: flex; gap: 4px; justify-content: center; }
 #fx-layer .fx-tiles .fx-t, #fx-layer .fx-wintile .tile { box-shadow: 0 0 12px 2px rgba(255, 255, 255, 0.55); }
 
-/* ロン：最も派手（0.8秒）。赤〜金の発光・フラッシュ・軽い画面揺れ・和了牌を大きく */
-#fx-layer.fx-ron .fx-word { font-size: clamp(60px, 26vw, 140px); color: #fff3c4;
-  text-shadow: 0 0 10px #ffb02e, 0 0 28px #ff4a1c, 0 0 56px #ff2d1a, 0 3px 0 #8a1500;
-  animation: fx-ron-word 800ms cubic-bezier(.2, .9, .3, 1) both; }
-#fx-layer.fx-ron .fx-wintile .tile { animation: fx-pop 800ms ease-out both; box-shadow: 0 0 16px 4px rgba(255, 190, 70, 0.9); }
+/* ロン：最も派手（1.1秒。Ver.0.5-D で 0.8 秒から延長・強化）。赤〜金の発光・二度の閃光・放射状の光条・軽い画面揺れ・和了牌を大きく長めに */
+#fx-layer.fx-ron .fx-word { font-size: clamp(64px, 28vw, 150px); color: #fff3c4;
+  text-shadow: 0 0 8px #ffd25a, 0 0 22px #ff9a1c, 0 0 44px #ff4a1c, 0 0 80px #ff2d1a, 0 4px 0 #8a1500, 0 7px 0 #5a0d00;
+  animation: fx-ron-word 1100ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-ron .fx-wintile .tile { animation: fx-pop-ron 1100ms ease-out both; box-shadow: 0 0 20px 6px rgba(255, 190, 70, 0.95), 0 0 36px 10px rgba(255, 70, 30, 0.55); }
 #fx-layer.fx-ron .fx-flash { position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-  background: radial-gradient(circle at 50% 50%, rgba(255, 230, 140, 0.9), rgba(255, 70, 30, 0.5) 45%, rgba(255, 40, 20, 0) 75%);
-  animation: fx-flash 480ms ease-out both; }
+  background: radial-gradient(circle at 50% 50%, rgba(255, 236, 150, 0.95), rgba(255, 70, 30, 0.6) 45%, rgba(255, 40, 20, 0) 78%);
+  animation: fx-flash-ron 720ms ease-out both; }
+#fx-layer.fx-ron .fx-rays { position: absolute; left: 50%; top: 50%; width: 150vmin; height: 150vmin; margin: -75vmin 0 0 -75vmin; border-radius: 50%;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 205, 90, 0.7) 0deg 5deg, rgba(255, 90, 30, 0) 5deg 15deg);
+  -webkit-mask-image: radial-gradient(circle, #000 0, rgba(0, 0, 0, 0.6) 40%, transparent 70%); mask-image: radial-gradient(circle, #000 0, rgba(0, 0, 0, 0.6) 40%, transparent 70%);
+  animation: fx-rays 1000ms ease-out both; }
 @keyframes fx-ron-word {
-  0% { opacity: 0; transform: scale(2.6); }
-  16% { opacity: 1; transform: scale(0.9); }
-  28% { transform: scale(1.1); }
-  40% { transform: scale(1); }
-  82% { opacity: 1; transform: scale(1); }
-  100% { opacity: 0; transform: scale(1.08); }
+  0% { opacity: 0; transform: scale(3); }
+  12% { opacity: 1; transform: scale(0.88); }
+  22% { transform: scale(1.14); }
+  32% { transform: scale(1); }
+  52% { transform: scale(1.05); }
+  64% { transform: scale(1); }
+  88% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.1); }
 }
 @keyframes fx-flash { 0% { opacity: 0; } 14% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-flash-ron { 0% { opacity: 0; } 10% { opacity: 1; } 30% { opacity: 0.25; } 42% { opacity: 0.8; } 100% { opacity: 0; } }
+@keyframes fx-rays { 0% { opacity: 0; transform: scale(0.5); } 14% { opacity: 1; } 100% { opacity: 0; transform: scale(1.25); } }
 @keyframes fx-pop { 0% { opacity: 0; transform: scale(0.4); } 25% { opacity: 1; transform: scale(1.25); } 40% { transform: scale(1); } 82% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-pop-ron { 0% { opacity: 0; transform: scale(0.4); } 16% { opacity: 1; transform: scale(1.3); } 28% { transform: scale(1); } 90% { opacity: 1; } 100% { opacity: 0; } }
 .table.fx-shake { animation: fx-shake 520ms linear both; animation-delay: 60ms; }
+/* ロンの揺れ：最初の衝撃を強めに、その後は減衰させる（不快にならないよう、振れ幅は 5px まで） */
+.table.fx-shake.fx-shake-ron { animation: fx-shake-ron 700ms linear both; animation-delay: 60ms; }
+@keyframes fx-shake-ron {
+  0% { transform: translate3d(0, 0, 0); }
+  8% { transform: translate3d(-5px, 2px, 0); }
+  18% { transform: translate3d(5px, -2px, 0); }
+  30% { transform: translate3d(-4px, 1px, 0); }
+  44% { transform: translate3d(3px, -1px, 0); }
+  60% { transform: translate3d(-2px, 1px, 0); }
+  78% { transform: translate3d(1px, 0, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
 @keyframes fx-shake {
   0% { transform: translate3d(0, 0, 0); }
   12% { transform: translate3d(-5px, 2px, 0); }
@@ -467,6 +488,24 @@ table.values td.undef { color: #999; font-size: 12px; }
 }
 @keyframes fx-halo { 0% { opacity: 0; transform: scale(0.15); } 12% { opacity: 1; } 100% { opacity: 0; transform: scale(2.1); } }
 
+/* リーチ（Ver.0.5-D）：0.7秒。ロン・ツモより短く、ポン・チーより特別感を出す。紫〜金の発光と白銀の鋭い閃光（十字の光条）、宣言牌を大きく */
+#fx-layer.fx-riichi .fx-word { font-size: clamp(54px, 23vw, 120px); color: #f6efff;
+  text-shadow: 0 0 8px #d9b8ff, 0 0 22px #9a5cff, 0 0 44px #6a2cff, 0 0 16px #ffd86a, 0 3px 0 #2a0f5a;
+  animation: fx-riichi-word 700ms cubic-bezier(.15, .9, .25, 1) both; }
+#fx-layer.fx-riichi .fx-decl .tile { animation: fx-riichi-decl 700ms ease-out both; box-shadow: 0 0 16px 4px rgba(220, 190, 255, 0.95), 0 0 28px 8px rgba(255, 214, 110, 0.6); }
+#fx-layer.fx-riichi .fx-flash { position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: radial-gradient(circle at 50% 50%, rgba(246, 240, 255, 0.9), rgba(160, 110, 255, 0.5) 38%, rgba(255, 214, 110, 0.18) 60%, rgba(90, 50, 200, 0) 78%);
+  animation: fx-flash 420ms ease-out both; }
+#fx-layer.fx-riichi .fx-streak { position: absolute; left: 50%; top: 50%; background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(235, 240, 255, 0.98) 50%, rgba(255, 255, 255, 0)); box-shadow: 0 0 14px 3px rgba(190, 170, 255, 0.9); }
+#fx-layer.fx-riichi .fx-streak-h { width: 120vmax; height: 3px; margin: -1px 0 0 -60vmax; animation: fx-streak-h 460ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-riichi .fx-streak-v { width: 3px; height: 120vmax; margin: -60vmax 0 0 -1px; animation: fx-streak-v 460ms cubic-bezier(.2, .9, .3, 1) 40ms both; }
+@keyframes fx-riichi-word { 0% { opacity: 0; transform: scale(1.7) translateY(-8px); letter-spacing: 0.3em; } 22% { opacity: 1; transform: scale(0.96) translateY(0); letter-spacing: 0.05em; } 36% { transform: scale(1.03); } 50% { transform: scale(1); } 86% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-riichi-decl { 0% { opacity: 0; transform: scale(0.5) rotate(-20deg); } 24% { opacity: 1; transform: scale(1.2) rotate(0deg); } 40% { transform: scale(1); } 86% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-streak-h { 0% { opacity: 0; transform: scaleX(0); } 20% { opacity: 1; transform: scaleX(1); } 100% { opacity: 0; transform: scaleX(1); } }
+@keyframes fx-streak-v { 0% { opacity: 0; transform: scaleY(0); } 20% { opacity: 1; transform: scaleY(1); } 100% { opacity: 0; transform: scaleY(1); } }
+.tile.fx-glow-riichi { animation: fx-glow-riichi 700ms ease-out both; }
+@keyframes fx-glow-riichi { 0% { box-shadow: 0 0 0 0 rgba(190, 150, 255, 0); } 20% { box-shadow: 0 0 14px 6px rgba(200, 170, 255, 0.95), 0 0 24px 8px rgba(255, 214, 110, 0.6); } 100% { box-shadow: 0 0 0 0 rgba(190, 150, 255, 0); } }
+
 /* ポン：中くらい（0.52秒）。3枚が左右・上から集まって衝撃。面子が金色に光る */
 #fx-layer.fx-pon .fx-word { font-size: clamp(52px, 21vw, 112px); color: #ffeab0;
   text-shadow: 0 0 10px #ffc04a, 0 0 26px #ff9a1c, 0 3px 0 #7a4a00;
@@ -496,10 +535,10 @@ table.values td.undef { color: #999; font-size: 12px; }
 
 /* 簡易表示・視差の少ない設定：文字だけ（フラッシュ・揺れ・牌・発光なし）。動きは不透明度のみ。 */
 #fx-layer.lite .fx-word { animation-name: fx-lite !important; }
-#fx-layer.lite .fx-flash, #fx-layer.lite .fx-halo, #fx-layer.lite .fx-tiles, #fx-layer.lite .fx-wintile { display: none; }
+#fx-layer.lite .fx-flash, #fx-layer.lite .fx-halo, #fx-layer.lite .fx-rays, #fx-layer.lite .fx-streak, #fx-layer.lite .fx-tiles, #fx-layer.lite .fx-wintile, #fx-layer.lite .fx-decl { display: none; }
 @keyframes fx-lite { 0% { opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
-  .table.fx-shake, .meld.fx-glow-pon, .meld.fx-glow-chi { animation: none; }
+  .table.fx-shake, .table.fx-shake.fx-shake-ron, .meld.fx-glow-pon, .meld.fx-glow-chi, .tile.fx-glow-riichi { animation: none; }
 }
 @media (max-width: 360px) {
   #fx-layer .fx-who { font-size: 13px; }

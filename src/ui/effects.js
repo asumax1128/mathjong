@@ -3,11 +3,14 @@
 // ゲームの記録（Game.events）を読んで、どの演出をいつ出すかを決める。ゲーム状態は読むだけで変更しない。
 // tests/effects.test.js で検証。
 
-// 演出の仕様（ms：演出の長さ。prio：重なったときの優先度。ロン・ツモ ＞ ポン ＞ チー。ロンとツモは同じ局に同時には起きない）
+// 演出の仕様（ms：演出の長さ。prio：重なったときの優先度。ロン・ツモ ＞ リーチ ＞ ポン ＞ チー。ロンとツモは同じ局に同時には起きない）
 // ツモ（Ver.0.5-C）：ロンと同格の派手さ。青白〜金で、ロン（赤金）と見分ける。自力で引き当てた達成感・神秘感（光の輪）を出す。
+// ロン（Ver.0.5-D）：800ms → 1100ms に延長し、迫力を強化した。
+// リーチ（Ver.0.5-D）：紫〜金・白銀の鋭い閃光と宣言牌の強調。ロン・ツモより短く（0.7秒）、ポン・チーより特別感を出す。
 export const EFFECTS = {
-  ron: { text: 'ロン！', ms: 800, prio: 3 },
+  ron: { text: 'ロン！', ms: 1100, prio: 3 },
   tsumo: { text: 'ツモ！', ms: 1000, prio: 3 },
+  riichi: { text: 'リーチ！', ms: 700, prio: 2.5 },
   pon: { text: 'ポン！', ms: 520, prio: 2 },
   chi: { text: 'チー！', ms: 420, prio: 1 },
 };
@@ -17,11 +20,13 @@ export const EFFECT_MODES = ['full', 'lite'];
 // 保存値：'lite'（簡易）のときだけ簡易。未保存・異常値・読込失敗は通常（full）。
 export const parseEffectMode = (saved) => (saved === 'lite' ? 'lite' : 'full');
 
-// 記録1件 → 演出の種類（演出のない記録は null）。流局・打牌・リーチなどは対象外。
+// 記録1件 → 演出の種類（演出のない記録は null）。流局・打牌・牌を引く記録は対象外。
+// リーチの記録は、エンジンが宣言を受け付けた（リーチが成立した）ときにだけ残る。ボタンを押しただけ・宣言牌の選択をやめた場合には記録がないので、演出も出ない。
 export function effectKindOf(event) {
   if (!event) return null;
   if (event.type === 'chi') return 'chi';
   if (event.type === 'pon') return 'pon';
+  if (event.type === 'riichi') return 'riichi';
   if (event.type === 'win' && event.how === 'ron') return 'ron';
   if (event.type === 'win' && event.how === 'tsumo') return 'tsumo';
   return null;
