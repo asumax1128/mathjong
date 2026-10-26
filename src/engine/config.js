@@ -6,7 +6,7 @@
 // 数学Ⅰ（度数法・0°〜180°・124枚）と数学Ⅱ（弧度法・0〜2π・168枚）の2モードを持つ。
 // 内部の角度は常に度（deg）で持ち、弧度法は画面表示だけで切り替える（angleUnit）。
 
-export const ENGINE_VERSION = '0.3.0-a';
+export const ENGINE_VERSION = '0.5.0-a';
 
 // Ver.0.1〜0.2.1 の規則（刻子・ポンなし、数式面子のみ、関数牌各16枚・0°〜360°）。
 // 互換テストと tools/simulate.mjs --legacy で使う（Ver.0.1 と同じ結果になることを確認する）。
