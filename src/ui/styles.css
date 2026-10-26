@@ -391,7 +391,7 @@ table.values td.undef { color: #999; font-size: 12px; }
 .yaku .riichi-li span { color: var(--ink-dim); }
 
 /* Ver.0.5-A：対戦画面のチー・ポン自動パス切替（ON は緑地、OFF は枠のみ。文字でも ON/OFF を示す） */
-.hand-help .ap-toggle { min-height: 40px; padding: 0 8px; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; gap: 1px; }
+.hand-help button.small.ap-toggle { min-height: 44px; padding: 0 8px; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; gap: 1px; }
 .hand-help .ap-toggle .apt-name { font-size: 10.5px; }
 .hand-help .ap-toggle .apt-state { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
 .hand-help .ap-toggle.on { background: #2e8b57; border-color: #5fd08e; color: #fff; }

@@ -1746,13 +1746,15 @@ async function apToSeat3(page) {
   await apForce(page, 1);
   await apForce(page, 2);
 }
-async function apSetting(page, on, { close = true } = {}) {
-  if (!(await page.locator('input[data-action="chi-autopass"]').count())) await page.locator('button[data-action="settings"]').tap();
-  const box = page.locator('input[data-action="chi-autopass"]');
-  // Ver.0.4-B：設定画面にチー・ポンの2つのスイッチが並ぶので、チーのラベルを指定する
-  if ((await box.isChecked()) !== on) await page.locator('label.setting.toggle:has(input[data-action="chi-autopass"])').tap();
-  assert.equal(await box.isChecked(), on);
-  if (close) await page.locator('.modal-actions button[data-action="close"]').tap();
+// Ver.0.5-A：チー・ポンの自動パスは対戦画面（手牌の下）の切替ボタン。設定画面から移動した。
+const apToggle = (page, kind = 'chi') => page.locator(`.hand-help button[data-action="toggle-${kind}-autopass"]`);
+const apToggleOn = async (page, kind = 'chi') => (await apToggle(page, kind).getAttribute('aria-pressed')) === 'true';
+async function apSetting(page, on) {
+  // 設定画面などが開いていれば閉じてから、対戦画面のボタンを押す
+  if (await page.locator('.overlay .modal-actions button[data-action="close"]').count()) await page.locator('.overlay .modal-actions button[data-action="close"]').tap();
+  if ((await apToggleOn(page)) !== on) await apToggle(page).tap();
+  assert.equal(await apToggleOn(page), on);
+  assert.equal(await page.evaluate(() => window.__mathjong.S.chiAutoPass), on);
 }
 async function apHint(page) {
   return page.evaluate(async (base) => {
@@ -1779,9 +1781,12 @@ async function chiAutoPass(browser) {
     let st = await apState(page);
     assert.equal(st.on, false, '初期値 OFF');
     assert.equal(st.stored, null);
+    assert.equal(await apToggleOn(page), false, '対戦画面のボタンも OFF');
+    assert.match(await apToggle(page).innerText(), /チー自動\s*OFF/);
     await page.locator('button[data-action="settings"]').tap();
-    assert.equal(await page.locator('input[data-action="chi-autopass"]').isChecked(), false);
-    // Ver.0.4-B：チー・ポンの2つの設定に共通の説明（指示どおりの文言）
+    // Ver.0.5-A：設定画面には切替の場所と安全仕様の説明だけ（二重管理しない）
+    assert.equal(await page.locator('.modal input[type="checkbox"]').count(), 0, '設定画面にスイッチはない');
+    assert.match(await page.locator('.setting-note').innerText(), /対戦画面の手牌の下のボタンで切り替えます/);
     assert.match(await page.locator('.setting-note').innerText(), /チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。/);
     await page.locator('.modal-actions button[data-action="close"]').tap();
     await apScene(page, apWall(AP_CHI_ONLY));
@@ -2007,7 +2012,7 @@ async function chiAutoPass(browser) {
     await apForce(page, 3, 'v:1/2');
     const st = await apState(page);
     assert.equal(st.modal, 'settings', 'モーダルは開いたまま');
-    assert.equal(await page.locator('input[data-action="chi-autopass"]').isChecked(), on);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.chiAutoPass), on);
     if (on) {
       assert.equal(st.count, 1);
       assert.deepEqual(st.p, { seat: 0, type: 'turn', ron: null, chi: null });
@@ -2056,8 +2061,8 @@ async function chiAutoPass(browser) {
     await page.reload();
     await page.waitForSelector('.hand .tile');
     assert.equal((await apState(page)).on, true, '再読み込み後も ON');
+    assert.equal(await apToggleOn(page), true, '対戦画面のボタンも ON');
     await page.locator('button[data-action="settings"]').tap();
-    assert.equal(await page.locator('input[data-action="chi-autopass"]').isChecked(), true);
     await page.locator('button[data-action="reset"]').tap();
     assert.equal((await apState(page)).on, true, '新しい対局でも ON');
     // 再読み込み後に実際に自動パスする
@@ -2162,15 +2167,14 @@ async function chiAutoPassLayouts(browser) {
   for (const [w, h] of sizes) {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: w, height: h } });
     const where = `${w}×${h}`;
-    await page.locator('button[data-action="settings"]').tap();
-    // Ver.0.4-B：チー・ポンの2つのスイッチ。どちらも 44px 以上・画面内
-    for (const act of ['chi-autopass', 'pon-autopass']) {
-      const label = page.locator(`label.setting.toggle:has(input[data-action="${act}"])`);
-      await label.scrollIntoViewIfNeeded();
-      const lb = await label.boundingBox();
-      assert.ok(lb.height >= 44 && lb.width >= 44 && lb.x >= 0 && lb.x + lb.width <= w + 0.5, `${where}: ${act} のタップ領域 ${JSON.stringify(lb)}`);
+    // Ver.0.5-A：対戦画面のチー・ポンの切替ボタン。どちらも 44px 以上・画面内
+    for (const kind of ['chi', 'pon']) {
+      const b = apToggle(page, kind);
+      await b.scrollIntoViewIfNeeded();
+      const lb = await b.boundingBox();
+      assert.ok(lb.height >= 44 && lb.width >= 44 && lb.x >= 0 && lb.x + lb.width <= w + 0.5, `${where}: ${kind} のタップ領域 ${JSON.stringify(lb)}`);
     }
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 0, `${where}: 設定の横スクロール`);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 0, `${where}: 横スクロール`);
     await apSetting(page, true);
     await apScene(page, apWall(AP_CHI_ONLY));
     const barNormal = (await page.locator('.bar').boundingBox()).height;
@@ -3169,13 +3173,11 @@ const PA_HANDS = {
   ronPonChi: ['=1/2', '=1/2', 'sin', '30', 'cos', '60', 'sin', '150'], // ロン＋ポン＋チー
 };
 async function paSettings(page, chi, pon) {
-  await page.locator('button[data-action="settings"]').tap();
-  for (const [act, on] of [['chi-autopass', chi], ['pon-autopass', pon]]) {
-    const box = page.locator(`input[data-action="${act}"]`);
-    if ((await box.isChecked()) !== on) await page.locator(`label.setting.toggle:has(input[data-action="${act}"])`).tap();
-    assert.equal(await box.isChecked(), on);
+  // Ver.0.5-A：対戦画面の切替ボタンで設定する
+  for (const [kind, on] of [['chi', chi], ['pon', pon]]) {
+    if ((await apToggleOn(page, kind)) !== on) await apToggle(page, kind).tap();
+    assert.equal(await apToggleOn(page, kind), on);
   }
-  await page.locator('.modal-actions button[data-action="close"]').tap();
 }
 async function paClaim(page, hand, { hint = false } = {}) {
   await v3Scene(page, presetWall(hand, PA_DRAWS, PA_OTHERS));
@@ -3264,15 +3266,15 @@ async function v04bPonAutoPass(browser) {
     const init = saved === null ? null : { fn: (v) => { try { localStorage.setItem('mj-pon-autopass', v); } catch { /* */ } }, arg: saved };
     const { ctx, page, errors } = await v3Page(browser, 'math1', { init });
     assert.equal(await page.evaluate(() => window.__mathjong.S.ponAutoPass), on, `保存値 ${saved}`);
-    await page.locator('button[data-action="settings"]').tap();
-    assert.equal(await page.locator('input[data-action="pon-autopass"]').isChecked(), on);
-    assert.match(await page.locator('.setting-note').innerText(), /チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。/);
+    assert.equal(await apToggleOn(page, 'pon'), on);
+    assert.match(await apToggle(page, 'pon').innerText(), new RegExp(`ポン自動\\s*${on ? 'ON' : 'OFF'}`));
     if (saved === null) {
-      await page.locator('label.setting.toggle:has(input[data-action="pon-autopass"])').tap();
+      await apToggle(page, 'pon').tap();
       assert.deepEqual(await paStored(page), [null, '1']);
-      await page.locator('label.setting.toggle:has(input[data-action="pon-autopass"])').tap();
+      assert.equal(await apToggleOn(page, 'pon'), true);
+      await apToggle(page, 'pon').tap();
       assert.deepEqual(await paStored(page), [null, '0']);
-      await page.locator('label.setting.toggle:has(input[data-action="chi-autopass"])').tap();
+      await apToggle(page, 'chi').tap();
       assert.deepEqual(await paStored(page), ['1', '0'], 'チーとポンは独立');
     }
     assert.deepEqual(errors, []);
@@ -3402,12 +3404,10 @@ async function v04bPonAutoPass(browser) {
   // (7) 320〜430px：2つのスイッチと宣言ボタン（ロン＋ポン＋チー）が画面に収まる
   for (const w of [320, 375, 430]) {
     const { ctx, page, errors } = await v3Page(browser, 'math1', { viewport: { width: w, height: 700 } });
-    await page.locator('button[data-action="settings"]').tap();
-    for (const act of ['chi-autopass', 'pon-autopass']) {
-      const b = await page.locator(`label.setting.toggle:has(input[data-action="${act}"])`).boundingBox();
-      assert.ok(b.height >= 44 && b.x >= 0 && b.x + b.width <= w + 0.5, `${w}px ${act} ${JSON.stringify(b)}`);
+    for (const kind of ['chi', 'pon']) {
+      const b = await apToggle(page, kind).boundingBox();
+      assert.ok(b.height >= 44 && b.x >= 0 && b.x + b.width <= w + 0.5, `${w}px ${kind} ${JSON.stringify(b)}`);
     }
-    await page.locator('.modal-actions button[data-action="close"]').tap();
     await paClaim(page, PA_HANDS.ronPonChi);
     for (const sel of ['ron', 'pon', 'chi', 'pass']) {
       const b = await page.locator(`.bar button[data-action="${sel}"]`).first().boundingBox();
