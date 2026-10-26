@@ -375,3 +375,6 @@ table.values td.undef { color: #999; font-size: 12px; }
 .replay-error .re-lead { font-size: 13px; color: var(--ink-dim); margin: 0; }
 .replay-error .re-list { font-size: 13px; padding-left: 1.2em; margin: 4px 0; }
 .round-limit-note, .next-round.over { font-size: 13px; }
+
+/* Ver.0.4-B：チー・ポンのオートパス（2つ並べる。狭い画面では折り返す） */
+.autopass-set { display: flex; flex-wrap: wrap; column-gap: 20px; }

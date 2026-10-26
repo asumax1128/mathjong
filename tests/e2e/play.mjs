@@ -1749,7 +1749,8 @@ async function apToSeat3(page) {
 async function apSetting(page, on, { close = true } = {}) {
   if (!(await page.locator('input[data-action="chi-autopass"]').count())) await page.locator('button[data-action="settings"]').tap();
   const box = page.locator('input[data-action="chi-autopass"]');
-  if ((await box.isChecked()) !== on) await page.locator('label.setting.toggle').tap();
+  // Ver.0.4-B：設定画面にチー・ポンの2つのスイッチが並ぶので、チーのラベルを指定する
+  if ((await box.isChecked()) !== on) await page.locator('label.setting.toggle:has(input[data-action="chi-autopass"])').tap();
   assert.equal(await box.isChecked(), on);
   if (close) await page.locator('.modal-actions button[data-action="close"]').tap();
 }
@@ -1780,7 +1781,8 @@ async function chiAutoPass(browser) {
     assert.equal(st.stored, null);
     await page.locator('button[data-action="settings"]').tap();
     assert.equal(await page.locator('input[data-action="chi-autopass"]').isChecked(), false);
-    assert.match(await page.locator('.setting-note').innerText(), /チーだけできる場面を自動で見送ります。ロン・ポン・ツモは自動で見送りません/);
+    // Ver.0.4-B：チー・ポンの2つの設定に共通の説明（指示どおりの文言）
+    assert.match(await page.locator('.setting-note').innerText(), /チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。/);
     await page.locator('.modal-actions button[data-action="close"]').tap();
     await apScene(page, apWall(AP_CHI_ONLY));
     await apToSeat3(page);
@@ -2144,10 +2146,10 @@ async function chiAutoPass(browser) {
   // (12) バージョン表示：ヘッダー・ページタイトル・再現情報
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.4.0-a');
-    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.4.0-a');
+    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.4.0-b');
+    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.4.0-b');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.4\.0-a ・ エンジン v0\.3\.0-a/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.4\.0-b ・ エンジン v0\.3\.0-a/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -2161,10 +2163,14 @@ async function chiAutoPassLayouts(browser) {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: w, height: h } });
     const where = `${w}×${h}`;
     await page.locator('button[data-action="settings"]').tap();
-    const label = page.locator('label.setting.toggle');
-    await label.scrollIntoViewIfNeeded();
-    const lb = await label.boundingBox();
-    assert.ok(lb.height >= 44 && lb.width >= 44, `${where}: スイッチのタップ領域 ${lb.width}×${lb.height}`);
+    // Ver.0.4-B：チー・ポンの2つのスイッチ。どちらも 44px 以上・画面内
+    for (const act of ['chi-autopass', 'pon-autopass']) {
+      const label = page.locator(`label.setting.toggle:has(input[data-action="${act}"])`);
+      await label.scrollIntoViewIfNeeded();
+      const lb = await label.boundingBox();
+      assert.ok(lb.height >= 44 && lb.width >= 44 && lb.x >= 0 && lb.x + lb.width <= w + 0.5, `${where}: ${act} のタップ領域 ${JSON.stringify(lb)}`);
+    }
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 0, `${where}: 設定の横スクロール`);
     await apSetting(page, true);
     await apScene(page, apWall(AP_CHI_ONLY));
     const barNormal = (await page.locator('.bar').boundingBox()).height;
@@ -2790,7 +2796,10 @@ async function v04Match(browser) {
     assert.equal(await page.locator('input[data-action="title-mode"][value="math2"]').isChecked(), true, '既定は数学Ⅱ');
     assert.equal(await page.locator('input[data-action="title-length"][value="4"]').isChecked(), true, '既定は4局戦');
     assert.equal(await page.locator('input[data-action="title-ai"][value="intermediate"]').isChecked(), true, '既定は中級');
-    assert.equal(await page.locator('.title-set .soon').count(), 2, '初級・上級は準備中と表示');
+    // Ver.0.4-B：初級・上級を有効化（「準備中」の表示はなく、各難易度の説明を表示）
+    assert.equal(await page.locator('.title-set .soon').count(), 0, '準備中の表示はない');
+    assert.equal(await page.locator('text=準備中').count(), 0);
+    for (const lv of ['beginner', 'intermediate', 'advanced']) assert.ok((await page.locator(`label.setting.radio:has(input[value="${lv}"]) small`).innerText()).length > 5, `${lv} の説明`);
     await page.locator('label.setting.radio', { hasText: '数学Ⅰ' }).tap();
     await page.locator('label.setting.radio', { hasText: '8局戦' }).tap();
     await page.locator('label.setting.radio', { hasText: '上級' }).tap();
@@ -3148,6 +3157,270 @@ async function v04Fixes(browser) {
 
 // ---- Ver.0.4-A 最終修正（PR #9）：終了理由（通常終了／通し局数の上限）と不可能な局状態の再現 URL ----
 const LIMIT_NOTE = '通し局数の上限（1,000,000局）に達したため、試合を終了しました。親の連荘もここで終了します。';
+// ---- Ver.0.4-B：AI 難易度・ポンのオートパス ----
+const PA_OTHERS = [V3_O1, ['=1/√3', 'cos', 'cos', '180', '150', '150', '=√3', '=√3'], ['=1/2', 'tan', 'tan', '120', '120', '90', '=-1/√2', '=-1/√2']];
+const PA_DRAWS = ['45', '=-1/√3', '=-√3/2', '=-1/√2'];
+// 上家（席3）が 1/2 を捨てたときに自分（席0）ができること（数学Ⅰ）
+const PA_HANDS = {
+  chiPon: ['=1/2', '=1/2', 'sin', '30', '0', '0', '135', '=-√3'], // チー＋ポン
+  pon: ['=1/2', '=1/2', '45', '0', '0', '135', '=-√3', 'tan'], // ポンのみ
+  chi: ['=1/2', '45', 'sin', '30', '0', '0', '135', '=-√3'], // チーのみ
+  ronPon: ['=1/2', '=1/2', 'tan', '45', '=1', 'cos', '180', '=-1'], // ロン＋ポン
+  ronPonChi: ['=1/2', '=1/2', 'sin', '30', 'cos', '60', 'sin', '150'], // ロン＋ポン＋チー
+};
+async function paSettings(page, chi, pon) {
+  await page.locator('button[data-action="settings"]').tap();
+  for (const [act, on] of [['chi-autopass', chi], ['pon-autopass', pon]]) {
+    const box = page.locator(`input[data-action="${act}"]`);
+    if ((await box.isChecked()) !== on) await page.locator(`label.setting.toggle:has(input[data-action="${act}"])`).tap();
+    assert.equal(await box.isChecked(), on);
+  }
+  await page.locator('.modal-actions button[data-action="close"]').tap();
+}
+async function paClaim(page, hand, { hint = false } = {}) {
+  await v3Scene(page, presetWall(hand, PA_DRAWS, PA_OTHERS));
+  if (hint) await page.locator('button[data-action="hint"]').tap(); // ヒントは局の開始で閉じるので、局面を作った後に開く
+  await apToSeat3(page);
+  await apForce(page, 3, 'v:1/2');
+  await v3WaitHuman(page);
+  return v3State(page);
+}
+const paStored = (page) => page.evaluate(() => { try { return [localStorage.getItem('mj-chi-autopass'), localStorage.getItem('mj-pon-autopass')]; } catch { return 'ERR'; } });
+
+async function v04bLevels(browser) {
+  // (1) タイトルで選んだ難易度が試合の AI 全員に使われる。もう一度遊ぶでも同じ。最終結果に実際の難易度を表示
+  for (const [lv, label] of [['beginner', '初級'], ['advanced', '上級']]) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?speed=test`);
+    await page.waitForSelector('.title-screen');
+    await page.locator('label.setting.radio', { hasText: '数学Ⅰ' }).tap();
+    await page.locator(`label.setting.radio:has(input[value="${lv}"])`).tap();
+    await page.locator('button[data-action="start-match"]').tap();
+    await page.waitForSelector('.hand .tile');
+    // AI の手番を何回か進める（自分はツモ牌を捨てる）
+    for (let i = 0; i < 3; i++) {
+      await v3WaitHuman(page);
+      const p = await page.evaluate(() => { const q = window.__mathjong.S.game.pending(); return q && { type: q.type, seat: q.seat }; });
+      if (!p) break;
+      if (p.type === 'turn') await apDiscardDrawn(page);
+      else await page.locator('button[data-action="pass"]').tap();
+    }
+    const d = await page.evaluate(() => ({ ...window.__mathjong.S.aiDecisions, ms: window.__mathjong.S.matchSettings.ai }));
+    assert.equal(d.ms, lv);
+    assert.ok(d[lv] > 0, `${lv} の AI が判断 ${JSON.stringify(d)}`);
+    for (const other of ['beginner', 'intermediate', 'advanced']) if (other !== lv) assert.equal(d[other] || 0, 0, `${other} は使わない`);
+    // 試合を終わらせて最終結果（東4局で親が流局 → 終了）
+    await page.evaluate(() => { const { S } = window.__mathjong; S.match.hand = 3; S.match.startDealer = 1; });
+    await forceDraw(page);
+    await page.waitForSelector('button[data-action="next"]', { timeout: 5000 });
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.final');
+    const info = await page.locator('.final-info').innerText();
+    assert.match(info, new RegExp(`AI難易度：${label}`));
+    assert.doesNotMatch(info, /準備中/);
+    // もう一度遊ぶ：同じ難易度（タイトルの選択を変えても試合の設定を使う）
+    await page.evaluate(() => { window.__mathjong.S.ai = 'intermediate'; window.__mathjong.S.aiDecisions = {}; });
+    await page.locator('button[data-action="again"]').tap();
+    await page.waitForSelector('.hand .tile');
+    for (let i = 0; i < 2; i++) {
+      await v3WaitHuman(page);
+      const p = await page.evaluate(() => { const q = window.__mathjong.S.game.pending(); return q && q.type; });
+      if (!p) break;
+      if (p === 'turn') await apDiscardDrawn(page); else await page.locator('button[data-action="pass"]').tap();
+    }
+    const d2 = await page.evaluate(() => ({ ...window.__mathjong.S.aiDecisions, ms: window.__mathjong.S.matchSettings.ai }));
+    assert.equal(d2.ms, lv, 'もう一度遊ぶは同じ難易度');
+    assert.ok(d2[lv] > 0 && !d2.intermediate, JSON.stringify(d2));
+    // 再現 URL に難易度が入る
+    await page.locator('button[data-action="settings"]').tap();
+    assert.match(await page.locator('.report-info code').innerText(), new RegExp(`&ai=${lv}$`));
+    assert.match(await page.locator('.report-info').innerText(), new RegExp(`AI ${label}`));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (2) 再現 URL の ai：指定どおりの難易度で始まる。不正な値はエラー画面
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?seed=12&round=1&dealer=1&hand=0&renchan=0&len=4&mode=math1&ai=beginner&speed=test`);
+    await page.waitForSelector('.hand .tile');
+    await page.waitForFunction(() => (window.__mathjong.S.aiDecisions.beginner || 0) > 0);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.matchSettings.ai), 'beginner');
+    await page.goto(`${LOCAL}?seed=12&round=1&ai=expert`);
+    await page.waitForSelector('.replay-error');
+    assert.match(await page.locator('.re-list').innerText(), /ai/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.4-B：AI難易度（タイトル → 試合の AI 全員・もう一度遊ぶで維持・最終結果・再現 URL）');
+}
+
+async function v04bPonAutoPass(browser) {
+  // (1) 保存値：'1' だけが ON。切り替えると '1'／'0' を保存。チーの保存キー・値は従来どおり
+  for (const [saved, on] of [[null, false], ['1', true], ['0', false], ['true', false], [' 1', false]]) {
+    const init = saved === null ? null : { fn: (v) => { try { localStorage.setItem('mj-pon-autopass', v); } catch { /* */ } }, arg: saved };
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { init });
+    assert.equal(await page.evaluate(() => window.__mathjong.S.ponAutoPass), on, `保存値 ${saved}`);
+    await page.locator('button[data-action="settings"]').tap();
+    assert.equal(await page.locator('input[data-action="pon-autopass"]').isChecked(), on);
+    assert.match(await page.locator('.setting-note').innerText(), /チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。/);
+    if (saved === null) {
+      await page.locator('label.setting.toggle:has(input[data-action="pon-autopass"])').tap();
+      assert.deepEqual(await paStored(page), [null, '1']);
+      await page.locator('label.setting.toggle:has(input[data-action="pon-autopass"])').tap();
+      assert.deepEqual(await paStored(page), [null, '0']);
+      await page.locator('label.setting.toggle:has(input[data-action="chi-autopass"])').tap();
+      assert.deepEqual(await paStored(page), ['1', '0'], 'チーとポンは独立');
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.4-B：ポンのオートパスの保存（mj-pon-autopass、"1" だけ ON）・チーと独立');
+
+  // (2) チー＋ポンが可能（ロン不可）：4つの組合せ。ヒントは表示中の選択肢と同じ経路。通知は見送った候補に応じる
+  const combos = [[false, false, ['pon', 'chi', 'pass']], [true, false, ['pon', 'pass']], [false, true, ['chi', 'pass']], [true, true, null]];
+  for (const [chi, pon, buttons] of combos) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await paSettings(page, chi, pon);
+    const st = await paClaim(page, PA_HANDS.chiPon, { hint: true });
+    const where = `チー${chi ? 'ON' : 'OFF'}・ポン${pon ? 'ON' : 'OFF'}`;
+    if (buttons) {
+      assert.deepEqual(st.p, { seat: 0, type: 'claim', ron: false, chi: 1, pon: true }, where);
+      assert.deepEqual(st.buttons.filter((b) => b !== 'hint' && b !== 'autosort' && b !== 'guide' && b !== 'settings'), buttons, where);
+      assert.equal(st.autoPass, 0);
+      const h = await page.evaluate(async ([base, set]) => {
+        const { yakuCandidates, claimForSeat } = await import(`${base}src/engine/yakuhint.js`);
+        const { claimPendingForHint } = await import(`${base}src/ui/autopass.js`);
+        const { S, rules } = window.__mathjong;
+        const g = S.game;
+        const c = claimForSeat(claimPendingForHint(g.pending(), set), 0, (id) => g.typeOf(id));
+        const exp = yakuCandidates(rules, g.viewFor(0), { claim: c }).map((x) => `${x.name}|${x.missing === 0 ? '完成！' : `あと${x.missing}枚`}`);
+        const shown = [...document.querySelectorAll('.yaku-cands li')].map((li) => `${li.querySelector('b').textContent}|${li.querySelector('.yc-miss').textContent}`);
+        return { exp, shown, chiRoute: c.chiMelds.length, ponRoute: c.ponMeld !== null };
+      }, [BASE, { chi, pon }]);
+      assert.deepEqual(h.shown, h.exp, `${where}：ヒントは表示中の宣言経路`);
+      assert.equal(h.chiRoute, buttons.includes('chi') ? 1 : 0, where);
+      assert.equal(h.ponRoute, buttons.includes('pon'), where);
+    } else {
+      // 両方 ON：宣言全体を自動パス → 自分のツモ番に「チー・ポンを自動で見送りました」
+      assert.equal(st.autoPass, 1, where);
+      assert.deepEqual([st.p.seat, st.p.type], [0, 'turn']);
+      assert.equal(st.status, 'チー・ポンを自動で見送りました');
+      assert.equal(await page.evaluate(() => window.__mathjong.S.game.melds[0].length), 0);
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.4-B：チー＋ポン可能（4組合せ：全部／ポン／チー／自動パス）・ヒントの経路一致・通知');
+
+  // (3) ポンのみ・チーのみ：それぞれの設定だけで自動パス。通知の文言
+  for (const [hand, chi, pon, auto, notice] of [
+    [PA_HANDS.pon, false, true, true, 'ポンを自動で見送りました'],
+    [PA_HANDS.pon, true, false, false, null],
+    [PA_HANDS.chi, true, false, true, 'チーを自動で見送りました'],
+    [PA_HANDS.chi, false, true, false, null],
+  ]) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await paSettings(page, chi, pon);
+    const st = await paClaim(page, hand);
+    if (auto) {
+      assert.equal(st.autoPass, 1);
+      assert.equal(st.status, notice);
+    } else {
+      assert.equal(st.autoPass, 0);
+      assert.equal(st.p.type, 'claim');
+      assert.ok(st.buttons.includes(hand === PA_HANDS.pon ? 'pon' : 'chi'));
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.4-B：ポンのみ・チーのみ（各設定で自動パス・通知の区別）');
+
+  // (4) ロン＋ポン／ロン＋ポン＋チー：ロンは必ず表示し自動パスしない。チー・ポンは各設定に従う
+  for (const [hand, chi, pon, buttons] of [
+    [PA_HANDS.ronPon, true, true, ['ron', 'pass']],
+    [PA_HANDS.ronPon, false, false, ['ron', 'pon', 'pass']],
+    [PA_HANDS.ronPonChi, true, true, ['ron', 'pass']],
+    [PA_HANDS.ronPonChi, false, true, ['ron', 'chi', 'pass']],
+    [PA_HANDS.ronPonChi, true, false, ['ron', 'pon', 'pass']],
+  ]) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await paSettings(page, chi, pon);
+    const st = await paClaim(page, hand);
+    assert.equal(st.autoPass, 0, 'ロンがあれば自動パスしない');
+    assert.equal(st.p.ron, true);
+    // チーの候補が複数（sin30・cos60・sin150）なら、チーのボタンは候補の数だけ並ぶ
+    assert.deepEqual([...new Set(st.buttons.filter((b) => ['ron', 'pon', 'chi', 'pass'].includes(b)))], buttons);
+    assert.match(st.passText, /^ロンしない/);
+    await page.locator('button[data-action="ron"]').tap();
+    assert.equal((await v3State(page)).result.winner, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.4-B：ロン＋ポン・ロン＋ポン＋チー（ロンは表示・自動パスなし、チー・ポンは各設定）');
+
+  // (5) 宣言中に設定を変えても選択肢は変わらず、次の宣言から反映
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    let st = await paClaim(page, PA_HANDS.chiPon);
+    assert.deepEqual(st.buttons.filter((b) => ['ron', 'pon', 'chi', 'pass'].includes(b)), ['pon', 'chi', 'pass']);
+    await paSettings(page, true, true);
+    st = await v3State(page);
+    assert.deepEqual(st.buttons.filter((b) => ['ron', 'pon', 'chi', 'pass'].includes(b)), ['pon', 'chi', 'pass'], '表示中の宣言は変わらない');
+    assert.equal(st.autoPass, 0);
+    await page.locator('button[data-action="pass"]').tap();
+    st = await paClaim(page, PA_HANDS.chiPon);
+    assert.equal(st.autoPass, 1, '次の宣言から ON');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (6) 自動パス後、後続の他家のロンで局が終わったら通知は次局に持ち越さない
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await paSettings(page, true, true);
+    await v3Scene(page, presetWall(PA_HANDS.chiPon, PA_DRAWS, [['cos', '180', '=-1', 'tan', '45', '=1', 'sin', '30'], PA_OTHERS[1], PA_OTHERS[2]]));
+    await apToSeat3(page);
+    await apForce(page, 3, 'v:1/2');
+    await page.waitForFunction(() => !window.__mathjong.S.game.pending(), null, { timeout: 8000 });
+    const r = await page.evaluate(() => ({ ...window.__mathjong.S.autoPass, result: window.__mathjong.S.game.result }));
+    assert.equal(r.count, 1, '自動パスした');
+    assert.equal(r.result.winner, 1, '下家のロン（後続のロンを妨げない）');
+    assert.equal(r.noticePending, false);
+    assert.equal(r.noticeKind, null);
+    await page.evaluate(() => window.__mathjong.startRound());
+    await v3WaitHuman(page);
+    const st = await v3State(page);
+    assert.doesNotMatch(st.status, /自動で見送りました/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.4-B：宣言中の設定変更は次の宣言から・後続のロンを妨げない・通知を次局へ持ち越さない');
+
+  // (7) 320〜430px：2つのスイッチと宣言ボタン（ロン＋ポン＋チー）が画面に収まる
+  for (const w of [320, 375, 430]) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { viewport: { width: w, height: 700 } });
+    await page.locator('button[data-action="settings"]').tap();
+    for (const act of ['chi-autopass', 'pon-autopass']) {
+      const b = await page.locator(`label.setting.toggle:has(input[data-action="${act}"])`).boundingBox();
+      assert.ok(b.height >= 44 && b.x >= 0 && b.x + b.width <= w + 0.5, `${w}px ${act} ${JSON.stringify(b)}`);
+    }
+    await page.locator('.modal-actions button[data-action="close"]').tap();
+    await paClaim(page, PA_HANDS.ronPonChi);
+    for (const sel of ['ron', 'pon', 'chi', 'pass']) {
+      const b = await page.locator(`.bar button[data-action="${sel}"]`).first().boundingBox();
+      assert.ok(b && b.x >= 0 && b.x + b.width <= w + 0.5 && b.height >= 40, `${w}px ${sel} ${JSON.stringify(b)}`);
+    }
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 0, `${w}px 横スクロール`);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v04b-ronponchi-${w}.png` });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.4-B：320／375／430px（スイッチ2つ・ロン＋ポン＋チーのボタン）');
+}
+
 async function v04End(browser) {
   const open = async (q) => {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -3277,6 +3550,13 @@ const t0 = Date.now();
 try {
   browser = await chromium.launch({ args: ['--no-proxy-server'], ...(CHANNEL ? { channel: CHANNEL } : {}) });
   console.log(`ブラウザ：${CHANNEL ? `channel=${CHANNEL}` : 'headless shell（既定）'} ${browser.version()}`);
+  // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
+  const ONLY = opt('--only', null);
+  if (ONLY) {
+    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass };
+    for (const n of ONLY.split(',')) await fns[n](browser);
+    console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
+  } else {
   await scenario(browser, 'tsumo', presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['=1']), (text) => {
     assert.match(text, /あなた の和了 ツモ/);
     assert.match(text, /三関制覇/);
@@ -3305,6 +3585,8 @@ try {
   await v04Match(browser);
   await v04Fixes(browser);
   await v04End(browser);
+  await v04bLevels(browser);
+  await v04bPonAutoPass(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
@@ -3321,6 +3603,7 @@ try {
   }
   console.log(JSON.stringify({ ...stats, seconds: (Date.now() - t0) / 1000 }));
   console.log('E2E OK');
+  }
 } catch (e) {
   console.error('E2E FAILED');
   console.error(e);
