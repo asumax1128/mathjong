@@ -252,12 +252,13 @@ button.pon { display: inline-flex; align-items: center; gap: 6px; background: #6
 .confirm-title { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
 button.danger { background: #b42318; color: #fff; border-color: #b42318; }
 
-/* ---- タイトル画面（Ver.0.4-A）。ロゴ（Ver.0.5-C）は正式採用の画像（背景透過 PNG、4:3）。比率は変えず、枠に収めて表示する ---- */
+/* ---- タイトル画面（Ver.0.4-A）。ロゴ（Ver.0.5-C）は正式採用の画像（背景透過 PNG、3:2）。比率は変えず、枠に収めて表示する ---- */
 .title-screen { max-width: 520px; margin: 0 auto; padding: 16px 16px 32px; display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
 .title-logo { display: flex; justify-content: center; margin: 0; }
-/* 幅は「画面の幅・380px・高さの 40%（4:3 なので高さの 30%）」の最小値。枠も常に 4:3 で、画像は歪まず余白も出ない */
-.title-logo-img { display: block; width: min(100%, 380px, 40vh); height: auto; }
-@media (orientation: landscape) and (max-height: 500px) { .title-logo-img { width: min(100%, 380px, 58vh); } }
+/* 幅は「画面の幅（余白を除く）・380px・高さの 45%」の最小値。枠も常に 3:2 で、画像は歪まず余白も出ない。
+   この式は app.js の img の sizes と同じにする（読み込む画像の大きさを実際の表示幅に合わせるため）。 */
+.title-logo-img { display: block; width: min(100%, 380px, 45vh); height: auto; }
+@media (orientation: landscape) and (max-height: 500px) { .title-logo-img { width: min(100%, 380px, 66vh); } }
 .title-lead { text-align: center; margin: 0; color: var(--ink-dim); font-size: 13px; }
 .title-form { display: flex; flex-direction: column; gap: 8px; }
 .title-set { border: 1px solid var(--felt-line); border-radius: 10px; padding: 4px 12px 8px; margin: 0; }

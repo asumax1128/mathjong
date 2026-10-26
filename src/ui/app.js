@@ -712,12 +712,15 @@ function replayErrorHTML() {
 }
 
 // ---------- タイトル画面 ----------
-// タイトルロゴ（Ver.0.5-C）：正式採用の画像（背景透過 PNG、4:3）。画面の幅と解像度に合わせて3つの大きさ（724・1084・1448 幅、
-// 縮小は比率・色を変えない）から選ぶ。width・height は元画像の大きさ（読み込み前から枠の比率を確保して表示のずれを防ぐ）。
+// タイトルロゴ（Ver.0.5-C）：正式採用の画像（背景透過 PNG、1536×1024、3:2）。画面の幅と解像度に合わせて6つの大きさ
+// （384・576・768・960・1152・1536 幅。縮小は比率・色を変えない。1536 幅は採用画像そのもの）から選ぶ。
+// sizes は styles.css の .title-logo-img の実際の表示幅（画面の幅−左右の余白 32px・380px・高さの割合 の最小値）と同じ式。
+// 低い横画面（高さ 500px 以下）は高さの 66%、それ以外は 45%（3:2 なので、高さの 30%／44% の枠）。
+// width・height は元画像の大きさ（読み込み前から枠の比率を確保して表示のずれを防ぐ）。
 function titleHTML() {
   const radio = (name, value, label, checked, extra = '') => `<label class="setting radio"><input type="radio" name="${name}" value="${value}" data-action="title-${name}" ${checked ? 'checked' : ''}><span>${label}${extra}</span></label>`;
   return `<main class="title-screen">
-    <div class="title-logo"><img class="title-logo-img" src="src/ui/title-logo-1084.png" srcset="src/ui/title-logo-724.png 724w, src/ui/title-logo-1084.png 1084w, src/ui/title-logo-1448.png 1448w" sizes="(max-width: 480px) 80vw, 380px" width="1448" height="1086" alt="数雀（MATHJONG）" decoding="async"></div>
+    <div class="title-logo"><img class="title-logo-img" src="src/ui/title-logo-768.png" srcset="src/ui/title-logo-384.png 384w, src/ui/title-logo-576.png 576w, src/ui/title-logo-768.png 768w, src/ui/title-logo-960.png 960w, src/ui/title-logo-1152.png 1152w, src/ui/title-logo-1536.png 1536w" sizes="(orientation: landscape) and (max-height: 500px) min(calc(100vw - 32px), 380px, 66vh), min(calc(100vw - 32px), 380px, 45vh)" width="1536" height="1024" alt="数雀（MATHJONG）" decoding="async"></div>
     <p class="title-lead">三角関数の牌で遊ぶ4人麻雀</p>
     <div class="title-form">
       <fieldset class="title-set"><legend>数学モード</legend>

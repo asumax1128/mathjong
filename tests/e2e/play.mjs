@@ -3991,6 +3991,21 @@ async function v05bFxModeFixed(browser) {
 
 // ---- Ver.0.5-C：ツモ演出の強化・タイトル画像 ----
 const TS_HAND = ['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45']; // =1 待ち（tan45°=1）
+// 牌種類 key の「表示ラベル」（牌の aria-label）。画面と同じ描画関数で、演出とは別に作って比べる
+const tileLabelOf = (page, key) => page.evaluate(async ([base, k]) => {
+  const { tileHTML } = await import(`${base}src/ui/render.js`);
+  const t = window.__mathjong.rules.types.find((x) => x.key === k);
+  const box = document.createElement('div');
+  box.innerHTML = tileHTML(t, { size: 'm' });
+  return box.firstElementChild.getAttribute('aria-label');
+}, [BASE, key]);
+// 演出に表示された和了牌：{ label, 牌の id・種類 }（ゲームの結果 result.tile と比べる）
+const fxWinTile = (page) => page.evaluate(() => {
+  const { S, rules } = window.__mathjong; const g = S.game; const r = g.result;
+  const el = document.querySelector('#fx-layer .fx-wintile .tile');
+  const hand = document.querySelector(`.hand .tile[data-id="${r.tile}"]`);
+  return { shown: el && el.getAttribute('aria-label'), id: r.tile, key: rules.types[g.typeOf(r.tile)].key, handLabel: hand && hand.getAttribute('aria-label'), count: document.querySelectorAll('#fx-layer .fx-wintile .tile').length };
+});
 async function v05cTsumo(browser) {
   // (1) 自分のツモ和了：ロンと同格の演出（文字・閃光・光の輪・和了牌・盤面の揺れ）。結果画面・精算は従来どおり
   for (const mode of ['math1', 'math2']) {
@@ -3998,6 +4013,9 @@ async function v05cTsumo(browser) {
     await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
     assert.equal((await v3State(page)).p.type, 'turn');
     const evBefore = (await fxState(page)).events;
+    // 実際にツモした牌（山から引いた牌の id と種類）を、和了の前に記録する
+    const drawn = await page.evaluate(() => { const { S, rules } = window.__mathjong; const g = S.game; return { id: g.drawn, key: rules.types[g.typeOf(g.drawn)].key }; });
+    assert.equal(drawn.key, 'v:1', `${mode}：山から引いた牌は =1`);
     await page.locator('button[data-action="tsumo"]').tap();
     const st = await fxState(page);
     assert.equal(st.cls, 'fx-tsumo', `${mode}：ツモの演出`);
@@ -4010,11 +4028,16 @@ async function v05cTsumo(browser) {
     assert.deepEqual(st.history, ['tsumo']);
     assert.equal(st.events, evBefore + 1, '記録は和了の1件だけ（演出は記録を増やさない）');
     assert.equal(st.modal, 'result', '結果画面は演出を待たずに開く');
-    // 和了牌は、実際に引いた牌（=1）
-    const shown = await page.evaluate(() => document.querySelector('#fx-layer .fx-wintile .tile').getAttribute('aria-label'));
-    const drawnLabel = await page.evaluate(() => { const { S, rules } = window.__mathjong; const t = rules.types[S.game.typeOf(S.game.result.tile)]; return t.key; });
-    assert.equal(drawnLabel, 'v:1');
-    assert.ok(shown && shown.length > 0);
+    // 和了牌は、実際にツモした牌と一致する（ラベルが空でないだけでなく、牌そのものを比べる）
+    const wt = await fxWinTile(page);
+    assert.equal(wt.count, 1);
+    assert.equal(wt.id, drawn.id, `${mode}：結果の和了牌は、ツモした牌（id ${drawn.id}）`);
+    assert.equal(wt.key, drawn.key);
+    const expectedLabel = await tileLabelOf(page, drawn.key);
+    assert.ok(expectedLabel && expectedLabel.length > 0);
+    assert.equal(wt.shown, expectedLabel, `${mode}：演出の和了牌の表示（${wt.shown}）が、ツモした牌（${drawn.key}）の表示（${expectedLabel}）と一致`);
+    assert.equal(wt.shown, wt.handLabel, `${mode}：手牌の同じ牌（id ${drawn.id}）の表示とも一致`);
+    for (const other of ['f:sin', 'a:30', 'v:1/2']) assert.notEqual(wt.shown, await tileLabelOf(page, other), `${mode}：ほかの牌（${other}）の表示ではない`);
     const res = await page.evaluate(() => { const { S } = window.__mathjong; const r = S.game.result; return { winner: r.winner, how: r.how, points: r.points, delta: S.match.scores.map((x, i) => x - S.prevScores[i]) }; });
     assert.deepEqual([res.winner, res.how], [0, 'tsumo']);
     assert.deepEqual(res.delta, [6 * res.points, -2 * res.points, -2 * res.points, -2 * res.points], '親ツモの精算は演出と無関係（6B・各 −2B）');
@@ -4037,11 +4060,15 @@ async function v05cTsumo(browser) {
   }
   console.log('✓ Ver.0.5-C：自分のツモ和了の演出（文字・閃光・光の輪・和了牌・盤面の揺れ）・結果画面と親ツモの精算は従来どおり・次の局へ持ち越さない（数学Ⅰ・Ⅱ）');
 
-  // (2) AI のツモ和了：下家（席1）が =1 を引いてツモ。演出に AI の名前
-  {
-    const { ctx, page, errors } = await v3Page(browser, 'math1');
+  // (2) AI のツモ和了：下家（席1）が =1 を引いてツモ。演出に AI の名前と、AI が実際に引いた牌（数学Ⅰ・Ⅱ）
+  for (const mode of ['math1', 'math2']) {
+    const { ctx, page, errors } = await v3Page(browser, mode);
     await v3Scene(page, presetWall(['=-1/√3', '=-1/√3', '=-√3/2', '=-√3/2', '=1/√2', '=1/√2', '=√3', '=1/√3'], ['45', '=1'], [TS_HAND, FX_O2, FX_O3]));
     await apDiscardDrawn(page);
+    // AI（席1）がツモ和了できる手番で、引いた牌を記録する（AI の判断を待つ間に読む）
+    await page.waitForFunction(() => { const g = window.__mathjong.S.game; const p = g.pending(); return p && p.seat === 1 && p.type === 'turn' && p.canTsumo; }, null, { timeout: 8000 });
+    const drawn = await page.evaluate(() => { const { S, rules } = window.__mathjong; const g = S.game; return { id: g.drawn, key: rules.types[g.typeOf(g.drawn)].key }; });
+    assert.equal(drawn.key, 'v:1', `${mode}：AI が引いた牌は =1`);
     await page.waitForFunction(() => window.__mathjong.S.fx.history.includes('tsumo'), null, { timeout: 8000 });
     const st = await fxState(page);
     assert.equal(st.word, 'ツモ！');
@@ -4049,10 +4076,16 @@ async function v05cTsumo(browser) {
     assert.equal(st.cls, 'fx-tsumo');
     assert.equal(st.modal, 'result');
     assert.equal(await page.evaluate(() => { const r = window.__mathjong.S.game.result; return [r.winner, r.how].join(); }), '1,tsumo');
+    const wt = await fxWinTile(page);
+    assert.equal(wt.count, 1);
+    assert.equal(wt.id, drawn.id, `${mode}：AI の和了牌は、AI が引いた牌（id ${drawn.id}）`);
+    const expectedLabel = await tileLabelOf(page, drawn.key);
+    assert.equal(wt.shown, expectedLabel, `${mode}：演出の和了牌（${wt.shown}）が、AI が引いた牌（${drawn.key}）の表示（${expectedLabel}）と一致`);
+    for (const other of ['f:sin', 'a:45', 'v:1/2']) assert.notEqual(wt.shown, await tileLabelOf(page, other), `${mode}：ほかの牌（${other}）の表示ではない`);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  console.log('✓ Ver.0.5-C：AI のツモ和了の演出（AI の名前を表示）');
+  console.log('✓ Ver.0.5-C P3-C：ツモ演出の和了牌が、実際にツモした牌（自分・AI、数学Ⅰ・Ⅱ）と一致（ラベルの比較・ほかの牌との区別）');
 
   // (3) 他の演出・機能との競合なし：リーチ後のツモ、重なり（ツモ＞ポン・チー）、自動パス ON でもツモは自動で見送らない、ヒント
   {
@@ -4146,8 +4179,11 @@ async function v05cTsumo(browser) {
   console.log('✓ Ver.0.5-C：320／375／430px でツモの演出が画面内に収まり、揺れの最中も横スクロールしない');
 }
 
+// 正式採用のタイトル画像（オーナー採用：1536×1024、3:2、背景透過 PNG）と、表示幅に合わせた縮小版
+const TITLE_LOGO_SHA = 'aee4ed6781d44eef9f1a666a56ac04e27c16790a376cf770a112f48434a7ca1f';
+const TITLE_LADDER = [384, 576, 768, 960, 1152, 1536];
 async function v05cTitleLogo(browser) {
-  // タイトル画像：読み込めて、4:3 の比率で歪まず、各サイズで見切れない。縦・横画面でも崩れない。画像の取得に失敗がない
+  // (1) 縦横8サイズ：読み込める・3:2 を保つ・見切れない・極端に小さくならない・横スクロールなし・画像の取得に失敗がない
   const sizes = [[320, 568, 2], [375, 667, 2], [390, 844, 3], [430, 932, 3], [568, 320, 2], [844, 390, 3], [768, 1024, 2], [1366, 768, 1]];
   for (const [w, h, dpr] of sizes) {
     const ctx = await newContext(browser, { viewport: { width: w, height: h }, deviceScaleFactor: dpr, isMobile: w < 800, hasTouch: w < 800 });
@@ -4158,40 +4194,60 @@ async function v05cTitleLogo(browser) {
     await page.waitForFunction(() => document.querySelector('.title-logo img').complete && document.querySelector('.title-logo img').naturalWidth > 0);
     const m = await page.evaluate(() => {
       const i = document.querySelector('.title-logo img'); const r = i.getBoundingClientRect();
-      return { alt: i.alt, w: r.width, h: r.height, l: r.left, r: r.right, t: r.top, src: i.currentSrc.split('/').pop(), nat: i.naturalWidth > 0, over: document.documentElement.scrollWidth - innerWidth, start: !!document.querySelector('[data-action="start-match"]') };
+      return { alt: i.alt, w: r.width, h: r.height, l: r.left, r: r.right, t: r.top, b: r.bottom, src: i.currentSrc.split('/').pop(), nat: i.naturalWidth > 0, over: document.documentElement.scrollWidth - innerWidth, start: !!document.querySelector('[data-action="start-match"]'), vh: innerHeight };
     });
     const where = `${w}×${h}`;
     assert.equal(m.alt, '数雀（MATHJONG）', where);
     assert.ok(m.nat, `${where}：読み込める`);
-    assert.ok(Math.abs(m.w / m.h - 4 / 3) < 0.01, `${where}：4:3 を保つ ${m.w}×${m.h}`);
+    assert.ok(Math.abs(m.w / m.h - 3 / 2) < 0.01, `${where}：3:2 を保つ ${m.w}×${m.h}`);
     assert.ok(m.l >= 0 && m.r <= w + 0.5 && m.t >= 0, `${where}：見切れない ${JSON.stringify([m.l, m.r, m.t])}`);
+    assert.ok(m.b <= m.vh + 0.5, `${where}：縦にも見切れない（画像の下端 ${Math.round(m.b)}px が画面の高さ ${m.vh}px 以内）`);
     assert.ok(m.w >= 150, `${where}：極端に小さくならない ${m.w}`);
     assert.ok(m.over <= 0, `${where}：横スクロールなし`);
-    assert.ok(/^title-logo-(724|1084|1448)\.png$/.test(m.src), `${where}：用意した3つの大きさのどれか ${m.src}`);
+    assert.ok(new RegExp(`^title-logo-(${TITLE_LADDER.join('|')})\\.png$`).test(m.src), `${where}：用意した大きさのどれか ${m.src}`);
     assert.equal(m.start, true, '対局開始のボタンがある（画面は従来どおり使える）');
     assert.deepEqual(errors, [], `${where}：画像の取得に失敗がない`);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/v05c-title-${w}x${h}.png` });
     await ctx.close();
   }
-  // 解像度に応じて画像が選ばれる（1x 小画面は小さい版、3x は大きい版）
-  const pick = async (w, h, dpr) => {
-    const ctx = await newContext(browser, { viewport: { width: w, height: h }, deviceScaleFactor: dpr, isMobile: true, hasTouch: true });
+  console.log('✓ Ver.0.5-C：タイトル画像（読み込み・3:2・見切れなし・縦横8サイズ・横スクロールなし）');
+
+  // (2) P3-B：画面の幅と解像度に応じて、必要な幅以上で最小の画像を1枚だけ取得する（低い横画面でも過大に取得しない）。
+  //     実際にネットワークで取得されたファイルで確認する（currentSrc だけでなく、取得した画像の幅と枚数）。
+  const dprCases = [[320, 568, 1], [320, 568, 2], [320, 568, 3], [375, 667, 2], [375, 667, 3], [390, 844, 2], [390, 844, 3], [430, 932, 3],
+    [667, 375, 2], [667, 375, 3], [812, 375, 3], [844, 390, 2], [844, 390, 3], [932, 430, 2], [932, 430, 3], [1024, 768, 2], [1366, 768, 1], [1366, 768, 2]];
+  for (const [w, h, dpr] of dprCases) {
+    const ctx = await newContext(browser, { viewport: { width: w, height: h }, deviceScaleFactor: dpr, isMobile: w < 800, hasTouch: w < 800 });
     const page = await ctx.newPage();
+    const fetched = [];
+    page.on('response', (r) => { const mm = r.url().match(/title-logo-(\d+)\.png/); if (mm && r.status() === 200) fetched.push(Number(mm[1])); });
     await page.goto(`${LOCAL}?speed=test`);
     await page.waitForFunction(() => document.querySelector('.title-logo img').complete);
-    const src = await page.evaluate(() => document.querySelector('.title-logo img').currentSrc.split('/').pop());
+    const css = await page.evaluate(() => document.querySelector('.title-logo img').getBoundingClientRect().width);
+    const need = css * dpr;
+    const smallest = TITLE_LADDER.find((x) => x >= need - 0.5) ?? TITLE_LADDER[TITLE_LADDER.length - 1];
+    const where = `${w}×${h}@${dpr}`;
+    assert.deepEqual(fetched, [smallest], `${where}：表示幅 ${css.toFixed(0)}px×${dpr}＝必要 ${need.toFixed(0)}px → 取得は ${smallest} 幅の1枚だけ（実際：${fetched}）`);
+    assert.ok(smallest / need <= 1.6, `${where}：必要な幅に対して大きすぎない（${(smallest / need).toFixed(2)} 倍）`);
     await ctx.close();
-    return src;
-  };
-  assert.equal(await pick(320, 568, 1), 'title-logo-724.png');
-  assert.notEqual(await pick(430, 932, 3), 'title-logo-724.png', '高解像度の画面では大きい版を使う');
-  // 元画像は変更せず配信される（公開サイトと同じサブパスで、PNG として）
-  const r = await fetch(`${LOCAL}src/ui/title-logo-1448.png`);
-  assert.equal(r.status, 200);
-  assert.equal(r.headers.get('content-type'), 'image/png');
+  }
+  // 修正前の過大取得（低い横画面 DPR3 で必要の約2倍）が出ないこと：667×375@3 は 768 幅、844×390@3 は 960 幅
+  console.log('✓ Ver.0.5-C P3-B：18の画面×解像度で、必要な幅以上で最小の画像を1枚だけ取得（低い横画面でも過大取得なし）');
+
+  // (3) 元画像（正式採用画像）はバイト単位で同一のまま配信される。縮小版は 3:2 で、公開サイトと同じサブパスから PNG として配信される
   const { createHash } = await import('node:crypto');
-  assert.equal(createHash('sha256').update(Buffer.from(await r.arrayBuffer())).digest('hex'), 'afb55d8e5263a58e65052e65ff22596da3c943e38555aa1bfd5021d34e4e4b7b', '元画像（採用画像）はバイト単位で同一');
-  console.log('✓ Ver.0.5-C：タイトル画像（読み込み・4:3・見切れなし・縦横8サイズ・解像度に応じた選択・元画像は同一）');
+  const get = async (name) => { const r = await fetch(`${LOCAL}src/ui/${name}`); assert.equal(r.status, 200, name); assert.equal(r.headers.get('content-type'), 'image/png', name); return Buffer.from(await r.arrayBuffer()); };
+  const orig = await get('title-logo-1536.png');
+  assert.equal(createHash('sha256').update(orig).digest('hex'), TITLE_LOGO_SHA, '元画像（採用画像）はバイト単位で同一');
+  for (const wd of TITLE_LADDER) {
+    const buf = await get(`title-logo-${wd}.png`);
+    const [iw, ih, depth, colorType] = [buf.readUInt32BE(16), buf.readUInt32BE(20), buf[24], buf[25]];
+    assert.deepEqual([iw, ih], [wd, (wd * 2) / 3], `title-logo-${wd}.png の大きさ（3:2）`);
+    assert.deepEqual([depth, colorType], [8, 6], `title-logo-${wd}.png は 8bit RGBA（透過あり）`);
+  }
+  // 旧画像（1448×1086 の別の画像）はもう配信されない
+  for (const old of ['title-logo-1448.png', 'title-logo-1084.png', 'title-logo-724.png']) assert.equal((await fetch(`${LOCAL}src/ui/${old}`)).status, 404, `${old} は削除済み`);
+  console.log('✓ Ver.0.5-C：元画像は SHA-256 が同一・縮小版は 3:2 の RGBA PNG・旧画像は配信されない');
 }
 
 async function v04End(browser) {
