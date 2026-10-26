@@ -141,6 +141,8 @@ export function modeConfig(mode = DEFAULT_MODE) {
     maxCalls: 2, // チーとポンの合計
     calledHandNeedsYaku: true, // チー・ポンをした手は役が必要
     sanankouRonCounts: true, // 三暗刻：ロンで完成した刻子も暗刻に数える（暫定。通常の麻雀とは異なる）
+    riichi: true, // リーチ（門前・聴牌で宣言。以後ツモ切りのみ・チー／ポン不可・ロン／ツモ可）
+    riichiBonus: 1, // リーチして和了したときの加点（基本点に加算。役満には加算しない）
   };
   delete c.rules.maxChi;
   // 既存の役は数式系：3組とも数式面子のときだけ評価する
