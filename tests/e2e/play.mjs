@@ -1781,7 +1781,8 @@ async function chiAutoPass(browser) {
     assert.equal(st.stored, null);
     await page.locator('button[data-action="settings"]').tap();
     assert.equal(await page.locator('input[data-action="chi-autopass"]').isChecked(), false);
-    assert.match(await page.locator('.setting-note').innerText(), /チーだけできる場面を自動で見送ります。ロン・ポン・ツモは自動で見送りません/);
+    // Ver.0.4-B：チー・ポンの2つの設定に共通の説明（指示どおりの文言）
+    assert.match(await page.locator('.setting-note').innerText(), /チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。/);
     await page.locator('.modal-actions button[data-action="close"]').tap();
     await apScene(page, apWall(AP_CHI_ONLY));
     await apToSeat3(page);
@@ -2148,7 +2149,7 @@ async function chiAutoPass(browser) {
     assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.4.0-b');
     assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.4.0-b');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.4\.0-a ・ エンジン v0\.3\.0-a/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.4\.0-b ・ エンジン v0\.3\.0-a/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
