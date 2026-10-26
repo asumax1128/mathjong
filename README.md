@@ -2,54 +2,59 @@
 
 三角関数の値を利用する**4人対戦の数学麻雀**。開発企画・試作ルール・シミュレーションの記録を保存するリポジトリです。
 
-> **開発中／2026-10-24 時点のスナップショット**。仕様には正式に方向性が決まったものと、比較実験中の仮設定が混在します。とくに **360°の採否は未決定** です。
+> **最新の正式完成版：Ver.0.4-B（2026-10-26、main反映・オーナーiPhone Safari実機7/7合格）**。画面版`0.4.0-b`。本書の後半には初期企画の歴史的なシミュレーション数値も保存しています。**現在の仕様と進行は[HANDOFF](docs/HANDOFF.md)を優先。**
 
-## 遊ぶ（Ver.0.1 試作版）
+## 新しいチャット／開発者の入口
 
-人間1人＋AI3人で1局ずつ遊べる Web 版を実装しました（依存ライブラリ・ビルド不要）。
+**[CHAT_START.md](docs/CHAT_START.md) → [HANDOFF.md](docs/HANDOFF.md) → [DECISIONS.md](docs/DECISIONS.md) → [ROADMAP.md](docs/ROADMAP.md) → [WORKFLOW.md](docs/WORKFLOW.md)**。
+
+これらはPR #11の文書ブランチで整備中の場合があります。その場合は[PR #11](https://github.com/asumax1128/mathjong/pull/11)を開いてブランチ `docs/director-handoff-2026-10-26` を選んでください。mainへのマージはオーナーの別途承認が必要です。
+
+## 遊ぶ（Ver.0.4-B）
+
+人間1人＋AI3人。数学Ⅰ（124枚）／数学Ⅱ（168枚）、4局/8局、初級/中級/上級AI、2段階ヒント、チー/ポン独立オートパス、親・連荘と精算を搭載。
+
+- **公開ゲーム**：<https://asumax1128.github.io/mathjong/>（2026-10-26、オーナーからiPhone Safari実機7項目合格報告）。
+- **ソース実装記録**：[Ver.0.3-A](docs/14-ver0.3-a.md)、[Ver.0.3-B](docs/15-ver0.3-b-hints.md)、[Ver.0.4-A](docs/16-ver0.4-a-match.md)、[Ver.0.4-B](docs/17-ver0.4-b-ai-autopass.md)。
+- **Codex独立監査と受入**：[監査・実機承認記録](docs/19-ver0.4-b-independent-audit-acceptance.md)。監査P0〜P2検出なし、P3改善3件は未対応。
 
 ```bash
-node tools/serve.mjs          # → http://localhost:8080/ を開く（このPCからのみ）
-npm test                      # 単体・対局テスト
-node tests/e2e/play.mjs       # ブラウザ実操作テスト（Playwright が必要）
-node tools/simulate.mjs --games 200 --check   # AI 自動対戦
+node tools/serve.mjs             # http://localhost:8080/ でローカル試遊
+npm test                         # Node.js単体・対局テスト
+node tests/e2e/play.mjs          # Playwright E2E（対応するChromium環境が必要）
 ```
 
-スマホ向けには GitHub Pages での公開を予定しています。**公開予定URL：https://asumax1128.github.io/mathjong/**（2026-10-24 時点で未公開・動作未確認。公開設定と確認手順は [iPhone 実機テスト手順](docs/12-iphone-test-guide.md)）。
-公開前に iPhone で試す場合は、同じ Wi-Fi の PC で `node tools/serve.mjs 8080 --lan` を実行し、表示される `http://<PCのIP>:8080/` を開きます（`--lan` を付けたときだけ LAN に公開。テスト後は Ctrl+C で停止）。`--base /mathjong/` を付けると Pages と同じサブパスを再現できます。
-実装仕様・暫定ルール・テスト結果は [Ver.0.1 実装記録](docs/10-ver0.1-implementation.md)。
-現在の画面は **Ver.0.2.1**（エンジン v0.1.0）：役ガイド・役候補ヒント（0.2-A）、手牌の長押し並び替え（0.2-D）、設定の「チーのオートパス」（0.2-B、初期値 OFF）。詳細は [Ver.0.2 開発仕様](docs/13-ver0.2-spec.md)。
-開発中の **Ver.0.3-A**（ブランチ `feature/v0.3-a-rules-pon`、未公開）：9枚制のまま、数学Ⅰ（度数法・124枚）／数学Ⅱ（弧度法・168枚）の2モード、刻子・ポン（ロン＞ポン＞チー）、新役（対々和・三暗刻・正弦/余弦/正接一色）。詳細は [Ver.0.3-A 実装記録](docs/14-ver0.3-a.md)。`node tools/simulate.mjs --legacy` で Ver.0.2.1 までの規則。
+iPhone実機ではmainマージ後の既存GitHub Pagesを利用します。専用プレビューサイトは原則作りません。設定や結果の再現・テスト詳細は[実機テスト手順](docs/12-iphone-test-guide.md)。
 
-## ゲームの核
+## ゲームの核（現行の試作仕様）
 
-- **3枚で1面子**：関数牌（sin / cos / tan）＋角度牌（例：30°）＋結果牌（例：=1/2）。
-- **基本は4人戦**。配牌8枚、9枚（3面子）で通常和了。上家からのチーと、他家の捨て牌によるロンを試験導入。
-- **チーをしたら役が必要**。門前なら役なしでも通常和了できる方式を比較中。
-- 九角無双のような**3面子を必要としない特殊和了**も検討。
-- 角度は第4象限まで採用。試作では0°〜360°の17種類を使用。
-- 関数牌各 **12枚（156枚山）** と各 **16枚（168枚山）** を比較。各16枚は有力候補で、正式決定ではありません。
+- 関数牌（sin/cos/tan）＋角度牌＋結果牌による正しい3牌数式面子、または同一牌の刻子。
+- 配牌8枚、通常9枚・3面子の和了。特殊和了あり。門前は役なし和了可、鳴いたら役が必要。
+- チー／ポン／ロン／ツモを実装。宣言の優先順位は **ロン＞ポン＞チー**。
+- 数学Ⅰ124枚と数学Ⅱ168枚を採用。角度/値/役の厳密な条件は現行`src/engine`と版別記録を参照。
+- 役点・役満評価は現在のゲームでは**暫定採点**。初期計画の未決定事項は歴史資料として残しており、そのまま現行の未実装リストにはしない。
 
 ## 資料の目次
 
 | 資料 | 内容 |
 | --- | --- |
-| [ゲームルール](docs/01-game-rules.md) | 操作、チー、ロン、和了、未決定事項 |
+| [旧ゲームルール（2026-10-24）](docs/01-game-rules.md) | 初期の試作記録。現行ルールのSSOTではない |
 | [牌一覧と三角関数値表](docs/02-tiles-and-values.md) | 17角度、13結果値、山の内訳 |
 | [役・役満一覧](docs/03-yaku-catalog.md) | 三関制覇、象限一色、九角無双など |
 | [シミュレーション履歴](docs/04-simulation-history.md) | 4人戦と12/16枚比較の結果、限界 |
-| [決定ログ](docs/05-decision-log.md) | 決定済み・比較中・保留事項と経緯 |
+| [旧決定ログ](docs/05-decision-log.md) | 2026-10-24時点の意思決定履歴。現行はDECISIONS参照 |
 | [次の検証タスク](docs/06-next-steps.md) | ルール設計と実装の優先順位 |
-| [開発ロードマップ](docs/09-roadmap.md) | 企画からWeb試作・AI検証・4人オンライン対戦までの段階計画 |
+| [旧開発ロードマップ](docs/09-roadmap.md) | 初期段階の計画案。現行はROADMAP参照 |
 | [再現性と既知の制約](docs/07-simulation-reproducibility.md) | 既存簡易シミュレーターの注意点 |
 | [公式ライブラリ・過去案](docs/08-formula-library-and-history.md) | 数式組立型や加法定理などの将来構想 |
 | [Ver.0.1 実装記録](docs/10-ver0.1-implementation.md) | Web 試作版の仕様・暫定採用・テスト結果・既知の問題 |
 | [実機テストと独立監査](docs/11-audit-and-device-testing.md) | iPhoneでのテスト手順、Claude→CodexのPR監査フロー |
 | [Codex監査ガイド](AGENTS.md) | 独立監査の重点項目と報告形式 |
 | [Ver.0.2 開発仕様](docs/13-ver0.2-spec.md) | 役ガイド・役候補ヒント・牌表示（A）、チーのオートパス（B）、横画面（C） |
-| [Ver.0.3-A 実装記録](docs/14-ver0.3-a.md) | 9枚制・数学Ⅰ／Ⅱ・刻子・ポン・新役（開発中） |
-| [Ver.0.3-B ヒント実装記録](docs/15-ver0.3-b-hints.md) | 2段階ヒント（発見・確認）・数式のカラー表示（開発中） |
-| [Ver.0.4-A 対局システム実装記録](docs/16-ver0.4-a-match.md) | タイトル画面・4局戦／8局戦・親の連荘・親子の精算・試合終了（開発中） |
+| [Ver.0.3-A 実装記録](docs/14-ver0.3-a.md) | 数学Ⅰ／Ⅱ・刻子・ポン・新役（main統合済み） |
+| [Ver.0.3-B ヒント実装記録](docs/15-ver0.3-b-hints.md) | 2段階ヒント・色枠（承認済み） |
+| [Ver.0.4-A 対局システム実装記録](docs/16-ver0.4-a-match.md) | 4/8局・連荘・精算・試合終了（承認済み） |
+| [Ver.0.4-B AI難易度＋ポンのオートパス](docs/17-ver0.4-b-ai-autopass.md) | 初・中・上級AIと独立自動パス（正式完成） |
 | [iPhone 実機テスト手順](docs/12-iphone-test-guide.md) | テストURL、Pages 設定、固定seed、報告方法 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |
@@ -66,6 +71,8 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 これらは**簡易AIによる参考値**であり、最適戦略・人間の実力差・実力70%/運30%を証明しません。詳しくは[検証履歴](docs/04-simulation-history.md)。
 
 ## 運用方針
+
+**2026-10-26以降の正式な開発運用手順は[WORKFLOW](docs/WORKFLOW.md)。以下は初期の研究ルールとして残す。**
 
 - 仕様変更時は**決定ログ／ルール／役一覧／検証履歴**を整合させる。
 - 予想・数学的に可能な組み合わせ・実測値を分ける。

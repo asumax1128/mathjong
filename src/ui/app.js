@@ -3,6 +3,7 @@ import { createRules } from '../engine/rules.js';
 import { makeConfig, MODES, DEFAULT_MODE, ENGINE_VERSION } from '../engine/config.js';
 import { Game } from '../engine/game.js';
 import { decide, applyAction, PERSONALITIES } from '../engine/ai.js';
+import { matchInfo } from '../engine/ai-levels.js';
 import { createRng } from '../engine/rng.js';
 import { trigExact } from '../engine/exact.js';
 import { tileHTML, formulaHTML, backHTML, valueHTML, angleHTML, angleText } from './render.js';
@@ -12,14 +13,14 @@ import { analyzeFormulas, initialSelection, assignColors, exposedSummary } from 
 import { createMatch, applyRoundResult, dealerOf, handLabel, ranks, matchAt, START_POINTS } from '../engine/match.js';
 import { reconcileOrder, defaultOrder } from './handorder.js';
 import { createHandDrag } from './handdrag.js';
-import { CHI_AUTOPASS_KEY, parseChiAutoPass, visibleClaimActions, claimPendingForHint, claimPolicy, autoPassDue } from './autopass.js';
+import { CHI_AUTOPASS_KEY, PON_AUTOPASS_KEY, parseChiAutoPass, parsePonAutoPass, visibleClaimActions, claimPendingForHint, claimPolicy, autoPassDue, policySettings, autoPassedKind, mergeKind, autoPassNotice } from './autopass.js';
 import { YAKU_GUIDE, GUIDE_NOTES, guideCondition } from './guide.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, MAX_ROUND } from './params.js';
 import { validateReplay, replayQuery } from './replay.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
-const APP_VERSION = '0.4.0-a';
+const APP_VERSION = '0.4.0-b';
 document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`;
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -56,18 +57,16 @@ const PLAYERS = [
 ];
 
 
-// AI 難易度（Ver.0.4-A では設定の保持と表示だけ。対局 AI はすべて現行の中級の判断）
+// AI 難易度（Ver.0.4-B）。性格（速攻型・役重視型・門前重視型）とは別の軸で、AI 3人すべてに同じ難易度を使う。
+// 判断は src/engine/ai.js（中級）・src/engine/ai-levels.js（初級・上級）。AI の速さ（待ち時間）とは別の設定。
 const AI_LEVELS = [
-  { id: 'beginner', label: '初級', ready: false },
-  { id: 'intermediate', label: '中級', ready: true },
-  { id: 'advanced', label: '上級', ready: false },
+  { id: 'beginner', label: '初級', desc: '鳴かず、打牌も単純。和了できるときは和了します' },
+  { id: 'intermediate', label: '中級', desc: 'これまでのAI（性格ごとの打ち方）' },
+  { id: 'advanced', label: '上級', desc: '中級を強化。河・公開面子から危険な牌を避けます' },
 ];
 const parseLen = (v) => (v === 4 || v === 8 || v === '4' || v === '8' ? Number(v) : null);
 const parseAi = (v) => (AI_LEVELS.some((a) => a.id === v) ? v : null);
-const aiLabel = (id) => {
-  const a = AI_LEVELS.find((x) => x.id === id) || AI_LEVELS[1];
-  return a.ready ? a.label : `${a.label}（準備中・中級のAIで対局）`;
-};
+const aiLabel = (id) => (AI_LEVELS.find((x) => x.id === id) || AI_LEVELS[1]).label;
 
 const S = {
   // 局の通し番号（連荘を含む、1から）。山は seed と この番号だけで決まる（従来の ?round=n と同じ）。
@@ -94,13 +93,16 @@ S.nextMode = S.mode;
 let rules = rulesForMode(S.mode);
 // 対局設定（タイトル画面で選び、「対局開始」で確定）。保存キー mj-mode・mj-length・mj-ai
 S.length = REPLAY.kind !== 'none' && REPLAY.ok && RV.lenGiven ? RV.len : savedLen;
-S.ai = parseAi(params.get('ai')) || parseAi(store.get('mj-ai', null)) || 'intermediate';
-// チーのオートパス（Ver.0.2-B）。保存値 '1' だけが ON、それ以外・保存不可は OFF。
+S.ai = (REPLAY.kind !== 'none' && REPLAY.ok && RV.ai) || parseAi(store.get('mj-ai', null)) || 'intermediate';
+// チーのオートパス（Ver.0.2-B）・ポンのオートパス（Ver.0.4-B）。保存値 '1' だけが ON、それ以外・保存不可は OFF。
 S.chiAutoPass = parseChiAutoPass(store.get(CHI_AUTOPASS_KEY, null));
-// 自動パスの回数（手動操作の S.input とは別に数える）と、次の自分の手番に出す通知
-S.autoPass = { count: 0, failed: 0, noticePending: false, noticeKey: null };
+S.ponAutoPass = parsePonAutoPass(store.get(PON_AUTOPASS_KEY, null));
+// 自動パスの回数（手動操作の S.input とは別に数える）と、次の自分の手番に出す通知（noticeKind：見送った鳴きの種類）
+S.autoPass = { count: 0, failed: 0, noticePending: false, noticeKind: null, noticeKey: null, shownKind: null };
 // 人間の入力の処理回数（多重処理の検出用。accepted=打牌などが成立、ignored=手番外の入力）
 S.input = { accepted: 0, ignored: 0, failed: 0 };
+// AI の判断回数（難易度ごと）。表示・判断には使わない（E2E で採用された難易度の確認に使う）
+S.aiDecisions = {};
 
 const app = document.getElementById('app');
 const T = (idx) => rules.types[idx];
@@ -130,7 +132,9 @@ function startRound() {
   S.scored = false;
   S.claimPolicy = null; // 宣言ごとの表示方針（局ごとに初期化）
   S.autoPass.noticePending = false;
+  S.autoPass.noticeKind = null;
   S.autoPass.noticeKey = null;
+  S.autoPass.shownKind = null;
   render();
   step();
 }
@@ -147,7 +151,8 @@ function currentClaimPolicy() {
   if (!p || p.seat !== HUMAN || p.type !== 'claim') return null;
   return S.claimPolicy && S.claimPolicy.key === stateKey() ? S.claimPolicy : null;
 }
-const claimAutoPassOn = () => { const c = currentClaimPolicy(); return !!(c && c.autoPass); };
+// 表示・ヒント・自動パスで共通に使う、この宣言の設定（宣言の発生時点で固定した値）
+const claimSettings = () => policySettings(currentClaimPolicy());
 
 // changed：直前にゲーム状態を変えた（AI の行動・自動パスの直後）。このときだけ AI の手番でも描画する。
 // それ以外（ドラッグ後の再開など）では従来どおり AI の手番で再描画しない（操作中のタップを妨げない）。
@@ -162,18 +167,21 @@ function step(changed = false) {
   const p = g.pending();
   if (!p) {
     S.autoPass.noticePending = false; // 他家のロン・流局で終わったら通知は持ち越さない
+    S.autoPass.noticeKind = null;
     return finishRound();
   }
   if (p.seat === HUMAN) {
     if (p.type === 'claim') {
       // 宣言の方針は、その宣言が発生した時点の設定で決め、同じ宣言の間は変えない（表示中の選択肢を途中で変えない）
-      const policy = S.claimPolicy = claimPolicy(S.claimPolicy, stateKey(), S.chiAutoPass);
-      // チーのオートパス：ON・ロン不可・チー候補ありのときだけ、宣言ボタンを描画する前に1回だけ見送る
+      const policy = S.claimPolicy = claimPolicy(S.claimPolicy, stateKey(), { chi: S.chiAutoPass, pon: S.ponAutoPass });
+      // チー・ポンのオートパス：ロン不可で、可能な鳴きがすべて設定 ON のときだけ、宣言ボタンを描画する前に1回だけ見送る
       if (autoPassDue(policy, p, HUMAN)) {
         policy.tried = true;
+        const kind = autoPassedKind(p);
         if (applyHumanAction({ type: 'pass' }) === 'ok') {
           S.autoPass.count++;
           S.autoPass.noticePending = true;
+          S.autoPass.noticeKind = mergeKind(S.autoPass.noticeKind, kind);
           return step(true); // 次の判断番へ（後続のロン判断か、自分のツモ番）
         }
         S.autoPass.failed++; // 失敗したら通常の宣言 UI を表示（手動で選べる）
@@ -182,6 +190,8 @@ function step(changed = false) {
       // 自動パス後の最初の自分の手番：この手番の間だけ状態欄に通知を出す
       S.autoPass.noticePending = false;
       S.autoPass.noticeKey = stateKey();
+      S.autoPass.shownKind = S.autoPass.noticeKind;
+      S.autoPass.noticeKind = null;
     }
     return render();
   }
@@ -191,7 +201,9 @@ function step(changed = false) {
     S.timer = null;
     if (g !== S.game) return;
     if (drag && drag.isDragging()) { S.stepDeferred = true; return; }
-    const action = decide(g, p.seat, PLAYERS[p.seat].personality, S.aiRng);
+    // AI 難易度は試合の開始時に確定した値（試合の途中で変えない）。試合の公開情報（持ち点・親番）は上級だけが使う。
+    const action = decide(g, p.seat, PLAYERS[p.seat].personality, S.aiRng, S.matchSettings.ai, matchInfo(S.match));
+    S.aiDecisions[S.matchSettings.ai] = (S.aiDecisions[S.matchSettings.ai] || 0) + 1; // 難易度ごとの判断回数（確認用）
     applyAction(g, p.seat, action);
     // 描画は step() が行う（自分の宣言を自動で見送る場合は、宣言ボタンを一度も描画しない）
     step(true);
@@ -351,8 +363,8 @@ function actionsHTML() {
   if (p.type === 'turn') {
     const tsumo = p.canTsumo ? '<button data-action="tsumo" class="win">ツモ</button>' : '';
     const sel = S.selected !== null;
-    // チーを自動で見送った後の最初の手番だけ、通常の案内の代わりに通知を出す（状態欄の大きさは変えない）
-    const notice = S.autoPass.noticeKey === stateKey() ? 'チーを自動で見送りました' : null;
+    // チー・ポンを自動で見送った後の最初の手番だけ、通常の案内の代わりに通知を出す（状態欄の大きさは変えない）
+    const notice = S.autoPass.noticeKey === stateKey() ? autoPassNotice(S.autoPass.shownKind) : null;
     const text = p.canTsumo ? (notice ? `${notice}・和了できます！` : '和了できます！')
       : notice || (g.justDrew ? 'あなたの番：捨てる牌を選択' : `${lastCallName(g)}後：捨てる牌を選択`);
     return `<div class="actions">
@@ -362,8 +374,8 @@ function actionsHTML() {
     </div>`;
   }
   const tile = tileHTML(T(g.typeOf(p.tile)), { size: 'm' });
-  // 表示する選択肢はこの宣言の方針で決める（OFF なら従来どおり全部。ON でロン＋チーならチーを出さない）
-  const v = visibleClaimActions(p, claimAutoPassOn());
+  // 表示する選択肢はこの宣言の方針で決める（OFF なら従来どおり全部。ON の鳴きは出さない。ロンは必ず出す）
+  const v = visibleClaimActions(p, claimSettings());
   const ron = v.ron ? '<button data-action="ron" class="win">ロン</button>' : '';
   const pon = v.pon ? `<button data-action="pon" class="pon">ポン ${formulaHTML(rules, v.pon.meld)}</button>` : '';
   const chi = v.chi.map((o) => {
@@ -565,8 +577,8 @@ function titleHTML() {
         ${radio('length', '8', '8局戦', S.length === 8, '<small>東1〜南4局</small>')}
       </fieldset>
       <fieldset class="title-set"><legend>AI難易度</legend>
-        ${AI_LEVELS.map((a) => radio('ai', a.id, a.label, S.ai === a.id, a.ready ? '' : '<small class="soon">準備中</small>')).join('')}
-        <p class="note">初級・上級は準備中です。現在はどれを選んでも中級（これまでのAI）で対局します。</p>
+        ${AI_LEVELS.map((a) => radio('ai', a.id, a.label, S.ai === a.id, `<small>${a.desc}</small>`)).join('')}
+        <p class="note">AI 3人すべてに適用します。AIの速さ（設定）とは別です。</p>
       </fieldset>
     </div>
     <button data-action="start-match" class="primary start-btn">対局開始</button>
@@ -580,8 +592,8 @@ function reportInfoHTML() {
   const m = S.match;
   const label = S.scored && S.lastRound ? S.lastRound : { label: handLabel(m), renchan: m.renchan };
   const hand = S.scored && S.lastRound ? m.log[m.log.length - 1].hand : m.hand;
-  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ ${label.label}・連荘${label.renchan}（通し第<b>${S.round}</b>局・親 ${POS[S.dealer]}）／ ${m.length}局戦 ／ ${modeLabel(rules)} ／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
-    この局から再現：URL の末尾に <code>${replayQuery({ seed: S.seedBase, round: S.round, dealer: S.dealer, hand, renchan: label.renchan, len: m.length, mode: LEGACY ? null : rules.config.mode }).replace(/&/g, '&amp;')}</code><br>
+  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ ${label.label}・連荘${label.renchan}（通し第<b>${S.round}</b>局・親 ${POS[S.dealer]}）／ ${m.length}局戦 ／ ${modeLabel(rules)} ／ AI ${aiLabel(S.matchSettings.ai)} ／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
+    この局から再現：URL の末尾に <code>${replayQuery({ seed: S.seedBase, round: S.round, dealer: S.dealer, hand, renchan: label.renchan, len: m.length, mode: LEGACY ? null : rules.config.mode, ai: S.matchSettings.ai }).replace(/&/g, '&amp;')}</code><br>
     <span class="report-caveat">このURLでは山・配牌・親・局状態を再現します。持ち点や過去の対局履歴は復元されず、全員100点から開始します。</span></p>`;
 }
 
@@ -686,8 +698,11 @@ function settingsHTML() {
       <p class="note mode-note">いまの対局：${modeLabel(rules)}。${S.nextMode !== rules.config.mode && !LEGACY ? '下の「新しい対局」で切り替わります（いまの局は変わりません）。' : 'モードの変更は「新しい対局」から反映されます。'}</p>
     </fieldset>
     <label class="setting">AIの速さ <select data-action="speed">${publicSpeedNames().map(opt).join('')}</select></label>
-    <label class="setting toggle"><input type="checkbox" data-action="chi-autopass" ${S.chiAutoPass ? 'checked' : ''}><span>チーのオートパス</span></label>
-    <p class="note setting-note">チーだけできる場面を自動で見送ります。ロン・ポン・ツモは自動で見送りません（ポンとチーが両方できるときはチーだけを見送ります）。</p>
+    <div class="autopass-set">
+      <label class="setting toggle"><input type="checkbox" data-action="chi-autopass" ${S.chiAutoPass ? 'checked' : ''}><span>チーのオートパス</span></label>
+      <label class="setting toggle"><input type="checkbox" data-action="pon-autopass" ${S.ponAutoPass ? 'checked' : ''}><span>ポンのオートパス</span></label>
+    </div>
+    <p class="note setting-note">チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。</p>
     ${reportInfoHTML()}
     <div class="modal-actions"><button data-action="reset">新しい対局（得点リセット）</button>
       ${S.confirmTitle ? '<span class="confirm-title">この対局を終了しますか？<button data-action="to-title" class="danger">終了してタイトルへ</button><button data-action="cancel-title">続ける</button></span>' : '<button data-action="ask-title">タイトルへ戻る</button>'}</div>`;
@@ -726,8 +741,8 @@ function countHint(kind) {
 function hintInputs() {
   const g = S.game;
   const view = g.viewFor(HUMAN);
-  // 画面に出している宣言の選択肢と同じ経路だけを渡す（ON でロン＋チーのときチーの経路は含めない）
-  const claim = claimForSeat(claimPendingForHint(g.pending(), claimAutoPassOn()), HUMAN, (id) => g.typeOf(id));
+  // 画面に出している宣言の選択肢と同じ経路だけを渡す（オートパスで出さないチー・ポンの経路は含めない）
+  const claim = claimForSeat(claimPendingForHint(g.pending(), claimSettings()), HUMAN, (id) => g.typeOf(id));
   return { view, claim };
 }
 
@@ -972,6 +987,11 @@ app.addEventListener('change', (ev) => {
     // 値の保存だけ。次に発生する宣言から反映し、表示中の宣言の選択肢は変えない（ゲームは進めない）
     S.chiAutoPass = ev.target.checked === true;
     store.set(CHI_AUTOPASS_KEY, S.chiAutoPass ? '1' : '0');
+  }
+  if (ev.target.dataset.action === 'pon-autopass') {
+    // チーと同じく値の保存だけ（次に発生する宣言から反映）
+    S.ponAutoPass = ev.target.checked === true;
+    store.set(PON_AUTOPASS_KEY, S.ponAutoPass ? '1' : '0');
   }
 });
 

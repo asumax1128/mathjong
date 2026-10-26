@@ -1,0 +1,42 @@
+{
+ "mode": "math1",
+ "length": 8,
+ "format": "same",
+ "a": "advanced",
+ "b": "advanced",
+ "seed": 2,
+ "advanced": {
+  "missDecay": 0.15,
+  "softness": 3,
+  "valueExp": null,
+  "koutsuBias": null,
+  "wallScale": 0,
+  "defense": 1.5,
+  "callScale": 1,
+  "calls": true
+ },
+ "groups": 60,
+ "matches": 60,
+ "rounds": 690,
+ "drawRate": 0.048,
+ "roundsPerMatch": 11.5,
+ "seconds": 37.8,
+ "levels": {
+  "advanced": {
+   "seats": 240,
+   "meanRank": 2.483,
+   "topRate": 0.25,
+   "lastRate": 0.246,
+   "meanScore": 100,
+   "winsPerMatch": 2.737,
+   "ronPerMatch": 1.858,
+   "tsumoPerMatch": 0.879,
+   "dealInPerMatch": 1.858,
+   "chiPerMatch": 1.496,
+   "ponPerMatch": 0.421,
+   "msPerDecision": 5.477,
+   "msPerDiscard": 7.166,
+   "maxMsDecision": 358.9
+  }
+ }
+}

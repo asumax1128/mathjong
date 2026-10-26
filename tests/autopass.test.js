@@ -99,13 +99,14 @@ test('役候補ヒントへ渡す宣言は、表示する選択肢と同じ経�
 
 test('宣言ごとの方針：同じ宣言は最初の方針を保ち、新しい宣言はその時点の設定で作り直す', () => {
   let pol = claimPolicy(null, '1:10', false);
-  assert.deepEqual(pol, { key: '1:10', autoPass: false, tried: false });
+  // Ver.0.4-B：方針にチー・ポンそれぞれの設定（chi・pon）を持つ。boolean の設定は従来のチー設定として扱う（ポンは OFF）
+  assert.deepEqual(pol, { key: '1:10', chi: false, pon: false, autoPass: false, tried: false });
   // 表示中に ON にしても同じ宣言の方針は変わらない（選択肢を途中で変えない）
   assert.equal(claimPolicy(pol, '1:10', true), pol);
   assert.equal(autoPassDue(claimPolicy(pol, '1:10', true), claim(), 0), false);
   // 次の宣言からは ON
   pol = claimPolicy(pol, '1:14', true);
-  assert.deepEqual(pol, { key: '1:14', autoPass: true, tried: false });
+  assert.deepEqual(pol, { key: '1:14', chi: true, pon: false, autoPass: true, tried: false });
   // ON → OFF も次の宣言から
   assert.equal(claimPolicy(pol, '1:14', false).autoPass, true);
   assert.equal(claimPolicy(pol, '1:18', false).autoPass, false);
@@ -209,11 +210,11 @@ test('120局：判定関数による自動パスと独立実装の見送りで�
   assert.ok(ronSeen > 0 && tsumoSeen > 0, `ロン ${ronSeen}・ツモ ${tsumoSeen} の局面を確認`);
 });
 
-test('バージョン：画面 0.4.0-a（ヘッダー・title は同じ値）、エンジン 0.3.0-a（対局の追加でゲーム・AI は不変）', () => {
+test('バージョン：画面 0.4.0-b（ヘッダー・title は同じ値）、エンジン 0.3.0-a（規則・判定・中級 AI は不変。初級・上級の追加は画面の版で管理）', () => {
   const app = readFileSync(new URL('../src/ui/app.js', import.meta.url), 'utf8');
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const v = app.match(/const APP_VERSION = '([^']+)';/)[1];
-  assert.equal(v, '0.4.0-a');
+  assert.equal(v, '0.4.0-b');
   assert.equal(ENGINE_VERSION, '0.3.0-a');
   assert.match(html, new RegExp(`<title>数雀（MATHJONG）Ver\\.${v.replace(/\./g, '\\.')}</title>`), 'index.html の title が画面の版と一致');
   assert.ok(app.includes('document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`'), 'JS の title も同じ');

@@ -1,3 +1,5 @@
+import { decideBeginner, decideAdvanced } from './ai-levels.js';
+
 // AI プレイヤー。Game.viewFor() の公開情報（自分の手牌・全員の河・公開面子・山の残り枚数）だけで判断する。
 //
 // 評価方法：あと必要な面子数 k に対し、k 個の面子の組合せ（重複可）を全て列挙し、
@@ -47,7 +49,7 @@ export const AI_TUNING = {
 
 const ISSHOKU = new Set(['sinIsshoku', 'cosIsshoku', 'tanIsshoku']);
 // AI が重みに使う点数。関数一色は対々和（通常和了点＋対々和）と同じ扱いにして、一色を無理に狙わない。
-function aiPoints(rules, ev) {
+export function aiPoints(rules, ev) {
   if (!ev.yaku.some((y) => ISSHOKU.has(y.id))) return ev.points;
   const toitoi = rules.config.yaku.find((y) => y.id === 'toitoi' && y.enabled);
   return rules.config.scoring.base + (toitoi ? toitoi.points : 0);
@@ -55,7 +57,7 @@ function aiPoints(rules, ev) {
 
 // rules ごとに「k 面子の組合せ」を事前計算（型付き配列で高速化）
 const comboCache = new WeakMap();
-function combosFor(rules, k) {
+export function combosFor(rules, k) {
   let byK = comboCache.get(rules);
   if (!byK) comboCache.set(rules, (byK = {}));
   if (byK[k]) return byK[k];
@@ -85,7 +87,7 @@ function combosFor(rules, k) {
 
 // 公開面子＋組合せ（完成形）ごとの重み（仮得点×性格）。役なしで和了できない形は 0。
 const weightCache = new WeakMap();
-function comboWeights(rules, exposed, personality) {
+export function comboWeights(rules, exposed, personality) {
   let cache = weightCache.get(rules);
   if (!cache) weightCache.set(rules, (cache = new Map()));
   const key = personality + ':' + exposed.slice().sort((a, b) => a - b).join(',');
@@ -156,7 +158,7 @@ export function handValue(rules, counts, exposed, unseen, personality) {
   return total;
 }
 
-function viewCounts(rules, view) {
+export function viewCounts(rules, view) {
   return rules.countsOf(view.hand.map((h) => h.type));
 }
 
@@ -210,7 +212,7 @@ export function chooseCall(rules, view, tileType, chiOptions, ponOption, persona
 
 // 面子 meld を鳴いた後の手で、役の付く完成形（重み > 0）に足りない牌の最小枚数。
 // 見えていない牌の枚数を超えて必要な形（取得不可能）は数えない。届かなければ Infinity。
-function minMissingAfterCall(rules, counts, exposed, unseen, tileType, meld, personality) {
+export function minMissingAfterCall(rules, counts, exposed, unseen, tileType, meld, personality) {
   const after = callCounts(rules, counts, tileType, meld);
   const ex2 = [...exposed, meld];
   const un2 = unseen.slice();
@@ -234,7 +236,7 @@ function minMissingAfterCall(rules, counts, exposed, unseen, tileType, meld, per
 }
 
 // 面子 meld を鳴いた後の手の内（鳴いた牌は刻子でも1枚だけ）
-function callCounts(rules, counts, tileType, meld) {
+export function callCounts(rules, counts, tileType, meld) {
   const after = counts.slice();
   let used = false;
   for (const t of rules.melds[meld].tiles) {
@@ -245,7 +247,7 @@ function callCounts(rules, counts, tileType, meld) {
 }
 
 // 面子 meld を鳴いた後、最良の打牌をしたときの手の価値
-function valueAfterCall(rules, counts, exposed, unseen, tileType, meld, personality) {
+export function valueAfterCall(rules, counts, exposed, unseen, tileType, meld, personality) {
   const after = callCounts(rules, counts, tileType, meld);
   const ex2 = [...exposed, meld];
   const un2 = unseen.slice();
@@ -292,8 +294,18 @@ export function chooseChi(rules, view, tileType, options, personality) {
   return bestIdx;
 }
 
-// Game.pending() に対する AI の行動を決める
-export function decide(game, seat, personality, rng) {
+// Game.pending() に対する AI の行動を決める。
+// level：AI 難易度（Ver.0.4-B）'beginner' | 'intermediate' | 'advanced'。省略時は中級（Ver.0.4-A までの AI と同一）。
+// info：試合の公開情報（持ち点・親番など。上級だけが使う。src/engine/ai-levels.js の matchInfo を参照）。
+export function decide(game, seat, personality, rng, level = 'intermediate', info = null) {
+  if (level === 'beginner') return decideBeginner(game, seat, rng);
+  if (level === 'advanced') return decideAdvanced(game, seat, personality, rng, info);
+  if (level !== 'intermediate') throw new Error(`unknown AI level ${level}`);
+  return decideIntermediate(game, seat, personality, rng);
+}
+
+// 中級：Ver.0.4-A までの AI（判断・乱数の使い方とも変更しない）
+function decideIntermediate(game, seat, personality, rng) {
   const p = game.pending();
   const rules = game.rules;
   const view = game.viewFor(seat);
