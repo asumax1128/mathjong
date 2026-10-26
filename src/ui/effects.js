@@ -3,9 +3,11 @@
 // ゲームの記録（Game.events）を読んで、どの演出をいつ出すかを決める。ゲーム状態は読むだけで変更しない。
 // tests/effects.test.js で検証。
 
-// 演出の仕様（ms：演出の長さ。prio：重なったときの優先度。ロン ＞ ポン ＞ チー、エンジンの宣言の優先順位と同じ）
+// 演出の仕様（ms：演出の長さ。prio：重なったときの優先度。ロン・ツモ ＞ ポン ＞ チー。ロンとツモは同じ局に同時には起きない）
+// ツモ（Ver.0.5-C）：ロンと同格の派手さ。青白〜金で、ロン（赤金）と見分ける。自力で引き当てた達成感・神秘感（光の輪）を出す。
 export const EFFECTS = {
   ron: { text: 'ロン！', ms: 800, prio: 3 },
+  tsumo: { text: 'ツモ！', ms: 1000, prio: 3 },
   pon: { text: 'ポン！', ms: 520, prio: 2 },
   chi: { text: 'チー！', ms: 420, prio: 1 },
 };
@@ -15,12 +17,13 @@ export const EFFECT_MODES = ['full', 'lite'];
 // 保存値：'lite'（簡易）のときだけ簡易。未保存・異常値・読込失敗は通常（full）。
 export const parseEffectMode = (saved) => (saved === 'lite' ? 'lite' : 'full');
 
-// 記録1件 → 演出の種類（演出のない記録は null）。ツモ和了・流局・打牌などは対象外。
+// 記録1件 → 演出の種類（演出のない記録は null）。流局・打牌・リーチなどは対象外。
 export function effectKindOf(event) {
   if (!event) return null;
   if (event.type === 'chi') return 'chi';
   if (event.type === 'pon') return 'pon';
   if (event.type === 'win' && event.how === 'ron') return 'ron';
+  if (event.type === 'win' && event.how === 'tsumo') return 'tsumo';
   return null;
 }
 

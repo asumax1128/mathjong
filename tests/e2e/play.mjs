@@ -2151,10 +2151,10 @@ async function chiAutoPass(browser) {
   // (12) バージョン表示：ヘッダー・ページタイトル・再現情報
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.5.0-b');
-    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.5.0-b');
+    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.5.0-c');
+    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.5.0-c');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.5\.0-b ・ エンジン v0\.5\.0-a/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.5\.0-c ・ エンジン v0\.5\.0-a/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -2796,7 +2796,8 @@ async function v04Match(browser) {
     const errors = watchErrors(page);
     await page.goto(`${LOCAL}?speed=test`);
     await page.waitForSelector('.title-screen');
-    assert.match(await page.locator('.title-logo').innerText(), /数雀\s*MATHJONG/);
+    // Ver.0.5-C：ロゴは画像（alt が名前）。読み込めて、4:3 の比率で表示されること
+    assert.equal(await page.locator('.title-logo img').getAttribute('alt'), '数雀（MATHJONG）');
     assert.equal(await page.locator('input[data-action="title-mode"][value="math2"]').isChecked(), true, '既定は数学Ⅱ');
     assert.equal(await page.locator('input[data-action="title-length"][value="4"]').isChecked(), true, '既定は4局戦');
     assert.equal(await page.locator('input[data-action="title-ai"][value="intermediate"]').isChecked(), true, '既定は中級');
@@ -3869,9 +3870,9 @@ async function fxSetMode(page, mode) {
 // 盤面の準備（ポン・チー用に、下家の手牌に3枚ある局面）と演出の発火（本物のゲームの記録がなくても、演出だけを出す）
 const fxSceneFire = (page, kind) => page.evaluate((k) => {
   const { S, fx } = window.__mathjong; const g = S.game;
-  if (k === 'ron') g.result = { ...(g.result || {}), tile: g.hands[0][0] };
+  if (k === 'ron' || k === 'tsumo') g.result = { ...(g.result || {}), tile: g.hands[0][0] };
   else g.melds[1].push({ meld: 0, kind: 'formula', call: k, tiles: g.hands[1].slice(0, 3), claimed: g.hands[1][0], from: 0 });
-  fx.fire(k, { type: k === 'ron' ? 'win' : k, seat: 1, how: 'ron', from: 0, tile: g.hands[1][0] });
+  fx.fire(k, { type: k === 'ron' || k === 'tsumo' ? 'win' : k, seat: 1, how: k === 'tsumo' ? 'tsumo' : 'ron', from: 0, tile: g.hands[1][0] });
 }, kind);
 
 async function v05bFxModeFixed(browser) {
@@ -3879,7 +3880,7 @@ async function v05bFxModeFixed(browser) {
   const wall = () => presetWall(hand, ['0', '=-1/√3'], [FX_O1, FX_O2, FX_O3]);
   // A・B：ロン。通常 → 簡易、簡易 → 通常。ポン・チーも同じ（C）
   for (const [from, to] of [['full', 'lite'], ['lite', 'full']]) {
-    for (const kind of ['ron', 'pon', 'chi']) {
+    for (const kind of ['ron', 'tsumo', 'pon', 'chi']) {
       const { ctx, page, errors } = await v3Page(browser, 'math1', { init: { fn: (m) => { try { localStorage.setItem('mj-effects', m); } catch { /* */ } }, arg: from } });
       await v3Scene(page, wall());
       await fxSceneFire(page, kind);
@@ -3897,7 +3898,7 @@ async function v05bFxModeFixed(browser) {
       assert.deepEqual([after.flash, after.win, after.tiles], [before.flash, before.win, before.tiles], `${where}：フラッシュ・和了牌・3枚は変わらない`);
       // 盤面の揺れ・発光：通常で始まった演出は続き、簡易で始まった演出は付かない（レイヤーと一致）
       if (from === 'full') {
-        assert.equal(kind === 'ron' ? after.shake : after.glow, 1, `${where}：揺れ・発光が続く`);
+        assert.equal(kind === 'ron' || kind === 'tsumo' ? after.shake : after.glow, 1, `${where}：揺れ・発光が続く`);
         assert.match(after.delay, /^-\d+ms$/, `${where}：開始時点からの経過で続きから再生する`);
         assert.ok(parseInt(after.delay.slice(1), 10) >= 0);
       } else {
@@ -3910,7 +3911,7 @@ async function v05bFxModeFixed(browser) {
       assert.equal(next.cur.lite, to === 'lite', `${where}：次の演出は新しい設定`);
       assert.equal(next.cls, `fx-${kind}${to === 'lite' ? ' lite' : ''}`, where);
       if (to === 'lite') assert.deepEqual([next.flash, next.win, next.tiles, next.shake, next.glow], [0, 0, 0, 0, 0], `${where}：簡易は文字だけ`);
-      else assert.equal(kind === 'ron' ? next.shake : next.glow, 1, `${where}：通常は揺れ・発光あり`);
+      else assert.equal(kind === 'ron' || kind === 'tsumo' ? next.shake : next.glow, 1, `${where}：通常は揺れ・発光あり`);
       assert.deepEqual(errors, []);
       await ctx.close();
     }
@@ -3986,6 +3987,267 @@ async function v05bFxModeFixed(browser) {
     await ctx.close();
   }
   console.log('✓ Ver.0.5-B P2-1：重なり（ロン＞ポン＞チー）・新しい局での消去・設定の保存と再読み込みは従来どおり');
+}
+
+// ---- Ver.0.5-C：ツモ演出の強化・タイトル画像 ----
+const TS_HAND = ['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45']; // =1 待ち（tan45°=1）
+// 牌種類 key の「表示ラベル」（牌の aria-label）。画面と同じ描画関数で、演出とは別に作って比べる
+const tileLabelOf = (page, key) => page.evaluate(async ([base, k]) => {
+  const { tileHTML } = await import(`${base}src/ui/render.js`);
+  const t = window.__mathjong.rules.types.find((x) => x.key === k);
+  const box = document.createElement('div');
+  box.innerHTML = tileHTML(t, { size: 'm' });
+  return box.firstElementChild.getAttribute('aria-label');
+}, [BASE, key]);
+// 演出に表示された和了牌：{ label, 牌の id・種類 }（ゲームの結果 result.tile と比べる）
+const fxWinTile = (page) => page.evaluate(() => {
+  const { S, rules } = window.__mathjong; const g = S.game; const r = g.result;
+  const el = document.querySelector('#fx-layer .fx-wintile .tile');
+  const hand = document.querySelector(`.hand .tile[data-id="${r.tile}"]`);
+  return { shown: el && el.getAttribute('aria-label'), id: r.tile, key: rules.types[g.typeOf(r.tile)].key, handLabel: hand && hand.getAttribute('aria-label'), count: document.querySelectorAll('#fx-layer .fx-wintile .tile').length };
+});
+async function v05cTsumo(browser) {
+  // (1) 自分のツモ和了：ロンと同格の演出（文字・閃光・光の輪・和了牌・盤面の揺れ）。結果画面・精算は従来どおり
+  for (const mode of ['math1', 'math2']) {
+    const { ctx, page, errors } = await v3Page(browser, mode);
+    await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
+    assert.equal((await v3State(page)).p.type, 'turn');
+    const evBefore = (await fxState(page)).events;
+    // 実際にツモした牌（山から引いた牌の id と種類）を、和了の前に記録する
+    const drawn = await page.evaluate(() => { const { S, rules } = window.__mathjong; const g = S.game; return { id: g.drawn, key: rules.types[g.typeOf(g.drawn)].key }; });
+    assert.equal(drawn.key, 'v:1', `${mode}：山から引いた牌は =1`);
+    await page.locator('button[data-action="tsumo"]').tap();
+    const st = await fxState(page);
+    assert.equal(st.cls, 'fx-tsumo', `${mode}：ツモの演出`);
+    assert.equal(st.word, 'ツモ！');
+    assert.equal(st.who, 'あなた');
+    assert.equal(st.flash, 1, '閃光');
+    assert.equal(st.win, 1, '和了牌（引いた牌）を大きく表示');
+    assert.equal(await page.locator('#fx-layer .fx-halo').count(), 1, '光の輪（ツモだけの演出）');
+    assert.equal(st.shake, 1, '盤面が揺れる');
+    assert.deepEqual(st.history, ['tsumo']);
+    assert.equal(st.events, evBefore + 1, '記録は和了の1件だけ（演出は記録を増やさない）');
+    assert.equal(st.modal, 'result', '結果画面は演出を待たずに開く');
+    // 和了牌は、実際にツモした牌と一致する（ラベルが空でないだけでなく、牌そのものを比べる）
+    const wt = await fxWinTile(page);
+    assert.equal(wt.count, 1);
+    assert.equal(wt.id, drawn.id, `${mode}：結果の和了牌は、ツモした牌（id ${drawn.id}）`);
+    assert.equal(wt.key, drawn.key);
+    const expectedLabel = await tileLabelOf(page, drawn.key);
+    assert.ok(expectedLabel && expectedLabel.length > 0);
+    assert.equal(wt.shown, expectedLabel, `${mode}：演出の和了牌の表示（${wt.shown}）が、ツモした牌（${drawn.key}）の表示（${expectedLabel}）と一致`);
+    assert.equal(wt.shown, wt.handLabel, `${mode}：手牌の同じ牌（id ${drawn.id}）の表示とも一致`);
+    for (const other of ['f:sin', 'a:30', 'v:1/2']) assert.notEqual(wt.shown, await tileLabelOf(page, other), `${mode}：ほかの牌（${other}）の表示ではない`);
+    const res = await page.evaluate(() => { const { S } = window.__mathjong; const r = S.game.result; return { winner: r.winner, how: r.how, points: r.points, delta: S.match.scores.map((x, i) => x - S.prevScores[i]) }; });
+    assert.deepEqual([res.winner, res.how], [0, 'tsumo']);
+    assert.deepEqual(res.delta, [6 * res.points, -2 * res.points, -2 * res.points, -2 * res.points], '親ツモの精算は演出と無関係（6B・各 −2B）');
+    // 揺れるのは盤面だけ：操作バーは揺れる盤面の外
+    assert.equal(await page.evaluate(() => !!document.querySelector('.table').contains(document.querySelector('.bar'))), false);
+    // ロンと見分けられる：色の系統（青白〜金）と、光の輪の有無
+    const color = await page.evaluate(() => getComputedStyle(document.querySelector('#fx-layer .fx-word')).textShadow);
+    assert.match(color, /127, 208, 255|58, 155, 255|79, 125, 255/, '青白〜青系の発光');
+    assert.doesNotMatch(color, /255, 74, 28|255, 45, 26/, 'ロンの赤い発光ではない');
+    await fxGone(page);
+    const e = await fxState(page);
+    assert.deepEqual([e.cls, e.shake], ['', 0]);
+    // 結果画面から次の局へ：演出の持ち越しなし
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.hand .tile');
+    const n = await fxState(page);
+    assert.deepEqual([n.cls, n.modal, n.history], ['', null, ['tsumo']]);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-C：自分のツモ和了の演出（文字・閃光・光の輪・和了牌・盤面の揺れ）・結果画面と親ツモの精算は従来どおり・次の局へ持ち越さない（数学Ⅰ・Ⅱ）');
+
+  // (2) AI のツモ和了：下家（席1）が =1 を引いてツモ。演出に AI の名前と、AI が実際に引いた牌（数学Ⅰ・Ⅱ）
+  for (const mode of ['math1', 'math2']) {
+    const { ctx, page, errors } = await v3Page(browser, mode);
+    await v3Scene(page, presetWall(['=-1/√3', '=-1/√3', '=-√3/2', '=-√3/2', '=1/√2', '=1/√2', '=√3', '=1/√3'], ['45', '=1'], [TS_HAND, FX_O2, FX_O3]));
+    await apDiscardDrawn(page);
+    // AI（席1）がツモ和了できる手番で、引いた牌を記録する（AI の判断を待つ間に読む）
+    await page.waitForFunction(() => { const g = window.__mathjong.S.game; const p = g.pending(); return p && p.seat === 1 && p.type === 'turn' && p.canTsumo; }, null, { timeout: 8000 });
+    const drawn = await page.evaluate(() => { const { S, rules } = window.__mathjong; const g = S.game; return { id: g.drawn, key: rules.types[g.typeOf(g.drawn)].key }; });
+    assert.equal(drawn.key, 'v:1', `${mode}：AI が引いた牌は =1`);
+    await page.waitForFunction(() => window.__mathjong.S.fx.history.includes('tsumo'), null, { timeout: 8000 });
+    const st = await fxState(page);
+    assert.equal(st.word, 'ツモ！');
+    assert.equal(st.who, 'AI-A', '和了した AI の名前');
+    assert.equal(st.cls, 'fx-tsumo');
+    assert.equal(st.modal, 'result');
+    assert.equal(await page.evaluate(() => { const r = window.__mathjong.S.game.result; return [r.winner, r.how].join(); }), '1,tsumo');
+    const wt = await fxWinTile(page);
+    assert.equal(wt.count, 1);
+    assert.equal(wt.id, drawn.id, `${mode}：AI の和了牌は、AI が引いた牌（id ${drawn.id}）`);
+    const expectedLabel = await tileLabelOf(page, drawn.key);
+    assert.equal(wt.shown, expectedLabel, `${mode}：演出の和了牌（${wt.shown}）が、AI が引いた牌（${drawn.key}）の表示（${expectedLabel}）と一致`);
+    for (const other of ['f:sin', 'a:45', 'v:1/2']) assert.notEqual(wt.shown, await tileLabelOf(page, other), `${mode}：ほかの牌（${other}）の表示ではない`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-C P3-C：ツモ演出の和了牌が、実際にツモした牌（自分・AI、数学Ⅰ・Ⅱ）と一致（ラベルの比較・ほかの牌との区別）');
+
+  // (3) 他の演出・機能との競合なし：リーチ後のツモ、重なり（ツモ＞ポン・チー）、自動パス ON でもツモは自動で見送らない、ヒント
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(TS_HAND, ['0', '=-1/√3', '=-√3/2', '=-1/√2', '=1'], [FX_O1, FX_O2, FX_O3]));
+    await page.locator('button[data-action="riichi"]').tap();
+    const zeroId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'a:0'); });
+    await page.locator(`.hand .tile[data-id="${zeroId}"]`).tap();
+    await page.locator('button[data-action="riichi-discard"]').tap();
+    await apToggle(page, 'chi').tap(); await apToggle(page, 'pon').tap(); // 自動パス ON
+    await page.locator('button[data-action="hint"]').tap(); // ヒント
+    await apForce(page, 1); await apForce(page, 2); await apForce(page, 3);
+    await riWaitTurn(page);
+    assert.equal((await riState(page)).p.canTsumo, true);
+    await page.locator('button[data-action="tsumo"]').tap();
+    const st = await fxState(page);
+    assert.equal(st.cls, 'fx-tsumo', '自動パスが ON でも、ツモは自動で見送られず演出が出る');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game.result.analysis.riichi), true, 'リーチ＋1は従来どおり');
+    // 重なり：ツモの演出中に後から来たポン・チーは、ツモを潰さない（優先度ツモ＞ポン＞チー）
+    await page.evaluate(() => { const { S, fx } = window.__mathjong; const g = S.game; const t = g.hands[1][0]; fx.fire('pon', { type: 'pon', seat: 1, tile: t }); fx.fire('chi', { type: 'chi', seat: 1, tile: t }); });
+    assert.equal((await fxState(page)).cls, 'fx-tsumo');
+    assert.deepEqual((await fxState(page)).history, ['tsumo']);
+    await fxGone(page);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-C：ツモ演出がリーチ・自動パス・ヒントと競合しない・ポン／チーで潰れない');
+
+  // (4) 簡易表示（文字だけ）と、設定変更でも表示中の演出が変わらない（P2-1）。再試合・タイトルで演出を消す
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { init: { fn: (m) => { try { localStorage.setItem('mj-effects', m); } catch { /* */ } }, arg: 'lite' } });
+    await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
+    await page.locator('button[data-action="tsumo"]').tap();
+    const l = await fxState(page);
+    assert.equal(l.cls, 'fx-tsumo lite');
+    assert.deepEqual([l.word, l.flash, l.win, l.shake], ['ツモ！', 0, 0, 0], '簡易は文字だけ');
+    assert.equal(await page.locator('#fx-layer .fx-halo').count(), 0, '簡易は光の輪も出さない');
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
+    await page.locator('button[data-action="tsumo"]').tap();
+    const before = await fxLook(page);
+    assert.equal(before.cur.lite, false);
+    await page.locator('button[data-action="close-result"]').tap();
+    await fxSetMode(page, 'lite'); // 演出中に簡易へ
+    const after = await fxLook(page);
+    assert.deepEqual([after.cls, after.cur.lite, after.shake, after.flash, after.win], [before.cls, false, 1, 1, 1], '表示中のツモ演出は通常のまま続く');
+    assert.equal(await page.locator('#fx-layer .fx-halo').count(), 1);
+    await fxGone(page);
+    // 再試合・タイトルへ戻る：演出が残らない
+    await page.evaluate(() => window.__mathjong.fx.fire('tsumo', { type: 'win', seat: 1, how: 'tsumo', from: null }));
+    assert.equal((await fxState(page)).cls, 'fx-tsumo lite', '次の演出は新しい設定（簡易）');
+    await page.evaluate(() => window.__mathjong.startRound());
+    assert.equal((await fxState(page)).cls, '', '新しい局で消える');
+    await page.evaluate(() => window.__mathjong.fx.fire('tsumo', { type: 'win', seat: 1, how: 'tsumo', from: null }));
+    await page.locator('button[data-action="settings"]').tap();
+    await page.locator('button[data-action="ask-title"]').tap();
+    await page.locator('button[data-action="to-title"]').tap();
+    await page.waitForSelector('.title-screen');
+    const t = await fxState(page);
+    assert.equal(t.cls, '', 'タイトルへ戻ると消える');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.fx.timer), null, 'タイマーも止まる');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-C：ツモの簡易表示（文字だけ）・設定変更でも表示中の演出は不変・新しい局／タイトルで演出を消す');
+
+  // (5) 320／375／430px：ツモの演出（文字・和了牌・光の輪）が画面内に収まり、揺れでも横スクロールしない
+  for (const w of [320, 375, 430]) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { viewport: { width: w, height: 700 } });
+    await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
+    await page.locator('button[data-action="tsumo"]').tap();
+    for (const t of [60, 200, 380]) {
+      await page.waitForTimeout(t === 60 ? 60 : 140);
+      const m = await page.evaluate(() => {
+        const l = document.getElementById('fx-layer');
+        const r = (el) => { const b = el.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom }; };
+        return { card: r(l.querySelector('.fx-card')), word: r(l.querySelector('.fx-word')), fs: parseFloat(getComputedStyle(l.querySelector('.fx-word')).fontSize), over: document.documentElement.scrollWidth - innerWidth, vh: innerHeight };
+      });
+      assert.ok(m.card.l >= -1 && m.card.r <= w + 1, `${w}px ツモ ${t}ms：演出が画面の幅に収まる ${JSON.stringify(m.card)}`);
+      assert.ok(m.word.t >= 0 && m.word.b <= m.vh, `${w}px：文字が画面の高さに収まる`);
+      assert.ok(m.fs >= 40, `${w}px：文字 ${m.fs}px`);
+      assert.ok(m.over <= 0, `${w}px ${t}ms：揺れの最中も横スクロールなし（${m.over}px）`);
+    }
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v05c-tsumo-${w}.png` });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-C：320／375／430px でツモの演出が画面内に収まり、揺れの最中も横スクロールしない');
+}
+
+// 正式採用のタイトル画像（オーナー採用：1536×1024、3:2、背景透過 PNG）と、表示幅に合わせた縮小版
+const TITLE_LOGO_SHA = 'aee4ed6781d44eef9f1a666a56ac04e27c16790a376cf770a112f48434a7ca1f';
+const TITLE_LADDER = [384, 576, 768, 960, 1152, 1536];
+async function v05cTitleLogo(browser) {
+  // (1) 縦横8サイズ：読み込める・3:2 を保つ・見切れない・極端に小さくならない・横スクロールなし・画像の取得に失敗がない
+  const sizes = [[320, 568, 2], [375, 667, 2], [390, 844, 3], [430, 932, 3], [568, 320, 2], [844, 390, 3], [768, 1024, 2], [1366, 768, 1]];
+  for (const [w, h, dpr] of sizes) {
+    const ctx = await newContext(browser, { viewport: { width: w, height: h }, deviceScaleFactor: dpr, isMobile: w < 800, hasTouch: w < 800 });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?speed=test`);
+    await page.waitForSelector('.title-logo img');
+    await page.waitForFunction(() => document.querySelector('.title-logo img').complete && document.querySelector('.title-logo img').naturalWidth > 0);
+    const m = await page.evaluate(() => {
+      const i = document.querySelector('.title-logo img'); const r = i.getBoundingClientRect();
+      return { alt: i.alt, w: r.width, h: r.height, l: r.left, r: r.right, t: r.top, b: r.bottom, src: i.currentSrc.split('/').pop(), nat: i.naturalWidth > 0, over: document.documentElement.scrollWidth - innerWidth, start: !!document.querySelector('[data-action="start-match"]'), vh: innerHeight };
+    });
+    const where = `${w}×${h}`;
+    assert.equal(m.alt, '数雀（MATHJONG）', where);
+    assert.ok(m.nat, `${where}：読み込める`);
+    assert.ok(Math.abs(m.w / m.h - 3 / 2) < 0.01, `${where}：3:2 を保つ ${m.w}×${m.h}`);
+    assert.ok(m.l >= 0 && m.r <= w + 0.5 && m.t >= 0, `${where}：見切れない ${JSON.stringify([m.l, m.r, m.t])}`);
+    assert.ok(m.b <= m.vh + 0.5, `${where}：縦にも見切れない（画像の下端 ${Math.round(m.b)}px が画面の高さ ${m.vh}px 以内）`);
+    assert.ok(m.w >= 150, `${where}：極端に小さくならない ${m.w}`);
+    assert.ok(m.over <= 0, `${where}：横スクロールなし`);
+    assert.ok(new RegExp(`^title-logo-(${TITLE_LADDER.join('|')})\\.png$`).test(m.src), `${where}：用意した大きさのどれか ${m.src}`);
+    assert.equal(m.start, true, '対局開始のボタンがある（画面は従来どおり使える）');
+    assert.deepEqual(errors, [], `${where}：画像の取得に失敗がない`);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v05c-title-${w}x${h}.png` });
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-C：タイトル画像（読み込み・3:2・見切れなし・縦横8サイズ・横スクロールなし）');
+
+  // (2) P3-B：画面の幅と解像度に応じて、必要な幅以上で最小の画像を1枚だけ取得する（低い横画面でも過大に取得しない）。
+  //     実際にネットワークで取得されたファイルで確認する（currentSrc だけでなく、取得した画像の幅と枚数）。
+  const dprCases = [[320, 568, 1], [320, 568, 2], [320, 568, 3], [375, 667, 2], [375, 667, 3], [390, 844, 2], [390, 844, 3], [430, 932, 3],
+    [667, 375, 2], [667, 375, 3], [812, 375, 3], [844, 390, 2], [844, 390, 3], [932, 430, 2], [932, 430, 3], [1024, 768, 2], [1366, 768, 1], [1366, 768, 2]];
+  for (const [w, h, dpr] of dprCases) {
+    const ctx = await newContext(browser, { viewport: { width: w, height: h }, deviceScaleFactor: dpr, isMobile: w < 800, hasTouch: w < 800 });
+    const page = await ctx.newPage();
+    const fetched = [];
+    page.on('response', (r) => { const mm = r.url().match(/title-logo-(\d+)\.png/); if (mm && r.status() === 200) fetched.push(Number(mm[1])); });
+    await page.goto(`${LOCAL}?speed=test`);
+    await page.waitForFunction(() => document.querySelector('.title-logo img').complete);
+    const css = await page.evaluate(() => document.querySelector('.title-logo img').getBoundingClientRect().width);
+    const need = css * dpr;
+    const smallest = TITLE_LADDER.find((x) => x >= need - 0.5) ?? TITLE_LADDER[TITLE_LADDER.length - 1];
+    const where = `${w}×${h}@${dpr}`;
+    assert.deepEqual(fetched, [smallest], `${where}：表示幅 ${css.toFixed(0)}px×${dpr}＝必要 ${need.toFixed(0)}px → 取得は ${smallest} 幅の1枚だけ（実際：${fetched}）`);
+    assert.ok(smallest / need <= 1.6, `${where}：必要な幅に対して大きすぎない（${(smallest / need).toFixed(2)} 倍）`);
+    await ctx.close();
+  }
+  // 修正前の過大取得（低い横画面 DPR3 で必要の約2倍）が出ないこと：667×375@3 は 768 幅、844×390@3 は 960 幅
+  console.log('✓ Ver.0.5-C P3-B：18の画面×解像度で、必要な幅以上で最小の画像を1枚だけ取得（低い横画面でも過大取得なし）');
+
+  // (3) 元画像（正式採用画像）はバイト単位で同一のまま配信される。縮小版は 3:2 で、公開サイトと同じサブパスから PNG として配信される
+  const { createHash } = await import('node:crypto');
+  const get = async (name) => { const r = await fetch(`${LOCAL}src/ui/${name}`); assert.equal(r.status, 200, name); assert.equal(r.headers.get('content-type'), 'image/png', name); return Buffer.from(await r.arrayBuffer()); };
+  const orig = await get('title-logo-1536.png');
+  assert.equal(createHash('sha256').update(orig).digest('hex'), TITLE_LOGO_SHA, '元画像（採用画像）はバイト単位で同一');
+  for (const wd of TITLE_LADDER) {
+    const buf = await get(`title-logo-${wd}.png`);
+    const [iw, ih, depth, colorType] = [buf.readUInt32BE(16), buf.readUInt32BE(20), buf[24], buf[25]];
+    assert.deepEqual([iw, ih], [wd, (wd * 2) / 3], `title-logo-${wd}.png の大きさ（3:2）`);
+    assert.deepEqual([depth, colorType], [8, 6], `title-logo-${wd}.png は 8bit RGBA（透過あり）`);
+  }
+  // 旧画像（1448×1086 の別の画像）はもう配信されない
+  for (const old of ['title-logo-1448.png', 'title-logo-1084.png', 'title-logo-724.png']) assert.equal((await fetch(`${LOCAL}src/ui/${old}`)).status, 404, `${old} は削除済み`);
+  console.log('✓ Ver.0.5-C：元画像は SHA-256 が同一・縮小版は 3:2 の RGBA PNG・旧画像は配信されない');
 }
 
 async function v04End(browser) {
@@ -4120,7 +4382,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed };
+    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
   } else {
@@ -4157,6 +4419,8 @@ try {
   await v05Riichi(browser);
   await v05bEffects(browser);
   await v05bFxModeFixed(browser);
+  await v05cTsumo(browser);
+  await v05cTitleLogo(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
