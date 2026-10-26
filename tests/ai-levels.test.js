@@ -14,15 +14,26 @@ const LEVELS = ['beginner', 'intermediate', 'advanced'];
 const LINEUP = ['speed', 'value', 'closed', 'speed'];
 
 // Ver.0.4-A（main 6be58ac、AI 難易度の導入前）の AI で記録した値。tests/ai-levels-golden.mjs で再計算できる。
+// リーチ（Ver.0.5-A）の導入後は、リーチの規則を無効にした数学Ⅰ・Ⅱでこの値と一致すること（＝リーチ以外の判断は不変）を確かめる。
 const GOLDEN_V04A = {
   legacy: '394af186ce38bccd5866242b',
   math1: '36539a5e436adea8690b5544',
   math2: '38876b39ff7db9d1a6a0294a',
 };
+// リーチありの規則（Ver.0.5-A）で記録した値。リーチの判断を変えたときだけ更新する（変更理由を docs に記録）。
+const GOLDEN_RIICHI = {
+  legacy: '394af186ce38bccd5866242b',
+  math1: '6f4d59ab54dec027d22847e9',
+  math2: '6d7148b1373dc92f45828d7b',
+};
 
-test('中級は従来の AI と完全一致（固定 seed の対局ログ：旧規則・数学Ⅰ・数学Ⅱ、1局×6＋4局戦1試合）', () => {
-  assert.deepEqual(goldenDigest(), GOLDEN_V04A, '難易度を省略した従来の呼び出し');
-  assert.deepEqual(goldenDigest({ level: 'intermediate' }), GOLDEN_V04A, '中級を明示した呼び出し');
+test('中級は従来の AI と完全一致（リーチの規則を無効にした場合。固定 seed の対局ログ：旧規則・数学Ⅰ・数学Ⅱ、1局×6＋4局戦1試合）', () => {
+  assert.deepEqual(goldenDigest({ riichi: false }), GOLDEN_V04A, '難易度を省略した従来の呼び出し');
+  assert.deepEqual(goldenDigest({ riichi: false, level: 'intermediate' }), GOLDEN_V04A, '中級を明示した呼び出し');
+});
+
+test('中級（リーチあり）：固定 seed の対局ログが記録値と一致（旧規則はリーチなしで従来どおり）', () => {
+  assert.deepEqual(goldenDigest(), GOLDEN_RIICHI);
 });
 
 test('未知の難易度は拒否する', () => {

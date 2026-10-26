@@ -39,7 +39,7 @@ const PATTERNS = {
 };
 
 function emptyStat() {
-  return { seats: 0, rankSum: 0, top: 0, last: 0, scoreSum: 0, wins: 0, ron: 0, tsumo: 0, dealIn: 0, chi: 0, pon: 0, decisions: 0, ms: 0, maxMs: 0, turnDecisions: 0, turnMs: 0 };
+  return { seats: 0, rankSum: 0, top: 0, last: 0, scoreSum: 0, wins: 0, ron: 0, tsumo: 0, dealIn: 0, chi: 0, pon: 0, riichi: 0, riichiWins: 0, decisions: 0, ms: 0, maxMs: 0, turnDecisions: 0, turnMs: 0 };
 }
 
 function runGroups(from, to) {
@@ -75,6 +75,7 @@ function runGroups(from, to) {
           if (p.type === 'turn') { st.turnDecisions++; st.turnMs += dt; }
           if (a.type === 'chi') st.chi++;
           if (a.type === 'pon') st.pon++;
+          if (a.riichi) st.riichi++;
           applyAction(game, p.seat, a);
           if (++steps > 3000) throw new Error('no progress');
         }
@@ -85,6 +86,7 @@ function runGroups(from, to) {
         else {
           const w = stat[lv[r.winner]];
           w.wins++; w[r.how]++;
+          if (r.analysis && r.analysis.riichi) w.riichiWins++;
           if (r.how === 'ron') stat[lv[r.from]].dealIn++;
         }
         m = applyRoundResult(m, r);
@@ -131,7 +133,7 @@ function report(res, seconds) {
     lv[name] = {
       seats: st.seats, meanRank: r3(st.rankSum / st.seats), topRate: r3(st.top / st.seats), lastRate: r3(st.last / st.seats), meanScore: +(st.scoreSum / st.seats).toFixed(2),
       winsPerMatch: r3(st.wins / st.seats), ronPerMatch: r3(st.ron / st.seats), tsumoPerMatch: r3(st.tsumo / st.seats), dealInPerMatch: r3(st.dealIn / st.seats),
-      chiPerMatch: r3(st.chi / st.seats), ponPerMatch: r3(st.pon / st.seats),
+      chiPerMatch: r3(st.chi / st.seats), ponPerMatch: r3(st.pon / st.seats), riichiPerMatch: r3(st.riichi / st.seats), riichiWinsPerMatch: r3(st.riichiWins / st.seats),
       msPerDecision: r3(st.ms / st.decisions), msPerDiscard: r3(st.turnMs / st.turnDecisions), maxMsDecision: +st.maxMs.toFixed(1),
     };
   }

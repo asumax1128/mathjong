@@ -230,15 +230,16 @@ export function advancedDiscard(rules, view, personality, rng, info) {
 // 係数は中級 AI どうしの対局（数学Ⅰ 300局・数学Ⅱ 200局、seed 9000〜）で、他家の実際の手牌から求めた「その牌でロンできたか」に
 // 当てはめた値（node tools/calibrate-advanced.mjs --mode math1|math2 で再計算できる）。実際の対局では他家の手牌は一切見ない。
 export const DANGER_COEF = {
-  //        [定数, log(w+0.001), turns, melds=1, melds=2, inRiver, min(turns,12)^2/10, w>0]
-  math1: [-6.982, 0.679, 0.554, 0.988, 2.007, -2.886, -0.264, 1.53],
-  math2: [-9.945, 0.106, 0.309, 0.45, 2.205, -2.194, -0.081, 4.555],
+  //        [定数, log(w+0.001), turns, melds=1, melds=2, inRiver, min(turns,12)^2/10, w>0, riichi]
+  // Ver.0.5-A：リーチ（公開情報）を特徴量に加え、リーチのある対局で当てはめ直した（AUC 0.916）。
+  math1: [-8.079, 0.561, 0.072, 4.25, 5.568, -2.995, -0.004, 1.107, 4.334],
+  math2: [-10.466, 0.376, 0.03, 3.677, 6.208, -2.579, 0.022, 3.455, 4.261],
 };
 
 // 自分の和了の見込み（同じ対局データで当てはめ）：logit = a + b·log(手の価値) + c·山の残り + d·鳴いた回数
 export const WIN_COEF = {
-  math1: [-2.816, 0.883, 0.03, 0.653],
-  math2: [-3.673, 0.79, 0.02, 1.297],
+  math1: [-2.862, 0.967, 0.032, 0.877],
+  math2: [-4.105, 0.812, 0.023, 1.368],
 };
 
 const sigmoid = (x) => 1 / (1 + Math.exp(-x));
@@ -258,7 +259,8 @@ export function dangerTable(rules, view, unseen) {
     const valid = finalMeldFilter(rules, ex);
     const turns = view.rivers[o].length + view.melds[o].length;
     const inRiver = new Set(view.rivers[o]);
-    const base = coef[0] + coef[2] * turns + (ex.length === 1 ? coef[3] : 0) + (ex.length >= 2 ? coef[4] : 0) + coef[6] * Math.min(turns, 12) ** 2 / 10;
+    const riichi = view.riichi && view.riichi[o] ? 1 : 0; // リーチした他家は聴牌している（公開情報）
+    const base = coef[0] + coef[2] * turns + (ex.length === 1 ? coef[3] : 0) + (ex.length >= 2 ? coef[4] : 0) + coef[6] * Math.min(turns, 12) ** 2 / 10 + (coef[8] || 0) * riichi;
     for (let t = 0; t < T; t++) {
       let w = 0;
       for (const mi of rules.meldsByTile[t]) {
