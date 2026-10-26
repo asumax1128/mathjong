@@ -202,7 +202,7 @@ export function advancedDiscard(rules, view, personality, rng, info) {
     counts[types[iBest]]--;
     const vN = handValue(rules, counts, exposed, unseen, 'speed');
     counts[types[iBest]]++;
-    const wc = WIN_COEF[rules.config.mode] || WIN_COEF.math2;
+    const wc = (rules.config.rules.riichi ? WIN_COEF : WIN_COEF_V04B)[rules.config.mode] || (rules.config.rules.riichi ? WIN_COEF : WIN_COEF_V04B).math2;
     const pWin = sigmoid(wc[0] + wc[1] * Math.log(vN + 1e-9) + wc[2] * view.wallCount + wc[3] * exposed.length);
     const gain = view.dealer === view.seat ? 6 : 4;
     score = types.map((t, i) => {
@@ -229,6 +229,16 @@ export function advancedDiscard(rules, view, personality, rng, info) {
 //   inRiver：o 自身が t を捨てているか（捨てた牌で待つことは少ない。フリテンはないので 0 にはならない）
 // 係数は中級 AI どうしの対局（数学Ⅰ 300局・数学Ⅱ 200局、seed 9000〜）で、他家の実際の手牌から求めた「その牌でロンできたか」に
 // 当てはめた値（node tools/calibrate-advanced.mjs --mode math1|math2 で再計算できる）。実際の対局では他家の手牌は一切見ない。
+// 係数はリーチの規則の有無で切り替える（riichi: false では Ver.0.4-B の係数＝旧挙動をそのまま再現する）。
+// 旧係数は main cd37c62（Ver.0.4-B）の値そのまま。リーチの特徴量（9番目）は新係数だけが持つ。
+export const DANGER_COEF_V04B = {
+  math1: [-6.982, 0.679, 0.554, 0.988, 2.007, -2.886, -0.264, 1.53],
+  math2: [-9.945, 0.106, 0.309, 0.45, 2.205, -2.194, -0.081, 4.555],
+};
+export const WIN_COEF_V04B = {
+  math1: [-2.816, 0.883, 0.03, 0.653],
+  math2: [-3.673, 0.79, 0.02, 1.297],
+};
 export const DANGER_COEF = {
   //        [定数, log(w+0.001), turns, melds=1, melds=2, inRiver, min(turns,12)^2/10, w>0, riichi]
   // Ver.0.5-A：リーチ（公開情報）を特徴量に加え、リーチのある対局で当てはめ直した（AUC 0.916）。
@@ -247,7 +257,9 @@ const sigmoid = (x) => 1 / (1 + Math.exp(-x));
 // 牌種類ごと・他家ごとのロンの確率 P[o][t]（o === 自分 は 0）
 export function dangerTable(rules, view, unseen) {
   const T = unseen.length;
-  const coef = DANGER_COEF[rules.config.mode] || DANGER_COEF.math2;
+  const riichiRule = rules.config.rules.riichi === true;
+  const table = riichiRule ? DANGER_COEF : DANGER_COEF_V04B;
+  const coef = table[rules.config.mode] || table.math2;
   const U = unseen.reduce((a, b) => a + Math.max(0, b), 0) || 1;
   const out = [];
   for (let o = 0; o < 4; o++) {
@@ -259,8 +271,9 @@ export function dangerTable(rules, view, unseen) {
     const valid = finalMeldFilter(rules, ex);
     const turns = view.rivers[o].length + view.melds[o].length;
     const inRiver = new Set(view.rivers[o]);
-    const riichi = view.riichi && view.riichi[o] ? 1 : 0; // リーチした他家は聴牌している（公開情報）
-    const base = coef[0] + coef[2] * turns + (ex.length === 1 ? coef[3] : 0) + (ex.length >= 2 ? coef[4] : 0) + coef[6] * Math.min(turns, 12) ** 2 / 10 + (coef[8] || 0) * riichi;
+    let base = coef[0] + coef[2] * turns + (ex.length === 1 ? coef[3] : 0) + (ex.length >= 2 ? coef[4] : 0) + coef[6] * Math.min(turns, 12) ** 2 / 10;
+    // リーチした他家は聴牌している（公開情報）。リーチの規則がないときは加えない（旧版と同じ計算順序・同じ値）
+    if (riichiRule && view.riichi && view.riichi[o]) base += coef[8];
     for (let t = 0; t < T; t++) {
       let w = 0;
       for (const mi of rules.meldsByTile[t]) {

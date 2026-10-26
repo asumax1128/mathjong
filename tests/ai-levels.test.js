@@ -9,6 +9,8 @@ import { createRng } from '../src/engine/rng.js';
 import { createMatch, applyRoundResult, dealerOf } from '../src/engine/match.js';
 import { rulesFor, rules as LEGACY } from './helpers.js';
 import { goldenDigest } from './ai-levels-golden.mjs';
+import { createRules } from '../src/engine/rules.js';
+import { makeConfig } from '../src/engine/config.js';
 
 const LEVELS = ['beginner', 'intermediate', 'advanced'];
 const LINEUP = ['speed', 'value', 'closed', 'speed'];
@@ -198,4 +200,49 @@ test('全難易度：4局戦の試合が止まらず完走する（数学Ⅰ・�
     }
   }
   for (const lv of LEVELS) play(LEGACY, 12, [lv, lv, lv, lv]);
+});
+
+// ---------------- Ver.0.5-A P2 修正：リーチ無効時の上級 AI は Ver.0.4-B と同じ判断 ----------------
+import { advancedDigest } from './ai-advanced-digest.mjs';
+import { DANGER_COEF, DANGER_COEF_V04B, WIN_COEF, WIN_COEF_V04B } from '../src/engine/ai-levels.js';
+
+const ENGINE_DIR = new URL('../src/engine/', import.meta.url).pathname;
+// Ver.0.4-B（main cd37c62）のコードで記録した値（数学Ⅰ 8局面系列 1,052 判断・数学Ⅱ 948 判断。上級2種・中級・初級の判断）。
+// tests/ai-advanced-digest.mjs を cd37c62 の src/engine に向けて実行すると再計算できる。
+const DIGEST_V04B = { math1: { n: 1052, sha: '7ec5c1eebfc140959c1fad81' }, math2: { n: 948, sha: 'd5cd1d9fe34f790f1bf245c8' } };
+// リーチ有効の規則で記録した値（P2 修正の前後で判断が変わっていないこと＝新しい係数のまま）
+const DIGEST_RIICHI_ON = { math1: { n: 972, sha: '835f266250c04daa0b23c636' }, math2: { n: 892, sha: 'c4d549c49237f7e253387f43' } };
+
+test('P2：リーチ無効の数学Ⅰ・Ⅱで、上級（と中級・初級）の判断が Ver.0.4-B と一致（複数 seed・複数局面）', async () => {
+  assert.deepEqual(await advancedDigest(ENGINE_DIR, { riichi: false }), DIGEST_V04B);
+});
+
+test('P2：リーチ有効のときは新しい係数を使い、判断は修正前（e780f5a）から変わらない', async () => {
+  assert.deepEqual(await advancedDigest(ENGINE_DIR, { riichi: true }), DIGEST_RIICHI_ON);
+});
+
+test('P2：係数セット：旧係数は Ver.0.4-B の値そのまま（リーチの特徴量なし）。新係数はリーチの項を持つ', () => {
+  assert.deepEqual(DANGER_COEF_V04B.math1, [-6.982, 0.679, 0.554, 0.988, 2.007, -2.886, -0.264, 1.53]);
+  assert.deepEqual(DANGER_COEF_V04B.math2, [-9.945, 0.106, 0.309, 0.45, 2.205, -2.194, -0.081, 4.555]);
+  assert.deepEqual(WIN_COEF_V04B.math1, [-2.816, 0.883, 0.03, 0.653]);
+  assert.deepEqual(WIN_COEF_V04B.math2, [-3.673, 0.79, 0.02, 1.297]);
+  for (const mode of ['math1', 'math2']) {
+    assert.equal(DANGER_COEF_V04B[mode].length, 8);
+    assert.equal(DANGER_COEF[mode].length, 9, 'リーチの特徴量（9番目）');
+    assert.notDeepEqual(WIN_COEF[mode], WIN_COEF_V04B[mode]);
+  }
+});
+
+test('P2：リーチ無効の規則では、他家のリーチ（公開情報）があっても危険度は旧版と同じ（リーチの項を加えない）', async () => {
+  const { dangerTable } = await import('../src/engine/ai-levels.js');
+  const { unseenCounts } = await import('../src/engine/ai.js');
+  const r = rulesFor('math1');
+  const off = createRules(makeConfig({ mode: 'math1', rules: { riichi: false } }));
+  const g = new Game({ rules: off, seed: 3, dealer: 0, players: LINEUP.map((p) => ({ kind: 'ai', personality: p })) });
+  const v = g.viewFor(0);
+  const base = dangerTable(off, v, unseenCounts(off, v));
+  const fake = { ...v, riichi: [false, true, true, true] }; // 他家がリーチしている公開情報
+  const withFlag = dangerTable(off, fake, unseenCounts(off, fake));
+  assert.deepEqual(withFlag.map((a) => [...a]), base.map((a) => [...a]), 'リーチ無効では riichi の特徴量を使わない');
+  void r;
 });
