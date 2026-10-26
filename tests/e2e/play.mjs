@@ -3421,6 +3421,156 @@ async function v04bPonAutoPass(browser) {
   console.log('✓ Ver.0.4-B：320／375／430px（スイッチ2つ・ロン＋ポン＋チーのボタン）');
 }
 
+// ---- Ver.0.5-A：リーチ ----
+const RI_HAND = ['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45']; // 0 を捨てて =1 待ち、45 を捨てて =0 待ち
+const RI_O1 = ['sin', 'sin', '0', '90', '90', '=-√3', '=√3', '150'];
+const RI_O2 = ['cos', '135', '=√3', '=-1/√2', '120', '120', 'tan', '=0'];
+const RI_O3 = ['=-1', 'tan', 'tan', '120', '=1/√3', '90', '=-1/√2', '=-√3'];
+const riState = (page) => page.evaluate(() => {
+  const { S } = window.__mathjong;
+  const g = S.game;
+  g.checkInvariants();
+  const p = g.pending();
+  return {
+    p: p && { seat: p.seat, type: p.type, canTsumo: p.canTsumo ?? null }, riichi: g.riichi.map((r) => !!r), input: { ...S.input },
+    buttons: [...document.querySelectorAll('.bar button[data-action]')].map((b) => b.dataset.action),
+    status: (document.querySelector('.bar .actions .status') || {}).textContent?.trim() || '',
+    taps: document.querySelectorAll('.hand .tile.tap').length, locked: document.querySelectorAll('.hand .tile.locked').length,
+    hand0: g.hands[0].length, river0: g.rivers[0].length, drawn: g.drawn,
+  };
+});
+// 自分の打牌番で止まるまで待つ
+const riWaitTurn = (page) => page.waitForFunction(() => { const p = window.__mathjong.S.game.pending(); return p && p.seat === 0 && p.type === 'turn'; }, null, { timeout: 8000 });
+
+async function v05Riichi(browser) {
+  // (1) 自分のリーチ：宣言 → 聴牌になる牌だけ選べる → 宣言牌 → 以後ツモ切りだけ → ツモで基本点＋1
+  for (const mode of ['math1', 'math2']) {
+    const { ctx, page, errors } = await v3Page(browser, mode);
+    await v3Scene(page, presetWall(RI_HAND, ['0', '=-1/√3', '=-√3/2', '=-1/√2', '=0', '=-1/√3', '=-√3/2', '=-1/√2', '=1'], [RI_O1, RI_O2, RI_O3]));
+    let st = await riState(page);
+    assert.ok(st.buttons.includes('riichi'), `${mode}：聴牌ならリーチのボタン`);
+    await page.locator('button[data-action="riichi"]').tap();
+    st = await riState(page);
+    assert.deepEqual(st.buttons.filter((b) => b.startsWith('riichi')), ['riichi-cancel', 'riichi-discard']);
+    assert.equal(st.taps, 2, '聴牌になる牌（0・45）だけ選べる');
+    assert.equal(st.locked, 7);
+    // やめる → 通常の打牌に戻る
+    await page.locator('button[data-action="riichi-cancel"]').tap();
+    st = await riState(page);
+    assert.equal(st.taps, 9);
+    await page.locator('button[data-action="riichi"]').tap();
+    // 選べない牌（sin）はタップしても選択されない
+    const sinId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'f:sin'); });
+    await page.locator(`.hand .tile[data-id="${sinId}"]`).tap({ force: true });
+    assert.equal(await page.evaluate(() => window.__mathjong.S.selected), null);
+    assert.equal(await page.locator('button[data-action="riichi-discard"]').isDisabled(), true);
+    const zeroId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'a:0'); });
+    await page.locator(`.hand .tile[data-id="${zeroId}"]`).tap();
+    await page.locator('button[data-action="riichi-discard"]').tap();
+    st = await riState(page);
+    assert.deepEqual(st.riichi, [true, false, false, false]);
+    assert.equal(await page.locator('.self .riichi-badge').count(), 1, '自分の表示にリーチ');
+    assert.equal(await page.locator('.river.mine .tile.riichi-decl').count(), 1, '宣言牌に印');
+    assert.match(await page.locator('.msg').innerText(), /リーチ/);
+    // 他家は（強制的に）ツモ切り → 自分の番：ツモ切りだけ
+    await apForce(page, 1); await apForce(page, 2); await apForce(page, 3);
+    await riWaitTurn(page);
+    st = await riState(page);
+    assert.equal(st.p.canTsumo, false);
+    assert.ok(st.buttons.includes('tsumogiri') && !st.buttons.includes('discard') && !st.buttons.includes('riichi'));
+    assert.match(st.status, /リーチ中：ツモ切り/);
+    assert.equal(st.taps, 1, 'ツモ牌だけ選べる');
+    // ツモ牌以外をエンジンに直接渡しても拒否される（画面の制限だけに頼らない）
+    const bypass = await page.evaluate(() => { const { S } = window.__mathjong; const g = S.game; const other = g.hands[0].find((x) => x !== g.drawn); try { g.discard(0, other); return 'accepted'; } catch (e) { return e.message; } });
+    assert.match(bypass, /tsumogiri only/);
+    await page.locator('button[data-action="tsumogiri"]').tap();
+    st = await riState(page);
+    assert.equal(st.river0, 2);
+    await apForce(page, 1); await apForce(page, 2); await apForce(page, 3);
+    await riWaitTurn(page);
+    st = await riState(page);
+    assert.equal(st.p.canTsumo, true, '=1 を引いてツモ和了できる');
+    assert.ok(st.buttons.includes('tsumo') && st.buttons.includes('tsumogiri'));
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.waitForSelector('.result');
+    const res = await page.evaluate(() => { const { S } = window.__mathjong; const r = S.game.result; return { points: r.points, riichi: r.analysis.riichi, bonus: r.analysis.riichiBonus, delta: S.match.scores.map((x, i) => x - S.prevScores[i]) }; });
+    assert.equal(res.riichi, true);
+    assert.equal(res.bonus, 1);
+    const yakuText = await page.locator('.result .yaku').innerText();
+    assert.match(yakuText, /リーチ\s*\+1/);
+    assert.match(yakuText, new RegExp(`合計\\s*${res.points}点`));
+    // 親（自分）のツモ：子3人が 2×和了点ずつ（和了点はリーチ込み）
+    assert.deepEqual(res.delta, [6 * res.points, -2 * res.points, -2 * res.points, -2 * res.points]);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-A：リーチ（宣言・聴牌の牌だけ選択・やめる・ツモ切りだけ・エンジンも拒否・ツモで＋1・親の精算）数学Ⅰ・Ⅱ');
+
+  // (2) リーチ後は自分にチー・ポンの選択肢が出ない（上家の sin：リーチ前ならチー・ポンできる形）。ロンは出る
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    const hand = ['sin', 'sin', '30', '=1/2', 'cos', '180', '=-1', '45'];
+    await v3Scene(page, presetWall(hand, ['0', '=-1/√3', '=-√3/2', 'sin'], [RI_O1.map((x) => (x === 'sin' ? '135' : x)), RI_O2, RI_O3]));
+    await page.locator('button[data-action="riichi"]').tap();
+    const zeroId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'a:0'); });
+    await page.locator(`.hand .tile[data-id="${zeroId}"]`).tap();
+    await page.locator('button[data-action="riichi-discard"]').tap();
+    await apForce(page, 1); await apForce(page, 2);
+    await apForce(page, 3, 'f:sin');
+    const claim = await page.evaluate(() => { const g = window.__mathjong.S.game; const p = g.pending(); return p && p.seat === 0 && p.type === 'claim' ? { chi: p.chi.length, pon: !!p.pon } : null; });
+    assert.equal(claim, null, 'リーチ後は宣言待ちにならない（チー・ポンなし、ロンもない形）');
+    await riWaitTurn(page);
+    const st = await riState(page);
+    assert.ok(!st.buttons.includes('chi') && !st.buttons.includes('pon'));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-A：リーチ後はチー・ポンの選択肢が出ない');
+
+  // (3) AI のリーチ：聴牌した AI はリーチを宣言し、対戦画面に表示する（初級・中級・上級）
+  for (const ai of ['beginner', 'intermediate', 'advanced']) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await page.evaluate((a) => { window.__mathjong.S.matchSettings.ai = a; }, ai);
+    // 下家（席1）に聴牌の手（不要牌 0 をツモ）。自分はツモ切り
+    await v3Scene(page, presetWall(['=-1/√3', '=-1/√3', '=-√3/2', '=-√3/2', '=-1/√2', '=-1/√2', '=√3', '=√3'], ['=-1', '0'], [RI_HAND, RI_O2, RI_O3]));
+    await apDiscardDrawn(page);
+    await page.waitForFunction(() => window.__mathjong.S.game.riichi[1] !== null || window.__mathjong.S.game.rivers[1].length > 0, null, { timeout: 8000 });
+    const st = await riState(page);
+    assert.equal(st.riichi[1], true, `${ai}：下家がリーチ`);
+    assert.equal(await page.locator('.panel.seat-1 .riichi-badge').count(), 1, `${ai}：下家の表示にリーチ`);
+    assert.equal(await page.locator('.panel.seat-1 .river .tile.riichi-decl').count(), 1);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-A：AI のリーチ（初級・中級・上級）と対戦画面の表示');
+
+  // (4) 320／375／430px：リーチのボタン・宣言牌の選択・ツモ切りが画面に収まる
+  for (const w of [320, 375, 430]) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { viewport: { width: w, height: 700 } });
+    await v3Scene(page, presetWall(RI_HAND, ['0', '=-1/√3', '=-√3/2', '=-1/√2', '=-1/√3'], [RI_O1, RI_O2, RI_O3]));
+    for (const sel of ['button[data-action="riichi"]', 'button[data-action="discard"]']) {
+      const b = await page.locator(sel).boundingBox();
+      assert.ok(b && b.x >= 0 && b.x + b.width <= w + 0.5 && b.height >= 44, `${w}px ${sel} ${JSON.stringify(b)}`);
+    }
+    await page.locator('button[data-action="riichi"]').tap();
+    for (const sel of ['button[data-action="riichi-cancel"]', 'button[data-action="riichi-discard"]']) {
+      const b = await page.locator(sel).boundingBox();
+      assert.ok(b && b.x >= 0 && b.x + b.width <= w + 0.5 && b.height >= 44, `${w}px ${sel} ${JSON.stringify(b)}`);
+    }
+    await page.locator('.hand .tile.tap').first().tap();
+    await page.locator('button[data-action="riichi-discard"]').tap();
+    await apForce(page, 1); await apForce(page, 2); await apForce(page, 3);
+    await riWaitTurn(page);
+    const b = await page.locator('button[data-action="tsumogiri"]').boundingBox();
+    assert.ok(b && b.x + b.width <= w + 0.5 && b.height >= 44, `${w}px ツモ切り ${JSON.stringify(b)}`);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 0, `${w}px 横スクロール`);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v05-riichi-${w}.png` });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-A：320／375／430px（リーチ・宣言牌の選択・ツモ切り）');
+}
+
 async function v04End(browser) {
   const open = async (q) => {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -3553,7 +3703,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass };
+    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
   } else {
@@ -3587,6 +3737,7 @@ try {
   await v04End(browser);
   await v04bLevels(browser);
   await v04bPonAutoPass(browser);
+  await v05Riichi(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
