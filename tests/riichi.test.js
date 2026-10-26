@@ -205,3 +205,65 @@ test('旧規則（Ver.0.2.1 互換）ではリーチなし', () => {
   assert.throws(() => g.discard(0, findTile(g, 0, '0'), { riichi: true }), /riichi not possible/);
   void LEGACY;
 });
+
+// ---------------- AI のリーチ判断 ----------------
+import { decide, riichiDecision, applyAction } from '../src/engine/ai.js';
+import { createRng } from '../src/engine/rng.js';
+
+test('AI：聴牌になる打牌ならリーチ（初級・中級・上級、数学Ⅰ・Ⅱ）。宣言は合法', () => {
+  for (const mode of MODES) {
+    const r = rulesFor(mode);
+    for (const lv of ['beginner', 'intermediate', 'advanced']) {
+      const g = scene(r);
+      const a = decide(g, 0, 'speed', createRng(5), lv);
+      assert.equal(a.type, 'discard');
+      const opt = g.riichiOptions(0).some((o) => o.type === g.typeOf(a.tile));
+      // 初級は打牌を単純に選ぶので、聴牌が崩れる牌を捨てることもある（そのときはリーチしない）
+      assert.equal(!!a.riichi, opt, `${mode} ${lv}`);
+      if (lv !== 'beginner') assert.equal(a.riichi, true, `${mode} ${lv}：最善の打牌は聴牌`);
+      applyAction(g, 0, a);
+      assert.equal(!!g.riichi[0], !!a.riichi);
+      g.checkInvariants();
+    }
+  }
+});
+
+test('AI：待ちの牌が自分から見て残っていなければ、中級・上級はリーチしない（初級はする）', () => {
+  const r = rulesFor('math1');
+  const g = scene(r);
+  // =1 を全部（copies 枚）山から下家の河へ移す（公開情報で残り0枚。牌の総数・位置の不変条件は保つ）
+  const one = idx('=1', r);
+  const ids = g.wall.filter((id) => g.typeOf(id) === one);
+  assert.equal(ids.length, r.types[one].copies);
+  g.wall = g.wall.filter((id) => g.typeOf(id) !== one);
+  for (const id of ids) g.rivers[1].push({ id, tsumogiri: true });
+  const zero = findTile(g, 0, '0');
+  assert.equal(riichiDecision(g, 0, zero, 'beginner'), true, '初級：聴牌ならリーチ');
+  assert.equal(riichiDecision(g, 0, zero, 'intermediate'), false, '中級：待ちが残っていない');
+  assert.equal(riichiDecision(g, 0, zero, 'advanced'), false, '上級：待ちが残っていない');
+  // 45 を捨てる形（=0 待ち）は残っているのでリーチする
+  assert.equal(riichiDecision(g, 0, findTile(g, 0, '45'), 'intermediate'), true);
+  // 聴牌にならない打牌・旧規則ではリーチしない
+  assert.equal(riichiDecision(g, 0, findTile(g, 0, 'sin'), 'beginner'), false);
+  const legacy = makeGame({ hands: [TENPAI, O1, O2, O3], draws: ['0'] });
+  assert.equal(riichiDecision(legacy, 0, findTile(legacy, 0, '0'), 'beginner'), false);
+});
+
+test('AI：リーチ中はツモ切り、和了できればツモ（全難易度）。リーチ後に鳴かない', () => {
+  const r = rulesFor('math1');
+  for (const lv of ['beginner', 'intermediate', 'advanced']) {
+    const g = scene(r, { draws: ['0', '=-1/√3', '=-√3/2', '=-1/√2', '=0', '=-1/√3', '=-√3/2', '=-1/√2', '=1'] });
+    g.discard(0, findTile(g, 0, '0'), { riichi: true });
+    passAll(g);
+    aroundToSelf(g);
+    let a = decide(g, 0, 'value', createRng(1), lv);
+    assert.deepEqual(a, { type: 'discard', tile: g.drawn }, `${lv}：ツモ切り`);
+    applyAction(g, 0, a);
+    passAll(g);
+    aroundToSelf(g);
+    a = decide(g, 0, 'value', createRng(1), lv);
+    assert.deepEqual(a, { type: 'tsumo' }, `${lv}：ツモ和了`);
+    applyAction(g, 0, a);
+    assert.equal(g.result.analysis.riichi, true);
+  }
+});
