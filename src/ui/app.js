@@ -293,12 +293,13 @@ function fxScan() {
   if (pick.kind) fxFire(pick.kind, pick.event);
 }
 
-// 演出の中身（HTML）。簡易表示は文字だけ。牌は公開されている情報（鳴いた面子・和了牌）だけを使う。
-function fxHTML(kind, ev) {
+// 演出の中身（HTML）。簡易表示（lite）は文字だけ。牌は公開されている情報（鳴いた面子・和了牌）だけを使う。
+// lite は演出の開始時に決めた値（S.fx.current.lite）を渡す。設定をいま読み直さない。
+function fxHTML(kind, ev, lite) {
   const g = S.game;
   const word = `<div class="fx-word">${EFFECTS[kind].text}</div>`;
   const who = `<div class="fx-who">${nameOf(ev.seat)}</div>`;
-  if (fxLite()) return `<div class="fx-card">${word}${who}</div>`;
+  if (lite) return `<div class="fx-card">${word}${who}</div>`;
   if (kind === 'ron') {
     const tile = g.result && g.result.tile !== undefined ? `<div class="fx-wintile">${tileHTML(T(g.typeOf(g.result.tile)), { size: 'm' })}</div>` : '';
     return `<div class="fx-flash"></div><div class="fx-card">${word}${who}${tile}</div>`;
@@ -313,11 +314,15 @@ function fxFire(kind, ev) {
   const now = fxNow();
   if (!shouldReplace(S.fx.current, kind, now)) return;
   clearTimeout(S.fx.timer);
-  S.fx.current = { kind, startedAt: now, seat: ev.seat, tile: ev.tile };
+  // 通常／簡易の実効モード（設定＋OS の reduced motion）は、演出の開始時に1回だけ決めて保存する。
+  // 文字・牌・フラッシュ（レイヤー）と、盤面の揺れ・面子の発光（fxApply）は、終了まで同じ値を使う。
+  // 演出中に設定を変えても表示中の演出は変わらず、次に始まる演出から新しい設定になる。
+  const lite = fxLite();
+  S.fx.current = { kind, startedAt: now, seat: ev.seat, tile: ev.tile, lite };
   S.fx.history.push(kind);
   if (S.fx.history.length > 100) S.fx.history.shift();
-  fxLayer.className = `fx-${kind}${fxLite() ? ' lite' : ''}`;
-  fxLayer.innerHTML = fxHTML(kind, ev);
+  fxLayer.className = `fx-${kind}${lite ? ' lite' : ''}`;
+  fxLayer.innerHTML = fxHTML(kind, ev, lite);
   S.fx.timer = setTimeout(() => fxClear(), EFFECTS[kind].ms + 60);
   fxApply();
 }
@@ -332,7 +337,7 @@ function fxApply() {
   }
   const c = S.fx.current;
   const { active, elapsed } = fxProgress(c, fxNow());
-  if (!c || !active || fxLite() || !S.game) return;
+  if (!c || !active || c.lite || !S.game) return; // 簡易表示で始まった演出は、途中で設定が変わっても揺れ・発光を付けない
   if (c.kind === 'ron') {
     if (table) { table.classList.add('fx-shake'); table.style.animationDelay = `-${Math.round(elapsed)}ms`; }
     return;

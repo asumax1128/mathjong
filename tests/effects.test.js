@@ -106,3 +106,19 @@ test('構造：演出は #app の外の専用レイヤーに出し、タップ�
   const scan = app.slice(app.indexOf('function fxScan()'), app.indexOf('// 演出の中身（HTML）'));
   assert.ok(!/g\.(discard|respond|tsumo|pass)\(/.test(scan));
 });
+
+test('P2-1：通常／簡易の実効モードは演出の開始時に1回だけ決め、表示（レイヤー・揺れ・発光）がその保存値を使う', () => {
+  const app = readFileSync(new URL('../src/ui/app.js', import.meta.url), 'utf8');
+  // fxLite()（現在の設定の読み取り）は、演出を始める fxFire の1か所だけ
+  assert.equal((app.match(/fxLite\(\)/g) || []).length, 1, '現在の設定の読み取り（fxLite() の呼び出し）は fxFire の1回だけ（定義は fxLite = () => で別）');
+  const fire = app.slice(app.indexOf('function fxFire('), app.indexOf('// 盤面の演出（ロンの画面揺れ'));
+  assert.match(fire, /const lite = fxLite\(\);/);
+  assert.match(fire, /S\.fx\.current = \{[^}]*lite[^}]*\}/, '開始時のモードを S.fx.current に保存');
+  assert.match(fire, /fxHTML\(kind, ev, lite\)/, '文字・牌・フラッシュも同じ値');
+  // fxHTML と fxApply は保存値だけを見る（現在の設定を読み直さない）
+  const html = app.slice(app.indexOf('function fxHTML('), app.indexOf('// 演出を出す。'));
+  assert.ok(!html.includes('fxLite('));
+  const apply = app.slice(app.indexOf('function fxApply()'));
+  assert.ok(!apply.slice(0, apply.indexOf('\n}\n')).includes('fxLite('));
+  assert.match(apply, /c\.lite/);
+});

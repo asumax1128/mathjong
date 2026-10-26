@@ -3848,6 +3848,146 @@ async function v05bEffects(browser) {
   console.log('✓ Ver.0.5-B：320／375／430px で演出（ロン・ポン・チー）が画面内に収まる');
 }
 
+// ---- Ver.0.5-B Codex 監査 P2-1：演出中に「通常／簡易」を変えても、表示中の演出の表示は変わらない ----
+// 演出の見た目をまとめて返す：レイヤー（文字・牌・フラッシュ）と盤面（揺れ・発光）の両方
+const fxLook = (page) => page.evaluate(() => {
+  const l = document.getElementById('fx-layer');
+  return {
+    cls: l.className, flash: l.querySelectorAll('.fx-flash').length, win: l.querySelectorAll('.fx-wintile .tile').length, tiles: l.querySelectorAll('.fx-tiles .fx-t').length,
+    shake: document.querySelectorAll('.table.fx-shake').length, glow: document.querySelectorAll('.meld.fx-glow').length,
+    delay: (document.querySelector('.table.fx-shake') || document.querySelector('.meld.fx-glow') || { style: {} }).style.animationDelay || '',
+    cur: window.__mathjong.S.fx.current && { kind: window.__mathjong.S.fx.current.kind, lite: window.__mathjong.S.fx.current.lite, startedAt: window.__mathjong.S.fx.current.startedAt },
+    mode: window.__mathjong.S.fx.mode,
+  };
+});
+// 設定画面で通常／簡易を切り替える（実際の画面操作）。閉じると再描画される。
+async function fxSetMode(page, mode) {
+  await page.locator('button[data-action="settings"]').tap();
+  await page.locator('select[data-action="fx-mode"]').selectOption(mode);
+  await page.locator('.modal-actions button[data-action="close"]').tap();
+}
+// 盤面の準備（ポン・チー用に、下家の手牌に3枚ある局面）と演出の発火（本物のゲームの記録がなくても、演出だけを出す）
+const fxSceneFire = (page, kind) => page.evaluate((k) => {
+  const { S, fx } = window.__mathjong; const g = S.game;
+  if (k === 'ron') g.result = { ...(g.result || {}), tile: g.hands[0][0] };
+  else g.melds[1].push({ meld: 0, kind: 'formula', call: k, tiles: g.hands[1].slice(0, 3), claimed: g.hands[1][0], from: 0 });
+  fx.fire(k, { type: k === 'ron' ? 'win' : k, seat: 1, how: 'ron', from: 0, tile: g.hands[1][0] });
+}, kind);
+
+async function v05bFxModeFixed(browser) {
+  const hand = ['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'];
+  const wall = () => presetWall(hand, ['0', '=-1/√3'], [FX_O1, FX_O2, FX_O3]);
+  // A・B：ロン。通常 → 簡易、簡易 → 通常。ポン・チーも同じ（C）
+  for (const [from, to] of [['full', 'lite'], ['lite', 'full']]) {
+    for (const kind of ['ron', 'pon', 'chi']) {
+      const { ctx, page, errors } = await v3Page(browser, 'math1', { init: { fn: (m) => { try { localStorage.setItem('mj-effects', m); } catch { /* */ } }, arg: from } });
+      await v3Scene(page, wall());
+      await fxSceneFire(page, kind);
+      const where = `${from}→${to} ${kind}`;
+      const before = await fxLook(page);
+      assert.equal(before.cur.lite, from === 'lite', `${where}：開始時のモードを保存`);
+      assert.equal(before.cls, `fx-${kind}${from === 'lite' ? ' lite' : ''}`, where);
+      // 演出中に設定を変えて閉じる（再描画される）
+      await fxSetMode(page, to);
+      const after = await fxLook(page);
+      assert.equal(after.mode, to, `${where}：設定は変わる（次の演出から反映）`);
+      assert.equal(after.cur.lite, before.cur.lite, `${where}：表示中の演出のモードは変わらない`);
+      assert.equal(after.cur.startedAt, before.cur.startedAt, `${where}：同じ演出が続く（作り直さない）`);
+      assert.equal(after.cls, before.cls, `${where}：文字のレイヤーは変わらない`);
+      assert.deepEqual([after.flash, after.win, after.tiles], [before.flash, before.win, before.tiles], `${where}：フラッシュ・和了牌・3枚は変わらない`);
+      // 盤面の揺れ・発光：通常で始まった演出は続き、簡易で始まった演出は付かない（レイヤーと一致）
+      if (from === 'full') {
+        assert.equal(kind === 'ron' ? after.shake : after.glow, 1, `${where}：揺れ・発光が続く`);
+        assert.match(after.delay, /^-\d+ms$/, `${where}：開始時点からの経過で続きから再生する`);
+        assert.ok(parseInt(after.delay.slice(1), 10) >= 0);
+      } else {
+        assert.deepEqual([after.shake, after.glow], [0, 0], `${where}：簡易で始まった演出に、途中から揺れ・発光を付けない`);
+      }
+      // 次の演出は新しい設定（簡易 ↔ 通常）
+      await fxGone(page);
+      await fxSceneFire(page, kind);
+      const next = await fxLook(page);
+      assert.equal(next.cur.lite, to === 'lite', `${where}：次の演出は新しい設定`);
+      assert.equal(next.cls, `fx-${kind}${to === 'lite' ? ' lite' : ''}`, where);
+      if (to === 'lite') assert.deepEqual([next.flash, next.win, next.tiles, next.shake, next.glow], [0, 0, 0, 0, 0], `${where}：簡易は文字だけ`);
+      else assert.equal(kind === 'ron' ? next.shake : next.glow, 1, `${where}：通常は揺れ・発光あり`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  }
+  console.log('✓ Ver.0.5-B P2-1：演出中に通常／簡易を変えても、表示中の演出（文字・フラッシュ・牌・揺れ・発光）は変わらず、次の演出から新しい設定（ロン・ポン・チー、両方向）');
+
+  // reduced motion は演出開始時の判定で簡易表示に反映される。開始後に変わっても表示中の演出は変わらない
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?mode=math1&seed=1&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    await v3Scene(page, wall());
+    await fxSceneFire(page, 'ron');
+    let l = await fxLook(page);
+    assert.equal(l.cur.lite, true, 'reduced motion：開始時に簡易');
+    assert.equal(l.cls, 'fx-ron lite');
+    await page.emulateMedia({ reducedMotion: 'no-preference' }); // 演出中に OS の設定が変わっても
+    await page.evaluate(() => window.__mathjong.render());
+    l = await fxLook(page);
+    assert.deepEqual([l.cur.lite, l.cls, l.shake], [true, 'fx-ron lite', 0], '表示中の演出は簡易のまま（揺れを付けない）');
+    await fxGone(page);
+    await fxSceneFire(page, 'ron'); // 次の演出は新しい判定（通常）
+    l = await fxLook(page);
+    assert.deepEqual([l.cur.lite, l.cls, l.shake], [false, 'fx-ron', 1]);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-B P2-1：reduced motion は開始時の判定で簡易に反映、途中で変わっても表示中の演出は不変');
+
+  // 経過時間の維持：設定変更・再描画のあとも、演出の開始時刻・終了のタイマーは変わらず、終了時に消える
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, wall());
+    await fxSceneFire(page, 'ron');
+    const t0 = (await fxLook(page)).cur.startedAt;
+    await page.waitForTimeout(250);
+    await fxSetMode(page, 'lite');
+    await page.evaluate(() => window.__mathjong.render());
+    const l = await fxLook(page);
+    assert.equal(l.cur.startedAt, t0, '開始時刻は変わらない');
+    const d = parseInt(l.delay.slice(1), 10);
+    assert.ok(d >= 250 && d < 800, `経過 ${d}ms が続きから反映される（やり直さない）`);
+    await fxGone(page); // 元のタイマーで終了する
+    const e = await fxLook(page);
+    assert.deepEqual([e.cls, e.shake, e.glow, e.cur], ['', 0, 0, null]);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.fx.timer), null, 'タイマーは終了で止まる');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-B P2-1：設定変更・再描画のあとも開始時刻と経過が維持され、元のタイマーで終了する');
+
+  // 既存の確認：重なり（ロン＞ポン＞チー）・新しい局／タイトルで消去・設定の保存と再読み込み
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, wall());
+    await page.evaluate(() => {
+      const { S, fx } = window.__mathjong; const g = S.game; const e = (k) => ({ type: k, seat: 1, tile: g.hands[1][0], how: 'ron', from: 0 });
+      fx.fire('chi', e('chi')); fx.fire('pon', e('pon')); fx.fire('ron', { type: 'win', seat: 1, how: 'ron', from: 0 }); fx.fire('pon', e('pon'));
+    });
+    assert.deepEqual((await page.evaluate(() => [...window.__mathjong.S.fx.history])), ['chi', 'pon', 'ron'], 'ロン＞ポン＞チー');
+    await fxSetMode(page, 'lite');
+    assert.equal((await fxLook(page)).cur.kind, 'ron', '設定変更でも優先度の結果は変わらない');
+    await page.evaluate(() => window.__mathjong.startRound());
+    const cleared = await fxLook(page);
+    assert.deepEqual([cleared.cls, cleared.cur, cleared.shake], ['', null, 0], '新しい局で演出を消す');
+    assert.equal(await page.evaluate(() => localStorage.getItem('mj-effects')), 'lite', '設定は保存される');
+    await page.reload();
+    await page.waitForSelector('.hand .tile');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.fx.mode), 'lite', '再読み込みでも保持');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-B P2-1：重なり（ロン＞ポン＞チー）・新しい局での消去・設定の保存と再読み込みは従来どおり');
+}
+
 async function v04End(browser) {
   const open = async (q) => {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -3980,7 +4120,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects };
+    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
   } else {
@@ -4016,6 +4156,7 @@ try {
   await v04bPonAutoPass(browser);
   await v05Riichi(browser);
   await v05bEffects(browser);
+  await v05bFxModeFixed(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
