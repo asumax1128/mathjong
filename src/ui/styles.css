@@ -252,11 +252,12 @@ button.pon { display: inline-flex; align-items: center; gap: 6px; background: #6
 .confirm-title { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
 button.danger { background: #b42318; color: #fff; border-color: #b42318; }
 
-/* ---- タイトル画面（Ver.0.4-A）。ロゴは .title-logo の中身を画像に差し替える ---- */
-.title-screen { max-width: 520px; margin: 0 auto; padding: 24px 16px 32px; display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
-.title-logo { display: flex; flex-direction: column; align-items: center; gap: 2px; margin: 8px 0 0; }
-.title-logo .tl-main { font-size: 56px; font-weight: 800; letter-spacing: 0.12em; color: var(--gold); line-height: 1.1; }
-.title-logo .tl-sub { font-size: 16px; letter-spacing: 0.4em; color: var(--ink-dim); }
+/* ---- タイトル画面（Ver.0.4-A）。ロゴ（Ver.0.5-C）は正式採用の画像（背景透過 PNG、4:3）。比率は変えず、枠に収めて表示する ---- */
+.title-screen { max-width: 520px; margin: 0 auto; padding: 16px 16px 32px; display: flex; flex-direction: column; align-items: stretch; gap: 12px; }
+.title-logo { display: flex; justify-content: center; margin: 0; }
+/* 幅は「画面の幅・380px・高さの 40%（4:3 なので高さの 30%）」の最小値。枠も常に 4:3 で、画像は歪まず余白も出ない */
+.title-logo-img { display: block; width: min(100%, 380px, 40vh); height: auto; }
+@media (orientation: landscape) and (max-height: 500px) { .title-logo-img { width: min(100%, 380px, 58vh); } }
 .title-lead { text-align: center; margin: 0; color: var(--ink-dim); font-size: 13px; }
 .title-form { display: flex; flex-direction: column; gap: 8px; }
 .title-set { border: 1px solid var(--felt-line); border-radius: 10px; padding: 4px 12px 8px; margin: 0; }
@@ -408,7 +409,7 @@ table.values td.undef { color: #999; font-size: 12px; }
    ロン ＞ ポン ＞ チーの順に派手。簡易表示（.lite）・視差の少ない設定では文字だけ。 */
 #fx-layer { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 100; pointer-events: none; overflow: hidden;
   display: none; align-items: center; justify-content: center; }
-#fx-layer.fx-ron, #fx-layer.fx-pon, #fx-layer.fx-chi { display: flex; }
+#fx-layer.fx-ron, #fx-layer.fx-tsumo, #fx-layer.fx-pon, #fx-layer.fx-chi { display: flex; }
 #fx-layer .fx-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 100%; padding: 0 8px; text-align: center; }
 #fx-layer .fx-word { font-weight: 900; line-height: 1.05; letter-spacing: 0.04em; white-space: nowrap; }
 #fx-layer .fx-who { font-size: 15px; font-weight: 700; color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7); }
@@ -444,6 +445,27 @@ table.values td.undef { color: #999; font-size: 12px; }
   100% { transform: translate3d(0, 0, 0); }
 }
 
+/* ツモ（Ver.0.5-C）：ロンと同格（1.0秒）。青白〜金で、ロン（赤金）と見分ける。自力で引き当てた神秘感として、閃光に光の輪を重ねる */
+#fx-layer.fx-tsumo .fx-word { font-size: clamp(60px, 26vw, 140px); color: #f4fbff;
+  text-shadow: 0 0 10px #7fd0ff, 0 0 28px #3a9bff, 0 0 56px #4f7dff, 0 0 18px #ffd86a, 0 3px 0 #0b2a66;
+  animation: fx-tsumo-word 1000ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-tsumo .fx-wintile .tile { animation: fx-pop 1000ms ease-out both; box-shadow: 0 0 18px 5px rgba(150, 215, 255, 0.95), 0 0 30px 8px rgba(255, 214, 110, 0.55); }
+#fx-layer.fx-tsumo .fx-flash { position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: radial-gradient(circle at 50% 50%, rgba(235, 248, 255, 0.95), rgba(110, 190, 255, 0.55) 40%, rgba(255, 215, 110, 0.25) 62%, rgba(80, 120, 255, 0) 78%);
+  animation: fx-flash 560ms ease-out both; }
+#fx-layer.fx-tsumo .fx-halo { position: absolute; left: 50%; top: 50%; width: 70vmin; height: 70vmin; margin: -35vmin 0 0 -35vmin; border-radius: 50%;
+  border: 4px solid rgba(190, 230, 255, 0.95); box-shadow: 0 0 26px 8px rgba(120, 190, 255, 0.8), inset 0 0 26px 6px rgba(255, 220, 130, 0.6);
+  animation: fx-halo 900ms ease-out both; }
+@keyframes fx-tsumo-word {
+  0% { opacity: 0; transform: scale(0.4); filter: blur(6px); }
+  18% { opacity: 1; transform: scale(1.18); filter: blur(0); }
+  32% { transform: scale(0.97); }
+  44% { transform: scale(1); }
+  86% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.06); }
+}
+@keyframes fx-halo { 0% { opacity: 0; transform: scale(0.15); } 12% { opacity: 1; } 100% { opacity: 0; transform: scale(2.1); } }
+
 /* ポン：中くらい（0.52秒）。3枚が左右・上から集まって衝撃。面子が金色に光る */
 #fx-layer.fx-pon .fx-word { font-size: clamp(52px, 21vw, 112px); color: #ffeab0;
   text-shadow: 0 0 10px #ffc04a, 0 0 26px #ff9a1c, 0 3px 0 #7a4a00;
@@ -473,7 +495,7 @@ table.values td.undef { color: #999; font-size: 12px; }
 
 /* 簡易表示・視差の少ない設定：文字だけ（フラッシュ・揺れ・牌・発光なし）。動きは不透明度のみ。 */
 #fx-layer.lite .fx-word { animation-name: fx-lite !important; }
-#fx-layer.lite .fx-flash, #fx-layer.lite .fx-tiles, #fx-layer.lite .fx-wintile { display: none; }
+#fx-layer.lite .fx-flash, #fx-layer.lite .fx-halo, #fx-layer.lite .fx-tiles, #fx-layer.lite .fx-wintile { display: none; }
 @keyframes fx-lite { 0% { opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
 @media (prefers-reduced-motion: reduce) {
   .table.fx-shake, .meld.fx-glow-pon, .meld.fx-glow-chi { animation: none; }
@@ -481,3 +503,7 @@ table.values td.undef { color: #999; font-size: 12px; }
 @media (max-width: 360px) {
   #fx-layer .fx-who { font-size: 13px; }
 }
+
+/* 演出の画面揺れ（盤面を ±5px 動かす）で、一瞬ページが横にはみ出して横スクロールできてしまわないよう、はみ出しを切る。
+   clip はスクロールの枠を作らないので、画面下に貼り付く操作バー（sticky）や重ねて表示する画面（fixed）には影響しない。 */
+#app { overflow-x: clip; }

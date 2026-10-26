@@ -21,7 +21,7 @@ import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, pickEffect, shouldReplace, f
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
-const APP_VERSION = '0.5.0-b';
+const APP_VERSION = '0.5.0-c';
 document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`;
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -300,9 +300,11 @@ function fxHTML(kind, ev, lite) {
   const word = `<div class="fx-word">${EFFECTS[kind].text}</div>`;
   const who = `<div class="fx-who">${nameOf(ev.seat)}</div>`;
   if (lite) return `<div class="fx-card">${word}${who}</div>`;
-  if (kind === 'ron') {
+  if (kind === 'ron' || kind === 'tsumo') {
+    // 和了牌（ロンは打牌、ツモは引いた牌）を大きく見せる。ツモは閃光に加えて、広がる光の輪（halo）を重ねる
     const tile = g.result && g.result.tile !== undefined ? `<div class="fx-wintile">${tileHTML(T(g.typeOf(g.result.tile)), { size: 'm' })}</div>` : '';
-    return `<div class="fx-flash"></div><div class="fx-card">${word}${who}${tile}</div>`;
+    const halo = kind === 'tsumo' ? '<div class="fx-halo"></div>' : '';
+    return `<div class="fx-flash"></div>${halo}<div class="fx-card">${word}${who}${tile}</div>`;
   }
   const meld = g.melds[ev.seat].find((m) => m.claimed === ev.tile) || g.melds[ev.seat][g.melds[ev.seat].length - 1];
   const tiles = meld ? meld.tiles.map((id, i) => `<span class="fx-t fx-t${i + 1}">${tileHTML(T(g.typeOf(id)), { size: 'm' })}</span>`).join('') : '';
@@ -338,7 +340,7 @@ function fxApply() {
   const c = S.fx.current;
   const { active, elapsed } = fxProgress(c, fxNow());
   if (!c || !active || c.lite || !S.game) return; // 簡易表示で始まった演出は、途中で設定が変わっても揺れ・発光を付けない
-  if (c.kind === 'ron') {
+  if (c.kind === 'ron' || c.kind === 'tsumo') {
     if (table) { table.classList.add('fx-shake'); table.style.animationDelay = `-${Math.round(elapsed)}ms`; }
     return;
   }
@@ -710,11 +712,12 @@ function replayErrorHTML() {
 }
 
 // ---------- タイトル画面 ----------
-// ロゴは後日画像に差し替える（.title-logo の中身だけを置き換えればよい構造）
+// タイトルロゴ（Ver.0.5-C）：正式採用の画像（背景透過 PNG、4:3）。画面の幅と解像度に合わせて3つの大きさ（724・1084・1448 幅、
+// 縮小は比率・色を変えない）から選ぶ。width・height は元画像の大きさ（読み込み前から枠の比率を確保して表示のずれを防ぐ）。
 function titleHTML() {
   const radio = (name, value, label, checked, extra = '') => `<label class="setting radio"><input type="radio" name="${name}" value="${value}" data-action="title-${name}" ${checked ? 'checked' : ''}><span>${label}${extra}</span></label>`;
   return `<main class="title-screen">
-    <div class="title-logo" role="img" aria-label="数雀（MATHJONG）"><span class="tl-main">数雀</span><span class="tl-sub">MATHJONG</span></div>
+    <div class="title-logo"><img class="title-logo-img" src="src/ui/title-logo-1084.png" srcset="src/ui/title-logo-724.png 724w, src/ui/title-logo-1084.png 1084w, src/ui/title-logo-1448.png 1448w" sizes="(max-width: 480px) 80vw, 380px" width="1448" height="1086" alt="数雀（MATHJONG）" decoding="async"></div>
     <p class="title-lead">三角関数の牌で遊ぶ4人麻雀</p>
     <div class="title-form">
       <fieldset class="title-set"><legend>数学モード</legend>

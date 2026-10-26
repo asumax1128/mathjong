@@ -10,8 +10,11 @@ import { decide, applyAction } from '../src/engine/ai.js';
 import { createRng } from '../src/engine/rng.js';
 import { rulesFor } from './helpers.js';
 
-test('演出の仕様：ロン 0.8秒・ポン 0.52秒・チー 0.42秒、優先度 ロン ＞ ポン ＞ チー（指示の長さの範囲内）', () => {
-  assert.deepEqual(Object.keys(EFFECTS), ['ron', 'pon', 'chi']);
+test('演出の仕様：ロン 0.8秒・ツモ 1.0秒・ポン 0.52秒・チー 0.42秒、優先度 ロン・ツモ ＞ ポン ＞ チー（指示の長さの範囲内）', () => {
+  assert.deepEqual(Object.keys(EFFECTS), ['ron', 'tsumo', 'pon', 'chi']);
+  assert.ok(EFFECTS.tsumo.ms >= 900 && EFFECTS.tsumo.ms <= 1100, 'ツモはロンと同程度（0.9〜1.1秒）');
+  assert.equal(EFFECTS.tsumo.prio, EFFECTS.ron.prio, 'ツモはロンと同格');
+  assert.equal(EFFECTS.tsumo.text, 'ツモ！');
   assert.ok(EFFECTS.ron.ms >= 600 && EFFECTS.ron.ms <= 900);
   assert.ok(EFFECTS.pon.ms >= 450 && EFFECTS.pon.ms <= 600);
   assert.ok(EFFECTS.chi.ms >= 350 && EFFECTS.chi.ms <= 500);
@@ -19,11 +22,12 @@ test('演出の仕様：ロン 0.8秒・ポン 0.52秒・チー 0.42秒、優先
   assert.deepEqual([EFFECTS.ron.text, EFFECTS.pon.text, EFFECTS.chi.text], ['ロン！', 'ポン！', 'チー！']);
 });
 
-test('記録 → 演出の種類：ロン・ポン・チーだけ。ツモ和了・打牌・ツモ・流局・リーチは出さない', () => {
+test('記録 → 演出の種類：ロン・ツモ和了・ポン・チーだけ。打牌・ツモ（牌を引く）・流局・リーチ宣言は出さない', () => {
   assert.equal(effectKindOf({ type: 'win', seat: 1, how: 'ron', from: 0 }), 'ron');
+  assert.equal(effectKindOf({ type: 'win', seat: 1, how: 'tsumo', from: null }), 'tsumo');
   assert.equal(effectKindOf({ type: 'pon', seat: 2 }), 'pon');
   assert.equal(effectKindOf({ type: 'chi', seat: 1 }), 'chi');
-  for (const e of [{ type: 'win', how: 'tsumo' }, { type: 'discard' }, { type: 'draw' }, { type: 'riichi' }, { type: 'exhaustive-draw' }, null, undefined]) assert.equal(effectKindOf(e), null);
+  for (const e of [{ type: 'win', how: 'unknown' }, { type: 'discard' }, { type: 'draw' }, { type: 'riichi' }, { type: 'exhaustive-draw' }, null, undefined]) assert.equal(effectKindOf(e), null);
 });
 
 test('pickEffect：新しい記録だけを見る。同じ記録で2回出さない。優先度が高いものを選ぶ。別の局（記録が短い）は数え直す', () => {
@@ -73,7 +77,7 @@ test('設定：保存キー mj-effects、"lite" だけが簡易。未保存・�
 });
 
 test('実際の対局：数学Ⅰ・Ⅱの AI 対局の記録からロン・ポン・チーを検出し、演出の有無でゲームの結果が変わらない（記録は読むだけ）', () => {
-  const seen = { ron: 0, pon: 0, chi: 0 };
+  const seen = { ron: 0, tsumo: 0, pon: 0, chi: 0 };
   for (const mode of ['math1', 'math2']) {
     const r = rulesFor(mode);
     for (let i = 0; i < 12; i++) {
@@ -92,7 +96,7 @@ test('実際の対局：数学Ⅰ・Ⅱの AI 対局の記録からロン・ポ�
       assert.equal(run(true), run(false), `${mode} 局${i}：演出の判定は記録を変えない`);
     }
   }
-  assert.ok(seen.ron > 0 && seen.pon + seen.chi > 0, JSON.stringify(seen));
+  assert.ok(seen.ron > 0 && seen.tsumo > 0 && seen.pon + seen.chi > 0, JSON.stringify(seen));
 });
 
 test('構造：演出は #app の外の専用レイヤーに出し、タップを通す。ゲームの判定・得点・進行のコードを呼ばない', () => {
