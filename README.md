@@ -53,6 +53,7 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 | [Ver.0.4-B AI難易度＋ポンのオートパス](docs/17-ver0.4-b-ai-autopass.md) | 初級・中級・上級の AI、強さの検証、チー・ポンのオートパスの統合（開発中） |
 | [Ver.0.5-A（仮）リーチ＋自動パス切替](docs/20-ver0.5-a-riichi-autopass-toggle.md) | リーチ（宣言・ツモ切り・＋1点・AI）、対戦画面のチー・ポン自動パス切替（Draft PR・監査待ち） |
 | [Ver.0.5-B（仮）ロン・ポン・チーの演出](docs/21-ver0.5-b-call-effects.md) | ロン・ポン・チーの視覚演出（CSS 中心・簡易表示あり）。Draft PR・監査待ち |
+| [Ver.0.5-C（仮）タイトル画像＋ツモ演出](docs/22-ver0.5-c-title-tsumo.md) | 正式採用のタイトル画像（背景透過 PNG、画面に合わせて3つの大きさから選択）、ツモ演出の強化。Draft PR・監査待ち |
 | [iPhone 実機テスト手順](docs/12-iphone-test-guide.md) | テストURL、Pages 設定、固定seed、報告方法 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |
