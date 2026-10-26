@@ -17,10 +17,11 @@ import { CHI_AUTOPASS_KEY, PON_AUTOPASS_KEY, parseChiAutoPass, parsePonAutoPass,
 import { YAKU_GUIDE, GUIDE_NOTES, guideCondition } from './guide.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, MAX_ROUND } from './params.js';
 import { validateReplay, replayQuery } from './replay.js';
+import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, pickEffect, shouldReplace, fxProgress, isLiteEffect } from './effects.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
-const APP_VERSION = '0.5.0-a';
+const APP_VERSION = '0.5.0-b';
 document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`;
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -87,6 +88,9 @@ const S = {
 };
 
 S.speed = resolveSpeed(params.get('speed'), store.get('mj-speed', null), IS_LOCAL);
+// ロン・ポン・チーの演出（Ver.0.5-B）。画面だけの機能で、ゲームの進行・判定・得点には関わらない。
+// mode：'full'（通常）／'lite'（簡易：文字だけ）。seen：演出を判定済みの記録（Game.events）の件数。history：出した演出（確認用）。
+S.fx = { mode: parseEffectMode(store.get(EFFECT_MODE_KEY, null)), seen: 0, serial: -1, current: null, timer: null, history: [] };
 // 対局中のモード（S.mode）と、次の新しい対局で使うモード（S.nextMode）
 S.mode = parseMode(params.get('mode')) || parseMode(store.get(MODE_KEY, null)) || DEFAULT_MODE;
 S.nextMode = S.mode;
@@ -132,6 +136,7 @@ function startRound() {
   S.scored = false;
   S.claimPolicy = null; // 宣言ごとの表示方針（局ごとに初期化）
   S.riichiSelect = false; // リーチの宣言牌を選んでいる途中か（局ごとに初期化）
+  fxClear(); // 前の局の演出を残さない
   S.autoPass.noticePending = false;
   S.autoPass.noticeKind = null;
   S.autoPass.noticeKey = null;
@@ -161,6 +166,7 @@ function step(changed = false) {
   clearTimeout(S.timer);
   S.timer = null;
   if (!S.game) return; // タイトル画面へ戻った後（遅れて呼ばれた step は何もしない）
+  fxScan(); // ゲームの記録に新しいロン・ポン・チーがあれば演出を出す（ゲーム状態は読むだけ）
   // 手牌の並び替え（dragging）中は AI を進めない。指を離すか中止した時点で step() を1回だけ呼び直す。
   // AI の判断・乱数は局面だけで決まるので、待つ時間は結果に影響しない。
   if (drag && drag.isDragging()) { S.stepDeferred = true; return; }
@@ -253,6 +259,87 @@ function humanAct(action) {
   S.riichiSelect = false;
   render();
   step();
+}
+
+// ---------- ロン・ポン・チーの演出（Ver.0.5-B） ----------
+// 表示は #app の外の専用レイヤー（#fx-layer）に出す。render() が #app の中身を作り直しても演出は途切れず、操作も妨げない
+// （pointer-events: none）。ゲームの状態は読むだけで、演出の有無・長さが進行・判定・得点に影響することはない。
+const fxLayer = document.createElement('div');
+fxLayer.id = 'fx-layer';
+fxLayer.setAttribute('aria-hidden', 'true');
+document.body.appendChild(fxLayer);
+
+const fxReduced = () => { try { return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch { return false; } };
+const fxLite = () => isLiteEffect(S.fx.mode, fxReduced());
+const fxNow = () => performance.now();
+
+// 演出を消す（新しい局・タイトルへ戻る・演出の終了）
+function fxClear() {
+  clearTimeout(S.fx.timer);
+  S.fx.timer = null;
+  S.fx.current = null;
+  fxLayer.className = '';
+  fxLayer.innerHTML = '';
+  fxApply();
+}
+
+// ゲームの記録に新しいロン・ポン・チーがあれば演出を出す。同じ記録で2回は出さない。別の局（記録が短くなった）は数え直す。
+function fxScan() {
+  const g = S.game;
+  if (!g) return;
+  if (S.fx.serial !== S.gameSerial) { S.fx.serial = S.gameSerial; S.fx.seen = 0; }
+  const pick = pickEffect(g.events, S.fx.seen);
+  S.fx.seen = pick.next;
+  if (pick.kind) fxFire(pick.kind, pick.event);
+}
+
+// 演出の中身（HTML）。簡易表示は文字だけ。牌は公開されている情報（鳴いた面子・和了牌）だけを使う。
+function fxHTML(kind, ev) {
+  const g = S.game;
+  const word = `<div class="fx-word">${EFFECTS[kind].text}</div>`;
+  const who = `<div class="fx-who">${nameOf(ev.seat)}</div>`;
+  if (fxLite()) return `<div class="fx-card">${word}${who}</div>`;
+  if (kind === 'ron') {
+    const tile = g.result && g.result.tile !== undefined ? `<div class="fx-wintile">${tileHTML(T(g.typeOf(g.result.tile)), { size: 'm' })}</div>` : '';
+    return `<div class="fx-flash"></div><div class="fx-card">${word}${who}${tile}</div>`;
+  }
+  const meld = g.melds[ev.seat].find((m) => m.claimed === ev.tile) || g.melds[ev.seat][g.melds[ev.seat].length - 1];
+  const tiles = meld ? meld.tiles.map((id, i) => `<span class="fx-t fx-t${i + 1}">${tileHTML(T(g.typeOf(id)), { size: 'm' })}</span>`).join('') : '';
+  return `<div class="fx-card">${word}${who}<div class="fx-tiles">${tiles}</div></div>`;
+}
+
+// 演出を出す。表示中のより優先度の高い演出（ロン）は、後から来た低い演出（ポン・チー）で潰さない。
+function fxFire(kind, ev) {
+  const now = fxNow();
+  if (!shouldReplace(S.fx.current, kind, now)) return;
+  clearTimeout(S.fx.timer);
+  S.fx.current = { kind, startedAt: now, seat: ev.seat, tile: ev.tile };
+  S.fx.history.push(kind);
+  if (S.fx.history.length > 100) S.fx.history.shift();
+  fxLayer.className = `fx-${kind}${fxLite() ? ' lite' : ''}`;
+  fxLayer.innerHTML = fxHTML(kind, ev);
+  S.fx.timer = setTimeout(() => fxClear(), EFFECTS[kind].ms + 60);
+  fxApply();
+}
+
+// 盤面の演出（ロンの画面揺れ・ポン／チーの面子の発光）を、いまの演出の経過に合わせて付け外しする。
+// 再描画で作り直された要素にも、経過分だけアニメーションをずらして続きから再生する（再描画でやり直さない）。
+function fxApply() {
+  const table = app.querySelector('.table');
+  for (const el of app.querySelectorAll('.fx-shake, .fx-glow')) {
+    el.classList.remove('fx-shake', 'fx-glow', 'fx-glow-pon', 'fx-glow-chi');
+    el.style.removeProperty('animation-delay');
+  }
+  const c = S.fx.current;
+  const { active, elapsed } = fxProgress(c, fxNow());
+  if (!c || !active || fxLite() || !S.game) return;
+  if (c.kind === 'ron') {
+    if (table) { table.classList.add('fx-shake'); table.style.animationDelay = `-${Math.round(elapsed)}ms`; }
+    return;
+  }
+  const sel = c.seat === HUMAN ? '.self .melds .meld:last-child' : `.panel.seat-${c.seat} .melds .meld:last-child`;
+  const el = app.querySelector(sel);
+  if (el) { el.classList.add('fx-glow', `fx-glow-${c.kind}`); el.style.animationDelay = `-${Math.round(elapsed)}ms`; }
 }
 
 // ---------- 描画 ----------
@@ -495,6 +582,7 @@ function render() {
     <footer class="bar">${actionsHTML()}</footer>
     ${modalHTML()}
   `;
+  fxApply(); // 再描画で作り直された要素にも、演出中なら続きから発光・揺れを付ける
 }
 
 // ---------- モーダル ----------
@@ -755,6 +843,7 @@ function settingsHTML() {
       <p class="note mode-note">いまの対局：${modeLabel(rules)}。${S.nextMode !== rules.config.mode && !LEGACY ? '下の「新しい対局」で切り替わります（いまの局は変わりません）。' : 'モードの変更は「新しい対局」から反映されます。'}</p>
     </fieldset>
     <label class="setting">AIの速さ <select data-action="speed">${publicSpeedNames().map(opt).join('')}</select></label>
+    <label class="setting">ロン・ポン・チーの演出 <select data-action="fx-mode"><option value="full" ${S.fx.mode === 'full' ? 'selected' : ''}>通常</option><option value="lite" ${S.fx.mode === 'lite' ? 'selected' : ''}>簡易（文字だけ）</option></select></label>
     <p class="note setting-note">チー・ポンの自動パスは、対戦画面の手牌の下のボタンで切り替えます（いま：チー ${S.chiAutoPass ? 'ON' : 'OFF'}・ポン ${S.ponAutoPass ? 'ON' : 'OFF'}）。チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。</p>
     ${reportInfoHTML()}
     <div class="modal-actions"><button data-action="reset">新しい対局（得点リセット）</button>
@@ -1027,6 +1116,7 @@ app.addEventListener('click', (ev) => {
       S.timer = null;
       if (drag && drag.isDragging()) drag.cancel('render');
       closeHint();
+      fxClear();
       S.confirmTitle = false;
       S.modal = null;
       S.game = null;
@@ -1043,6 +1133,11 @@ app.addEventListener('click', (ev) => {
 });
 
 app.addEventListener('change', (ev) => {
+  if (ev.target.dataset.action === 'fx-mode') {
+    // 値の保存だけ（ゲームは進めない）。表示中の演出は変えず、次の演出から反映する。
+    S.fx.mode = parseEffectMode(ev.target.value);
+    store.set(EFFECT_MODE_KEY, S.fx.mode);
+  }
   if (ev.target.dataset.action === 'speed') {
     S.speed = resolveSpeed(ev.target.value, null, false);
     store.set('mj-speed', S.speed);
@@ -1104,7 +1199,7 @@ function goRound(n, dealer = (n - 1) % 4) {
   S.round = n;
   startRound();
 }
-if (IS_LOCAL) window.__mathjong = { S, get rules() { return rules; }, decide, startRound, startMatch, goRound, render, step, drag };
+if (IS_LOCAL) window.__mathjong = { S, get rules() { return rules; }, decide, startRound, startMatch, goRound, render, step, drag, fx: { fire: fxFire, clear: fxClear, scan: fxScan } };
 
 // 試合を始める。fromUrl：?seed= の再現・テスト用 URL（親番・連荘・親の席を URL から）
 // settings：{ mode, length, ai } 試合の設定（採用元は呼び出し側が決める：タイトル／もう一度遊ぶ／設定画面）

@@ -402,3 +402,82 @@ table.values td.undef { color: #999; font-size: 12px; }
   .hand-help .hh-tools { gap: 4px; }
   .hand-help button.small { padding: 0 8px; }
 }
+
+/* ===== Ver.0.5-B：ロン・ポン・チーの演出 =====
+   専用レイヤー #fx-layer（#app の外・タップを通す）に出す。transform・opacity だけを動かし、軽く保つ。
+   ロン ＞ ポン ＞ チーの順に派手。簡易表示（.lite）・視差の少ない設定では文字だけ。 */
+#fx-layer { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 100; pointer-events: none; overflow: hidden;
+  display: none; align-items: center; justify-content: center; }
+#fx-layer.fx-ron, #fx-layer.fx-pon, #fx-layer.fx-chi { display: flex; }
+#fx-layer .fx-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 100%; padding: 0 8px; text-align: center; }
+#fx-layer .fx-word { font-weight: 900; line-height: 1.05; letter-spacing: 0.04em; white-space: nowrap; }
+#fx-layer .fx-who { font-size: 15px; font-weight: 700; color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7); }
+#fx-layer .fx-tiles, #fx-layer .fx-wintile { display: flex; gap: 4px; justify-content: center; }
+#fx-layer .fx-tiles .fx-t, #fx-layer .fx-wintile .tile { box-shadow: 0 0 12px 2px rgba(255, 255, 255, 0.55); }
+
+/* ロン：最も派手（0.8秒）。赤〜金の発光・フラッシュ・軽い画面揺れ・和了牌を大きく */
+#fx-layer.fx-ron .fx-word { font-size: clamp(60px, 26vw, 140px); color: #fff3c4;
+  text-shadow: 0 0 10px #ffb02e, 0 0 28px #ff4a1c, 0 0 56px #ff2d1a, 0 3px 0 #8a1500;
+  animation: fx-ron-word 800ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-ron .fx-wintile .tile { animation: fx-pop 800ms ease-out both; box-shadow: 0 0 16px 4px rgba(255, 190, 70, 0.9); }
+#fx-layer.fx-ron .fx-flash { position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: radial-gradient(circle at 50% 50%, rgba(255, 230, 140, 0.9), rgba(255, 70, 30, 0.5) 45%, rgba(255, 40, 20, 0) 75%);
+  animation: fx-flash 480ms ease-out both; }
+@keyframes fx-ron-word {
+  0% { opacity: 0; transform: scale(2.6); }
+  16% { opacity: 1; transform: scale(0.9); }
+  28% { transform: scale(1.1); }
+  40% { transform: scale(1); }
+  82% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.08); }
+}
+@keyframes fx-flash { 0% { opacity: 0; } 14% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-pop { 0% { opacity: 0; transform: scale(0.4); } 25% { opacity: 1; transform: scale(1.25); } 40% { transform: scale(1); } 82% { opacity: 1; } 100% { opacity: 0; } }
+.table.fx-shake { animation: fx-shake 520ms linear both; animation-delay: 60ms; }
+@keyframes fx-shake {
+  0% { transform: translate3d(0, 0, 0); }
+  12% { transform: translate3d(-5px, 2px, 0); }
+  27% { transform: translate3d(5px, -2px, 0); }
+  42% { transform: translate3d(-4px, 1px, 0); }
+  57% { transform: translate3d(3px, -1px, 0); }
+  72% { transform: translate3d(-2px, 1px, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+
+/* ポン：中くらい（0.52秒）。3枚が左右・上から集まって衝撃。面子が金色に光る */
+#fx-layer.fx-pon .fx-word { font-size: clamp(52px, 21vw, 112px); color: #ffeab0;
+  text-shadow: 0 0 10px #ffc04a, 0 0 26px #ff9a1c, 0 3px 0 #7a4a00;
+  animation: fx-pon-word 520ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-pon .fx-t1 { animation: fx-pon-l 520ms ease-out both; }
+#fx-layer.fx-pon .fx-t2 { animation: fx-pon-c 520ms ease-out both; }
+#fx-layer.fx-pon .fx-t3 { animation: fx-pon-r 520ms ease-out both; }
+@keyframes fx-pon-word { 0% { opacity: 0; transform: scale(1.9); } 24% { opacity: 1; transform: scale(0.94); } 40% { transform: scale(1.04); } 55% { transform: scale(1); } 85% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-pon-l { 0% { opacity: 0; transform: translate3d(-90px, 0, 0); } 35% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.08); } 50% { transform: scale(1); } 85% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-pon-r { 0% { opacity: 0; transform: translate3d(90px, 0, 0); } 35% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.08); } 50% { transform: scale(1); } 85% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-pon-c { 0% { opacity: 0; transform: translate3d(0, 40px, 0); } 35% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.12); } 50% { transform: scale(1); } 85% { opacity: 1; } 100% { opacity: 0; } }
+.meld.fx-glow-pon { animation: fx-glow-pon 520ms ease-out both; }
+@keyframes fx-glow-pon { 0% { box-shadow: 0 0 0 0 rgba(255, 190, 70, 0); } 20% { box-shadow: 0 0 14px 5px rgba(255, 190, 70, 0.95); } 100% { box-shadow: 0 0 0 0 rgba(255, 190, 70, 0); } }
+
+/* チー：ポンより軽く素早い（0.42秒）。青〜緑で、左から流れるように */
+#fx-layer.fx-chi .fx-word { font-size: clamp(44px, 18vw, 92px); color: #d9f7ff;
+  text-shadow: 0 0 10px #3ec6ff, 0 0 24px #2fd49a, 0 3px 0 #0b4a52;
+  animation: fx-chi-word 420ms cubic-bezier(.25, .8, .3, 1) both; }
+#fx-layer.fx-chi .fx-t1 { animation: fx-chi-t 420ms ease-out both; }
+#fx-layer.fx-chi .fx-t2 { animation: fx-chi-t 420ms ease-out 45ms both; }
+#fx-layer.fx-chi .fx-t3 { animation: fx-chi-t 420ms ease-out 90ms both; }
+#fx-layer.fx-chi .fx-tiles .fx-t { box-shadow: 0 0 12px 2px rgba(80, 210, 230, 0.7); }
+@keyframes fx-chi-word { 0% { opacity: 0; transform: translate3d(-40px, 0, 0); } 30% { opacity: 1; transform: translate3d(0, 0, 0); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate3d(24px, 0, 0); } }
+@keyframes fx-chi-t { 0% { opacity: 0; transform: translate3d(-44px, 0, 0); } 35% { opacity: 1; transform: translate3d(0, 0, 0); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate3d(14px, 0, 0); } }
+.meld.fx-glow-chi { animation: fx-glow-chi 420ms ease-out both; }
+@keyframes fx-glow-chi { 0% { box-shadow: 0 0 0 0 rgba(70, 200, 230, 0); } 20% { box-shadow: 0 0 12px 4px rgba(70, 200, 230, 0.95); } 100% { box-shadow: 0 0 0 0 rgba(70, 200, 230, 0); } }
+
+/* 簡易表示・視差の少ない設定：文字だけ（フラッシュ・揺れ・牌・発光なし）。動きは不透明度のみ。 */
+#fx-layer.lite .fx-word { animation-name: fx-lite !important; }
+#fx-layer.lite .fx-flash, #fx-layer.lite .fx-tiles, #fx-layer.lite .fx-wintile { display: none; }
+@keyframes fx-lite { 0% { opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .table.fx-shake, .meld.fx-glow-pon, .meld.fx-glow-chi { animation: none; }
+}
+@media (max-width: 360px) {
+  #fx-layer .fx-who { font-size: 13px; }
+}
