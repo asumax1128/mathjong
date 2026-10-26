@@ -51,6 +51,7 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 | [Ver.0.3-B ヒント実装記録](docs/15-ver0.3-b-hints.md) | 2段階ヒント（発見・確認）・数式のカラー表示（開発中） |
 | [Ver.0.4-A 対局システム実装記録](docs/16-ver0.4-a-match.md) | タイトル画面・4局戦／8局戦・親の連荘・親子の精算・試合終了（開発中） |
 | [Ver.0.4-B AI難易度＋ポンのオートパス](docs/17-ver0.4-b-ai-autopass.md) | 初級・中級・上級の AI、強さの検証、チー・ポンのオートパスの統合（開発中） |
+| [Ver.0.5-A（仮）リーチ＋自動パス切替](docs/20-ver0.5-a-riichi-autopass-toggle.md) | リーチ（宣言・ツモ切り・＋1点・AI）、対戦画面のチー・ポン自動パス切替（Draft PR・監査待ち） |
 | [iPhone 実機テスト手順](docs/12-iphone-test-guide.md) | テストURL、Pages 設定、固定seed、報告方法 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |

@@ -378,3 +378,27 @@ table.values td.undef { color: #999; font-size: 12px; }
 
 /* Ver.0.4-B：チー・ポンのオートパス（2つ並べる。狭い画面では折り返す） */
 .autopass-set { display: flex; flex-wrap: wrap; column-gap: 20px; }
+
+/* Ver.0.5-A：リーチ */
+.riichi-badge { background: #c0392b; color: #fff; border-radius: 4px; padding: 0 5px; font-weight: 700; font-size: 11px; }
+.riichi-word { color: #ff8a7a; margin: 0 2px; }
+.tile.riichi-decl { transform: rotate(90deg); margin: 0 4px; box-shadow: 0 0 0 2px #c0392b; }
+.hand .tile.locked { opacity: 0.45; filter: grayscale(0.5); }
+.hand .tile.riichi-ok { box-shadow: 0 0 0 3px #e74c3c; }
+.actions button.riichi { background: #c0392b; color: #fff; border-color: #c0392b; font-weight: 700; }
+.actions button.riichi[disabled] { opacity: 0.5; }
+.riichi-status { color: #ffb4a8; font-weight: 700; }
+.yaku .riichi-li span { color: var(--ink-dim); }
+
+/* Ver.0.5-A：対戦画面のチー・ポン自動パス切替（ON は緑地、OFF は枠のみ。文字でも ON/OFF を示す） */
+.hand-help button.small.ap-toggle { min-height: 44px; padding: 0 8px; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1; gap: 1px; }
+.hand-help .ap-toggle .apt-name { font-size: 10.5px; }
+.hand-help .ap-toggle .apt-state { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; }
+.hand-help .ap-toggle.on { background: #2e8b57; border-color: #5fd08e; color: #fff; }
+.hand-help .ap-toggle.off { background: transparent; color: var(--ink-dim); }
+.hand-help .ap-toggle.off .apt-state { color: #c9c9c9; }
+.hand-help .hh-tools button { white-space: nowrap; }
+@media (max-width: 360px) {
+  .hand-help .hh-tools { gap: 4px; }
+  .hand-help button.small { padding: 0 8px; }
+}

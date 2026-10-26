@@ -39,9 +39,11 @@ export function playMatch(rules, seedBase, { level, length = 4 } = {}) {
   return out;
 }
 
-export function goldenDigest({ level } = {}) {
+// riichi：false でリーチの規則を無効にした数学Ⅰ・Ⅱ（Ver.0.4-B までの規則と同じ）。リーチの導入で AI の他の判断が変わっていないことの確認に使う。
+export function goldenDigest({ level, riichi = true } = {}) {
   const res = {};
-  const sets = { legacy: createRules(LEGACY_V02_CONFIG), math1: createRules(makeConfig({ mode: 'math1' })), math2: createRules(makeConfig({ mode: 'math2' })) };
+  const rf = riichi ? {} : { rules: { riichi: false } };
+  const sets = { legacy: createRules(LEGACY_V02_CONFIG), math1: createRules(makeConfig({ mode: 'math1', ...rf })), math2: createRules(makeConfig({ mode: 'math2', ...rf })) };
   for (const [name, rules] of Object.entries(sets)) {
     const all = [];
     for (let i = 0; i < 6; i++) all.push(playRound(rules, 4242 + i, i % 4, LINEUP.map((_, k) => LINEUP[(k + i) % 4]), { level }).log);

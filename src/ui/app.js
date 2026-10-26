@@ -20,7 +20,7 @@ import { validateReplay, replayQuery } from './replay.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
-const APP_VERSION = '0.4.0-b';
+const APP_VERSION = '0.5.0-a';
 document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`;
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -131,6 +131,7 @@ function startRound() {
   S.modal = null;
   S.scored = false;
   S.claimPolicy = null; // 宣言ごとの表示方針（局ごとに初期化）
+  S.riichiSelect = false; // リーチの宣言牌を選んでいる途中か（局ごとに初期化）
   S.autoPass.noticePending = false;
   S.autoPass.noticeKind = null;
   S.autoPass.noticeKey = null;
@@ -249,6 +250,7 @@ function humanAct(action) {
   if (r !== 'ok') { S.input[r]++; return; }
   S.input.accepted++;
   S.selected = null;
+  S.riichiSelect = false;
   render();
   step();
 }
@@ -259,7 +261,11 @@ function lastEventText() {
   const g = S.game;
   for (let i = g.events.length - 1; i >= 0; i--) {
     const e = g.events[i];
-    if (e.type === 'discard') return `${nameOf(e.seat)} が ${tileHTML(T(g.typeOf(e.tile)), { size: 's' })} を捨てました`;
+    if (e.type === 'discard') {
+      const decl = i > 0 && g.events[i - 1].type === 'riichi' && g.events[i - 1].tile === e.tile;
+      return decl ? `${nameOf(e.seat)} が<b class="riichi-word">リーチ</b>： ${tileHTML(T(g.typeOf(e.tile)), { size: 's' })} を捨てました`
+        : `${nameOf(e.seat)} が ${tileHTML(T(g.typeOf(e.tile)), { size: 's' })} を捨てました`;
+    }
     if (e.type === 'chi') return `${nameOf(e.seat)} がチー： ${formulaHTML(rules, e.meld)}`;
     if (e.type === 'pon') return `${nameOf(e.seat)} がポン： ${formulaHTML(rules, e.meld)}`;
     if (e.type === 'win') return `${nameOf(e.seat)} の${e.how === 'ron' ? 'ロン' : 'ツモ'}和了！`;
@@ -282,7 +288,7 @@ function riverHTML(seat, size) {
   const claimTile = g.claim ? g.claim.tile : null;
   return g.rivers[seat].map((r) => tileHTML(T(g.typeOf(r.id)), {
     size,
-    cls: [r.tsumogiri ? 'tsumogiri' : '', last && last.tile === r.id ? 'last' : '', claimTile === r.id ? 'claimable' : ''].join(' '),
+    cls: [r.tsumogiri ? 'tsumogiri' : '', r.riichi ? 'riichi-decl' : '', last && last.tile === r.id ? 'last' : '', claimTile === r.id ? 'claimable' : ''].join(' '),
   })).join('');
 }
 
@@ -296,6 +302,7 @@ function panelHTML(seat) {
     <header>
       <span class="pos">${POS[seat]}</span><span class="name">${pl.name}</span>${pers}
       ${g.dealer === seat ? '<span class="oya">親</span>' : ''}
+      ${g.riichi[seat] ? '<span class="riichi-badge">リーチ</span>' : ''}
       ${!g.isClosed(seat) ? '<span class="naki">鳴き</span>' : ''}
       <span class="score">${S.scores[seat]}点</span>
     </header>
@@ -331,15 +338,40 @@ function handHTML() {
     if (!c) return '';
     return c.length === 2 ? 'fhf fhf-rb' : `fhf fhf-${c[0]}`;
   };
-  const tile = (id) => tileHTML(T(g.typeOf(id)), {
-    size: 'l', id,
-    cls: [myTurn ? 'tap' : '', S.selected === id ? 'selected' : '', frame(id),
-      id === drawn ? (drawnAtEnd ? 'drawn' : 'drawn drawn-mark') : ''].join(' '),
-    attrs: myTurn ? `data-action="tile" tabindex="0"` : '',
-  });
+  // リーチ中はツモ牌だけ、リーチの宣言牌を選んでいる間は聴牌になる牌だけを選べる（エンジンも同じ条件で拒否する）
+  const allowed = humanDiscardFilter();
+  const tile = (id) => {
+    const ok = myTurn && allowed(id);
+    return tileHTML(T(g.typeOf(id)), {
+      size: 'l', id,
+      cls: [ok ? 'tap' : '', myTurn && !ok ? 'locked' : '', S.selected === id ? 'selected' : '', frame(id),
+        S.riichiSelect && ok ? 'riichi-ok' : '',
+        id === drawn ? (drawnAtEnd ? 'drawn' : 'drawn drawn-mark') : ''].join(' '),
+      attrs: ok ? `data-action="tile" tabindex="0"` : '',
+    });
+  };
   const body = order.map((id) => (drawnAtEnd && id === drawn ? `<span class="drawn-gap"></span>${tile(id)}` : tile(id))).join('');
   return `<div class="hand">${body}</div>
-    <div class="hand-help"><span>長押しで並び替え・タップ2回で捨てる</span><span class="hh-tools"><button data-action="autosort" class="small">自動整列</button><button data-action="hint" class="small hint-btn" aria-pressed="${!!S.hintOpen}">ヒント</button></span></div>`;
+    <div class="hand-help"><span>長押しで並び替え・タップ2回で捨てる</span><span class="hh-tools">${autoPassToggleHTML('chi')}${autoPassToggleHTML('pon')}<button data-action="autosort" class="small">自動整列</button><button data-action="hint" class="small hint-btn" aria-pressed="${!!S.hintOpen}">ヒント</button></span></div>`;
+}
+
+// チー・ポンの自動パスの切替（対戦画面。Ver.0.5-A で設定画面から移動）。ON/OFF を色と文字で示す。
+// 切り替えは次に発生する宣言から反映し、表示中の宣言の選択肢は変えない（宣言ごとの方針 claimPolicy で固定）。
+function autoPassToggleHTML(kind) {
+  const on = kind === 'chi' ? S.chiAutoPass : S.ponAutoPass;
+  const name = kind === 'chi' ? 'チー' : 'ポン';
+  return `<button data-action="toggle-${kind}-autopass" class="small ap-toggle ${on ? 'on' : 'off'}" aria-pressed="${on}" aria-label="${name}の自動パス ${on ? 'ON' : 'OFF'}"><span class="apt-name">${name}自動</span><span class="apt-state">${on ? 'ON' : 'OFF'}</span></button>`;
+}
+
+// 自分の打牌番で、いま捨てられる牌の条件（リーチ中はツモ牌だけ、宣言牌の選択中は聴牌になる種類だけ）
+function humanDiscardFilter() {
+  const g = S.game;
+  if (g.riichi[HUMAN]) return (id) => id === g.drawn;
+  if (S.riichiSelect) {
+    const types = new Set(g.riichiOptions(HUMAN).map((o) => o.type));
+    return (id) => types.has(g.typeOf(id));
+  }
+  return () => true;
 }
 
 // 直前の鳴き（チー／ポン）の名前
@@ -360,8 +392,29 @@ function actionsHTML() {
     const what = p.type === 'turn' ? `${nameOf(p.seat)} の手番…` : `${nameOf(p.seat)} が考え中…`;
     return `<div class="actions waiting"><span class="status">${what}</span></div>`;
   }
+  if (p.type === 'turn' && g.riichi[HUMAN]) {
+    // リーチ中：ツモ和了かツモ切りだけ
+    const tsumo = p.canTsumo ? '<button data-action="tsumo" class="win">ツモ</button>' : '';
+    return `<div class="actions">
+      <span class="status riichi-status">${p.canTsumo ? 'リーチ中・和了できます！' : 'リーチ中：ツモ切り'}</span>
+      ${tsumo}
+      <button data-action="tsumogiri" class="primary">ツモ切り</button>
+    </div>`;
+  }
+  if (p.type === 'turn' && S.riichiSelect) {
+    // リーチの宣言牌を選ぶ：聴牌になる牌だけ選べる（光る牌）
+    const tsumo = p.canTsumo ? '<button data-action="tsumo" class="win">ツモ</button>' : '';
+    const ok = S.selected !== null && humanDiscardFilter()(S.selected);
+    return `<div class="actions">
+      <span class="status riichi-status">リーチ：宣言して捨てる牌を選択</span>
+      ${tsumo}
+      <button data-action="riichi-cancel">やめる</button>
+      <button data-action="riichi-discard" class="primary riichi" ${ok ? '' : 'disabled'}>リーチして捨てる</button>
+    </div>`;
+  }
   if (p.type === 'turn') {
     const tsumo = p.canTsumo ? '<button data-action="tsumo" class="win">ツモ</button>' : '';
+    const riichiBtn = g.riichiOptions(HUMAN).length ? '<button data-action="riichi" class="riichi">リーチ</button>' : '';
     const sel = S.selected !== null;
     // チー・ポンを自動で見送った後の最初の手番だけ、通常の案内の代わりに通知を出す（状態欄の大きさは変えない）
     const notice = S.autoPass.noticeKey === stateKey() ? autoPassNotice(S.autoPass.shownKind) : null;
@@ -369,7 +422,7 @@ function actionsHTML() {
       : notice || (g.justDrew ? 'あなたの番：捨てる牌を選択' : `${lastCallName(g)}後：捨てる牌を選択`);
     return `<div class="actions">
       <span class="status${notice ? ' autopass-notice' : ''}">${text}</span>
-      ${tsumo}
+      ${tsumo}${riichiBtn}
       <button data-action="discard" class="primary" ${sel ? '' : 'disabled'}>捨てる</button>
     </div>`;
   }
@@ -429,6 +482,7 @@ function render() {
         <header>
           <span class="pos">自分</span><span class="name">あなた</span>
           ${g.dealer === HUMAN ? '<span class="oya">親</span>' : ''}
+          ${g.riichi[HUMAN] ? '<span class="riichi-badge">リーチ</span>' : ''}
           ${!g.isClosed(HUMAN) ? '<span class="naki">鳴き（役が必要）</span>' : '<span class="menzen">門前</span>'}
           <span class="score">${S.scores[HUMAN]}点</span>
         </header>
@@ -489,7 +543,9 @@ function resultHTML() {
     }
     const base = a.yakuman ? '' : `<li><span>通常和了</span><b>${rules.config.scoring.base}</b></li>`;
     const yaku = a.yaku.map((y) => `<li class="${y.yakuman ? 'yakuman' : ''}"><span>${y.name}${y.yakuman ? '（役満）' : ''}</span><b>${a.yakuman ? '' : '+'}${y.points}</b></li>`).join('');
-    detail += `<ul class="yaku">${base}${yaku || (a.yakuman ? '' : '<li class="none"><span>役なし（門前のため和了可）</span><b></b></li>')}
+    // リーチの加点は yaku に含まれる（エンジンが追加）。役満では加点しないことを明示する
+    const riichiNote = a.riichi && !a.riichiBonus ? '<li class="riichi-li"><span>リーチ（役満のため加点なし）</span><b>+0</b></li>' : '';
+    detail += `<ul class="yaku">${base}${yaku || (a.yakuman ? '' : '<li class="none"><span>役なし（門前のため和了可）</span><b></b></li>')}${riichiNote}
       <li class="total"><span>合計</span><b>${r.points}点</b></li></ul>
       ${a.kind === 'normal' && a.melds.some((mi) => rules.melds[mi].kind === 'koutsu') && a.melds.some((mi) => rules.melds[mi].kind === 'formula') ? '<p class="note">数式面子と刻子の混合形：数式系の役は付きません（門前なら役なしで和了できます）。</p>' : ''}
       ${a.candidateCount > 1 ? `<p class="note">この手は${a.candidateCount}通りの和了形に分けられます。最高得点の形を採用しました。</p>` : ''}`;
@@ -662,7 +718,8 @@ function rulesHTML() {
     <li><b>鳴いた手は役が必要</b>。数式系の役は3組すべてが数式面子のときだけ付きます（刻子を含む混合形には付きません）。刻子を公開した手で付く役は対々和・関数一色です。</li>
     <li><b>優先順位</b>：ロン ＞ ポン ＞ チー。複数のロンはアタマハネ、複数のポンは打牌者から手番順に近い人。ほかの人のロン判断が終わるまでポン・チーは確定しません。</li>
     <li><b>三暗刻</b>は門前の刻子3組。ロンで最後の刻子を完成させた場合も成立します（Ver.0.3 の暫定規則。通常の麻雀とは異なります）。</li>${common}
-    <li><b>チーのオートパス</b>（設定・初期値 OFF）：ON にすると、チーだけできる場面を自動で見送ります。ロン・ポン・ツモは自動で見送りません。ロンやポンもできるときはチーを表示せず、「ロンしない／見送る」でチーも見送ります。</li>`
+    ${c.rules.riichi ? `<li><b>リーチ</b>：門前で、1枚捨てると聴牌（あと1枚で和了）になるとき、自分の番に「リーチ」を押して捨てる牌を選びます（聴牌になる牌だけ選べます）。リーチ後はツモ切りだけで、チー・ポンはできません。ロン・ツモはできます。リーチして和了すると基本点に<b>＋${c.rules.riichiBonus ?? 1}点</b>（役満には加算しません）。親子の精算の倍率は変わりません。リーチ棒・一発・裏ドラはありません。</li>` : ''}
+    <li><b>チー・ポンの自動パス</b>（対戦画面の手牌の下のボタン・初期値 OFF）：チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。切り替えは次の宣言から反映されます。</li>`
     : `
     <li><b>面子</b>：関数牌＋角度牌＋結果牌で正しい等式（例：sin 30° = 1/2）。</li>
     <li><b>和了</b>：8枚＋1枚＝9枚で3面子。または特殊和了。</li>
@@ -698,11 +755,7 @@ function settingsHTML() {
       <p class="note mode-note">いまの対局：${modeLabel(rules)}。${S.nextMode !== rules.config.mode && !LEGACY ? '下の「新しい対局」で切り替わります（いまの局は変わりません）。' : 'モードの変更は「新しい対局」から反映されます。'}</p>
     </fieldset>
     <label class="setting">AIの速さ <select data-action="speed">${publicSpeedNames().map(opt).join('')}</select></label>
-    <div class="autopass-set">
-      <label class="setting toggle"><input type="checkbox" data-action="chi-autopass" ${S.chiAutoPass ? 'checked' : ''}><span>チーのオートパス</span></label>
-      <label class="setting toggle"><input type="checkbox" data-action="pon-autopass" ${S.ponAutoPass ? 'checked' : ''}><span>ポンのオートパス</span></label>
-    </div>
-    <p class="note setting-note">チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。</p>
+    <p class="note setting-note">チー・ポンの自動パスは、対戦画面の手牌の下のボタンで切り替えます（いま：チー ${S.chiAutoPass ? 'ON' : 'OFF'}・ポン ${S.ponAutoPass ? 'ON' : 'OFF'}）。チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。</p>
     ${reportInfoHTML()}
     <div class="modal-actions"><button data-action="reset">新しい対局（得点リセット）</button>
       ${S.confirmTitle ? '<span class="confirm-title">この対局を終了しますか？<button data-action="to-title" class="danger">終了してタイトルへ</button><button data-action="cancel-title">続ける</button></span>' : '<button data-action="ask-title">タイトルへ戻る</button>'}</div>`;
@@ -853,8 +906,37 @@ app.addEventListener('click', (ev) => {
   switch (act) {
     case 'tile': {
       const id = Number(el.dataset.id);
-      if (S.selected === id) humanAct({ type: 'discard', tile: id });
+      if (!humanDiscardFilter()(id)) break; // リーチ中・宣言牌の選択中に選べない牌（描画上もタップ不可）
+      if (S.selected === id) humanAct({ type: 'discard', tile: id, ...(S.riichiSelect ? { riichi: true } : {}) });
       else { S.selected = id; render(); }
+      break;
+    }
+    case 'riichi': {
+      // 宣言牌の選択へ。選択中の牌が聴牌にならない牌なら選び直し
+      const gg = S.game;
+      const p = gg.pending();
+      if (!p || p.seat !== HUMAN || p.type !== 'turn' || !gg.riichiOptions(HUMAN).length) break;
+      S.riichiSelect = true;
+      if (S.selected !== null && !humanDiscardFilter()(S.selected)) S.selected = null;
+      render();
+      break;
+    }
+    case 'riichi-cancel': S.riichiSelect = false; render(); break;
+    case 'riichi-discard':
+      if (S.selected !== null && S.riichiSelect && humanDiscardFilter()(S.selected)) humanAct({ type: 'discard', tile: S.selected, riichi: true });
+      break;
+    case 'tsumogiri': {
+      const gg = S.game;
+      if (gg.riichi[HUMAN] && gg.drawn !== null && gg.drawn !== undefined) humanAct({ type: 'discard', tile: gg.drawn });
+      break;
+    }
+    case 'toggle-chi-autopass':
+    case 'toggle-pon-autopass': {
+      // 設定の保存だけ（ゲームは進めない・全体を描画し直さない：ドラッグ中や宣言の表示を妨げない）。次の宣言から反映。
+      const kind = act === 'toggle-chi-autopass' ? 'chi' : 'pon';
+      const on = !(kind === 'chi' ? S.chiAutoPass : S.ponAutoPass);
+      if (kind === 'chi') { S.chiAutoPass = on; store.set(CHI_AUTOPASS_KEY, on ? '1' : '0'); } else { S.ponAutoPass = on; store.set(PON_AUTOPASS_KEY, on ? '1' : '0'); }
+      el.outerHTML = autoPassToggleHTML(kind);
       break;
     }
     case 'autosort': {
@@ -982,16 +1064,6 @@ app.addEventListener('change', (ev) => {
     // 次の新しい対局のモードを選ぶだけ（いまの局は変えない）
     const m = parseMode(ev.target.value);
     if (m) { S.nextMode = m; store.set(MODE_KEY, m); render(); }
-  }
-  if (ev.target.dataset.action === 'chi-autopass') {
-    // 値の保存だけ。次に発生する宣言から反映し、表示中の宣言の選択肢は変えない（ゲームは進めない）
-    S.chiAutoPass = ev.target.checked === true;
-    store.set(CHI_AUTOPASS_KEY, S.chiAutoPass ? '1' : '0');
-  }
-  if (ev.target.dataset.action === 'pon-autopass') {
-    // チーと同じく値の保存だけ（次に発生する宣言から反映）
-    S.ponAutoPass = ev.target.checked === true;
-    store.set(PON_AUTOPASS_KEY, S.ponAutoPass ? '1' : '0');
   }
 });
 
