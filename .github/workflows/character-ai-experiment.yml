@@ -1,0 +1,37 @@
+name: Character AI experiment (no deploy)
+on:
+  pull_request:
+    paths:
+      - 'src/engine/character-ai-prototype.js'
+      - 'tools/simulate-characters.mjs'
+      - 'tests/character-ai-prototype.test.js'
+      - '.github/workflows/character-ai-experiment.yml'
+  workflow_dispatch:
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Node and syntax checks
+        run: |
+          node --check src/engine/character-ai-prototype.js
+          node --check tools/simulate-characters.mjs
+          node --check tests/character-ai-prototype.test.js
+      - name: All unit tests
+        run: npm test
+      - name: Mathematics I baseline versus candidate
+        run: node tools/simulate-characters.mjs --mode math1 --groups 8 --seed 1 --length 4 | tee /tmp/math1.json
+      - name: Mathematics II baseline versus candidate
+        run: node tools/simulate-characters.mjs --mode math2 --groups 8 --seed 2 --length 4 | tee /tmp/math2.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: beginner-character-experiment-results
+          path: /tmp/math*.json
+          if-no-files-found: ignore
