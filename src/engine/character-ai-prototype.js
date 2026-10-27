@@ -55,7 +55,7 @@ function kanataScore(game, seat, type, view, counts, aotoSeat) {
   const waits = game.waitsOf(after, view.melds[seat].map((m) => m.meld))
     .filter((t) => unseen[t] > 0);
   const live = waits.reduce((s, t) => s + unseen[t], 0);
-  const readyBonus = live ? 3.5 + Math.min(live, 6) * 0.22 : 0;
+  const readyBonus = live ? 1.3 + Math.min(live, 6) * 0.12 : 0;
   return score - readyBonus - aotoReadScore(game.rules, view, waits, aotoSeat, unseen);
 }
 
