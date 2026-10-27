@@ -3,6 +3,16 @@
 import { beginnerKeepScore, beginnerDiscard } from './ai-levels.js';
 import { unseenCounts, viewCounts } from './ai.js';
 
+// 初級3人の判断係数（キャラごとに独立して調整できる。character-ai.js の CHARACTER_PARAMS からも参照する）
+export const BEGINNER_PARAMS = {
+  // かなた：候補順位の選択確率、聴牌（実在する待ち）への加点、弟あおとの公開河の読みの上限
+  kanata: { pick: [0.75, 0.20, 0.05], readyBase: 1.3, readyPerLive: 0.12, readyLiveCap: 6, readExact: 0.12, readKind: 0.03, readPerWait: 0.3, readMax: 0.5 },
+  // みつき：sin 関数牌・sin の数式の保持、候補順位の選択確率
+  mitsuki: { pick: [0.45, 0.35, 0.20], sinTile: 3, sinPair: 2.5, sinSingle: 0.3 },
+  // あおと：雑な打牌の確率、ポン・チーの確率
+  aoto: { randomDiscard: 0.40, pon: 0.85, chi: 0.75 },
+};
+
 export const BEGINNER_CHARACTERS = Object.freeze({
   kanata: Object.freeze({ id: 'kanata', name: 'かなた', age: 10, personality: 'speed' }),
   mitsuki: Object.freeze({ id: 'mitsuki', name: 'みつき', age: 8, personality: 'value' }),
@@ -30,7 +40,7 @@ function rankedDiscard(game, seat, rng, weights, scoreFn) {
 
 // あおとの公開された過去の捨て牌に多いカテゴリを参照する。「真の次牌」は参照不可。
 // 同種牌を複数捨てているほど、また近い捨て牌ほどわずかに加点する。
-function aotoReadScore(rules, view, waits, aotoSeat, unseen) {
+function aotoReadScore(rules, view, waits, aotoSeat, unseen, P = BEGINNER_PARAMS.kanata) {
   if (!Number.isInteger(aotoSeat) || aotoSeat === view.seat || aotoSeat < 0 || aotoSeat > 3) return 0;
   const river = view.rivers[aotoSeat].slice(-6);
   if (!river.length) return 0;
@@ -41,13 +51,14 @@ function aotoReadScore(rules, view, waits, aotoSeat, unseen) {
     const kind = rules.types[t].kind;
     const exact = river.filter((r) => rules.types[r].key === key).length;
     const sameKind = river.filter((r) => rules.types[r].kind === kind).length;
-    bonus += Math.min(0.3, 0.12 * exact + 0.03 * sameKind);
+    bonus += Math.min(P.readPerWait, P.readExact * exact + P.readKind * sameKind);
   }
-  return Math.min(0.5, bonus);
+  return Math.min(P.readMax, bonus);
 }
 
 // かなた：聴牌を見つけるが上級の危険度や相手の手牌は見ない。
 function kanataScore(game, seat, type, view, counts, aotoSeat) {
+  const P = BEGINNER_PARAMS.kanata;
   const score = beginnerKeepScore(game.rules, counts, type);
   const unseen = unseenCounts(game.rules, view);
   const after = counts.slice();
@@ -55,14 +66,15 @@ function kanataScore(game, seat, type, view, counts, aotoSeat) {
   const waits = game.waitsOf(after, view.melds[seat].map((m) => m.meld))
     .filter((t) => unseen[t] > 0);
   const live = waits.reduce((s, t) => s + unseen[t], 0);
-  const readyBonus = live ? 1.3 + Math.min(live, 6) * 0.12 : 0;
-  return score - readyBonus - aotoReadScore(game.rules, view, waits, aotoSeat, unseen);
+  const readyBonus = live ? P.readyBase + Math.min(live, P.readyLiveCap) * P.readyPerLive : 0;
+  return score - readyBonus - aotoReadScore(game.rules, view, waits, aotoSeat, unseen, P);
 }
 
 // みつき：本来の残したい牌評価を基礎に、sin牌とsinで作れそうな2枚組を強く保持。
 function mitsukiScore(rules, type, counts) {
+  const P = BEGINNER_PARAMS.mitsuki;
   let keep = beginnerKeepScore(rules, counts, type);
-  if (rules.types[type].key === 'f:sin') keep += 3;
+  if (rules.types[type].key === 'f:sin') keep += P.sinTile;
   for (const mi of rules.meldsByTile[type]) {
     const m = rules.melds[mi];
     if (m.kind !== 'formula' || m.fn !== 'sin') continue;
@@ -73,8 +85,8 @@ function mitsukiScore(rules, type, counts) {
     tmp[type]--;
     let held = 0;
     for (const o of others) if (tmp[o]-- > 0) held++;
-    if (held === 2) keep += 2.5;
-    else if (held === 1) keep += 0.3;
+    if (held === 2) keep += P.sinPair;
+    else if (held === 1) keep += P.sinSingle;
   }
   return keep;
 }
@@ -90,21 +102,21 @@ export function decideBeginnerCharacter(game, seat, characterId, rng, { seatIds 
     if (game.riichi[seat]) return { type: 'discard', tile: game.viewFor(seat).drawn };
     if (characterId === 'aoto') {
       const view = game.viewFor(seat);
-      const tile = rng.next() < 0.40 ? rng.pick(view.hand).id : beginnerDiscard(game.rules, view, rng);
+      const tile = rng.next() < BEGINNER_PARAMS.aoto.randomDiscard ? rng.pick(view.hand).id : beginnerDiscard(game.rules, view, rng);
       return { type: 'discard', tile };
     }
     if (characterId === 'mitsuki') {
-      return { type: 'discard', tile: rankedDiscard(game, seat, rng, [0.45, 0.35, 0.20],
+      return { type: 'discard', tile: rankedDiscard(game, seat, rng, BEGINNER_PARAMS.mitsuki.pick,
         (t, view, counts) => mitsukiScore(game.rules, t, counts)) };
     }
     const aotoSeat = seatIds.indexOf('aoto');
-    return { type: 'discard', tile: rankedDiscard(game, seat, rng, [0.75, 0.20, 0.05],
+    return { type: 'discard', tile: rankedDiscard(game, seat, rng, BEGINNER_PARAMS.kanata.pick,
       (t, view, counts) => kanataScore(game, seat, t, view, counts, aotoSeat)) };
   }
 
   if (pending.ron) return { type: 'ron' };
   if (characterId !== 'aoto') return { type: 'pass' };
-  if (pending.pon && rng.next() < 0.85) return { type: 'pon' };
-  if (pending.chi.length && rng.next() < 0.75) return { type: 'chi', option: rng.int(pending.chi.length) };
+  if (pending.pon && rng.next() < BEGINNER_PARAMS.aoto.pon) return { type: 'pon' };
+  if (pending.chi.length && rng.next() < BEGINNER_PARAMS.aoto.chi) return { type: 'chi', option: rng.int(pending.chi.length) };
   return { type: 'pass' };
 }
