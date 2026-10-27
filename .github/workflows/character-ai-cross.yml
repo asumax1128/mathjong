@@ -1,0 +1,29 @@
+name: Character AI cross-level validation
+on:
+  pull_request:
+    paths:
+      - 'tools/simulate-characters-cross.mjs'
+      - '.github/workflows/character-ai-cross.yml'
+  workflow_dispatch:
+jobs:
+  comparison:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax
+        run: node --check tools/simulate-characters-cross.mjs
+      - name: Mathematics I cross-level
+        run: node tools/simulate-characters-cross.mjs --mode math1 --groups 4 --seed 31 | tee /tmp/cross-math1.json
+      - name: Mathematics II cross-level
+        run: node tools/simulate-characters-cross.mjs --mode math2 --groups 4 --seed 32 | tee /tmp/cross-math2.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nine-character-cross-level-comparison
+          path: /tmp/cross-math*.json
