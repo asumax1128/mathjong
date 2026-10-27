@@ -240,10 +240,12 @@ test('構造：sound.js はエンジンを読み込まない。app.js は音の�
   assert.ok(!/from ['"]\.\.\/engine/.test(snd), 'sound.js はエンジンを読み込まない');
   const app = readFileSync(new URL('../src/ui/app.js', import.meta.url), 'utf8');
   const scan = app.slice(app.indexOf('function soundScan()'), app.indexOf('// iPhone Safari：最初のタップ'));
-  assert.ok(scan.includes('pickSound(g.events, S.sound.seen)') && scan.includes('sound.play(pick.kind)'));
+  assert.ok(scan.includes('pickSound(g.events, S.sound.seen)') && scan.includes("if (pick.kind === 'discard') sound.play('discard');"), 'ここで鳴らすのは打牌だけ（Ver.0.5-E：宣言の音は演出の開始時）');
+  const show = app.slice(app.indexOf('function fxShow('), app.indexOf('// 盤面の演出（ロン・ツモの画面揺れ'));
+  assert.ok(show.includes('sound.play(kind,'), '宣言の音は演出が実際に始まったとき（fxShow）に鳴らす');
   assert.ok(!/g\.(discard|draw|chi|pon|ron|tsumo|riichi|pass)\s*\(/.test(scan), '音の判定はゲームを進めない');
   assert.ok(/for \(const t of \['touchend', 'pointerup', 'click', 'keydown'\]\)/.test(app) && app.includes("{ capture: true, passive: true }"));
-  assert.ok(app.includes('if (S.sound.on) sound.unlock()'), 'オフのときは AudioContext を作らない');
+  assert.ok(app.includes('if (S.sound.on) { sound.unlock(); voice.load(); }'), 'オフのときは AudioContext を作らない');
   assert.ok(app.includes("soundScan(); //"), 'step() の先頭で、演出と同じく1回だけ判定する');
   assert.ok(app.includes('sound.silence()'), '新しい局・タイトルで音を止める');
 });

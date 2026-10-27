@@ -18,12 +18,16 @@ const TYPES = {
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  // 宣言ボイス（Ver.0.5-E で導入の準備。正式採用された音声ファイルを src/ui/voice-*.m4a|mp3 に置く）
+  '.m4a': 'audio/mp4',
+  '.mp3': 'audio/mpeg',
 };
 
 // 配信を許可するパス（base を除いた相対パス）。これ以外はすべて 404。
 const ALLOWED = [
   /^index\.html$/,
   /^src\/(?:engine|ui)\/[a-z0-9][a-z0-9-]*\.(?:js|css|svg|png)$/,
+  /^src\/ui\/voice-[a-z0-9][a-z0-9-]*\.(?:m4a|mp3)$/,
 ];
 const SEGMENT = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/; // 先頭がドット（隠しファイル）の要素は不可
 

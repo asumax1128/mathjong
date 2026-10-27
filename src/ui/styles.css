@@ -405,45 +405,197 @@ table.values td.undef { color: #999; font-size: 12px; }
   .hand-help button.small { padding: 0 8px; }
 }
 
-/* ===== Ver.0.5-B：ロン・ポン・チーの演出 =====
-   専用レイヤー #fx-layer（#app の外・タップを通す）に出す。transform・opacity だけを動かし、軽く保つ。
-   ロン ＞ ポン ＞ チーの順に派手。簡易表示（.lite）・視差の少ない設定では文字だけ。 */
+/* ===== 宣言の演出（Ver.0.5-B〜E） =====
+   専用レイヤー #fx-layer（#app の外・タップを通す）に出す。transform・opacity を中心に動かし、軽く保つ。
+   Ver.0.5-E：チー・ポン・ロン・ツモはカットイン（斜めに横切る帯・光のライン・大きな宣言文字・牌の強調）。
+   宣言者（あなた／AI-A…）を大きく出し、宣言者の席を発光させる。中央に文字・宣言者・牌を読める静止時間を取る。
+   色：チー 青緑、ポン 金橙、ロン 赤金、ツモ 青白金、リーチ 紫金。閃光は冒頭の1回だけ（連続した点滅はしない）。 */
 #fx-layer { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 100; pointer-events: none; overflow: hidden;
-  display: none; align-items: center; justify-content: center; }
+  display: none; align-items: center; justify-content: center;
+  --fx-tilt: -7deg; --fx-accent: #fff; --fx-glow: rgba(255, 255, 255, 0.7); --fx-band-a: #333; --fx-band-b: #777; --fx-line: #fff; }
 #fx-layer.fx-ron, #fx-layer.fx-tsumo, #fx-layer.fx-riichi, #fx-layer.fx-pon, #fx-layer.fx-chi { display: flex; }
-#fx-layer .fx-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: 100%; padding: 0 8px; text-align: center; }
-#fx-layer .fx-word { font-weight: 900; line-height: 1.05; letter-spacing: 0.04em; white-space: nowrap; }
-#fx-layer .fx-who { font-size: 15px; font-weight: 700; color: #fff; text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7); }
-#fx-layer .fx-tiles, #fx-layer .fx-wintile { display: flex; gap: 4px; justify-content: center; }
-#fx-layer .fx-tiles .fx-t, #fx-layer .fx-wintile .tile { box-shadow: 0 0 12px 2px rgba(255, 255, 255, 0.55); }
+#fx-layer.fx-chi { --fx-accent: #3fe0c8; --fx-glow: rgba(60, 220, 210, 0.85); --fx-band-a: #06404f; --fx-band-b: #10a59a; --fx-line: #c8fff6; }
+#fx-layer.fx-pon { --fx-accent: #ffb43a; --fx-glow: rgba(255, 170, 50, 0.9); --fx-band-a: #5a2a00; --fx-band-b: #e08a12; --fx-line: #fff0c2; }
+#fx-layer.fx-ron { --fx-accent: #ffcf4a; --fx-glow: rgba(255, 80, 40, 0.9); --fx-band-a: #4d0606; --fx-band-b: #c4200f; --fx-line: #ffe49a; }
+#fx-layer.fx-tsumo { --fx-accent: #ffe08a; --fx-glow: rgba(110, 190, 255, 0.9); --fx-band-a: #0b2459; --fx-band-b: #2f7fd6; --fx-line: #eaf7ff; }
+#fx-layer.fx-riichi { --fx-accent: #d9b8ff; --fx-glow: rgba(170, 120, 255, 0.9); }
 
-/* ロン：最も派手（1.1秒。Ver.0.5-D で 0.8 秒から延長・強化）。赤〜金の発光・二度の閃光・放射状の光条・軽い画面揺れ・和了牌を大きく長めに */
-#fx-layer.fx-ron .fx-word { font-size: clamp(64px, 28vw, 150px); color: #fff3c4;
-  text-shadow: 0 0 8px #ffd25a, 0 0 22px #ff9a1c, 0 0 44px #ff4a1c, 0 0 80px #ff2d1a, 0 4px 0 #8a1500, 0 7px 0 #5a0d00;
-  animation: fx-ron-word 1100ms cubic-bezier(.2, .9, .3, 1) both; }
-#fx-layer.fx-ron .fx-wintile .tile { animation: fx-pop-ron 1100ms ease-out both; box-shadow: 0 0 20px 6px rgba(255, 190, 70, 0.95), 0 0 36px 10px rgba(255, 70, 30, 0.55); }
+#fx-layer .fx-card { position: relative; display: flex; flex-direction: column; align-items: center; gap: clamp(4px, 1.4vh, 10px);
+  max-width: 100%; padding: 0 8px; text-align: center; }
+#fx-layer .fx-mid { position: relative; display: flex; align-items: center; justify-content: center; }
+#fx-layer .fx-word { position: relative; z-index: 2; font-weight: 900; line-height: 1.05; letter-spacing: 0.04em; white-space: nowrap; }
+/* 宣言者：大きく、宣言の色の縁取り。AI は席（下家・対面・上家）も添える */
+#fx-layer .fx-who { position: relative; z-index: 3; display: inline-flex; align-items: center; gap: 0.3em; white-space: nowrap;
+  font-size: clamp(22px, min(8vw, 6.5vh), 40px); font-weight: 900; line-height: 1.15; color: #fff;
+  padding: 0.12em 0.6em; border-radius: 999px; background: rgba(8, 10, 18, 0.86); border: 2px solid var(--fx-accent);
+  box-shadow: 0 0 14px 2px var(--fx-glow); text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8); }
+#fx-layer .fx-pos { font-size: 0.6em; padding: 0.1em 0.45em; border-radius: 6px; background: var(--fx-accent); color: #141414; text-shadow: none; }
+#fx-layer .fx-of { font-size: 0.72em; opacity: 0.92; }
+#fx-layer .fx-tiles, #fx-layer .fx-wintile, #fx-layer .fx-decl { position: relative; display: flex; gap: 4px; justify-content: center; }
+#fx-layer .fx-tiles .fx-t .tile, #fx-layer .fx-wintile .tile, #fx-layer .fx-decl .tile { box-shadow: 0 0 14px 3px var(--fx-glow); }
+
+/* カットインの帯：斜めに画面を横切る。上下の縁に光のライン、中を流れる光の筋 */
+#fx-layer .fx-band { position: absolute; z-index: 1; left: 50%; top: 50%; width: 160vw; height: clamp(70px, min(23vw, 23vh), 150px);
+  margin: calc(clamp(70px, min(23vw, 23vh), 150px) / -2) 0 0 -80vw; overflow: hidden;
+  background: linear-gradient(90deg, var(--fx-band-a) 0%, var(--fx-band-b) 35%, var(--fx-band-b) 65%, var(--fx-band-a) 100%);
+  border-top: 3px solid var(--fx-line); border-bottom: 3px solid var(--fx-line);
+  box-shadow: 0 0 18px 4px var(--fx-glow), 0 0 0 1px rgba(0, 0, 0, 0.35) inset; transform: rotate(var(--fx-tilt)); }
+#fx-layer .fx-band-lines { position: absolute; top: 0; bottom: 0; left: 0; width: 200%;
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0) 0 46px, rgba(255, 255, 255, 0.22) 46px 49px, rgba(255, 255, 255, 0) 49px 130px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0) 30%, rgba(255, 255, 255, 0) 70%, rgba(0, 0, 0, 0.25) 100%);
+  animation: fx-lines 700ms linear infinite; }
+@keyframes fx-lines { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(-130px, 0, 0); } }
+
+/* --- チー（1.0秒）：青緑。帯が左から素早く入り、中央で静止、右へ抜ける --- */
+#fx-layer.fx-chi .fx-band { animation: fx-band-slide 1000ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-chi .fx-word { font-size: clamp(48px, min(19vw, 20vh), 104px); color: #e9fffb;
+  text-shadow: 0 0 10px #3ec6ff, 0 0 24px #2fd49a, 0 3px 0 #04353d, 0 5px 8px rgba(0, 0, 0, 0.6);
+  animation: fx-word-slide 1000ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-chi .fx-who { animation: fx-who-in 1000ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-chi .fx-t1 { animation: fx-tile-in 1000ms ease-out both; }
+#fx-layer.fx-chi .fx-t2 { animation: fx-tile-in 1000ms ease-out 50ms both; }
+#fx-layer.fx-chi .fx-t3 { animation: fx-tile-in 1000ms ease-out 100ms both; }
+@keyframes fx-band-slide {
+  0% { opacity: 0; transform: rotate(var(--fx-tilt)) translate3d(-100vw, 0, 0); }
+  16% { opacity: 1; transform: rotate(var(--fx-tilt)) translate3d(0, 0, 0); }
+  82% { opacity: 1; transform: rotate(var(--fx-tilt)) translate3d(0, 0, 0); }
+  100% { opacity: 0; transform: rotate(var(--fx-tilt)) translate3d(60vw, 0, 0); }
+}
+@keyframes fx-word-slide {
+  0% { opacity: 0; transform: translate3d(-60vw, 0, 0) skewX(-14deg); }
+  18% { opacity: 1; transform: translate3d(0, 0, 0) skewX(-6deg); }
+  26% { transform: translate3d(0, 0, 0) skewX(0deg); }
+  84% { opacity: 1; transform: translate3d(0, 0, 0); }
+  100% { opacity: 0; transform: translate3d(40vw, 0, 0) skewX(-10deg); }
+}
+@keyframes fx-who-in {
+  0% { opacity: 0; transform: translate3d(0, -14px, 0) scale(0.9); }
+  14% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.06); }
+  22% { transform: scale(1); }
+  86% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1); }
+}
+@keyframes fx-tile-in {
+  0% { opacity: 0; transform: translate3d(-40px, 0, 0); }
+  22% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.08); }
+  30% { transform: scale(1); }
+  86% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: translate3d(16px, 0, 0); }
+}
+.meld.fx-glow-chi { animation: fx-glow-chi 1000ms ease-out both; }
+@keyframes fx-glow-chi { 0% { box-shadow: 0 0 0 0 rgba(70, 200, 230, 0); } 15% { box-shadow: 0 0 12px 4px rgba(70, 220, 210, 0.95); } 70% { box-shadow: 0 0 8px 2px rgba(70, 220, 210, 0.6); } 100% { box-shadow: 0 0 0 0 rgba(70, 200, 230, 0); } }
+
+/* --- ポン（1.2秒）：金橙。帯が中央から一気に広がる衝撃、3枚が左・下・右から集まる --- */
+#fx-layer.fx-pon .fx-band { animation: fx-band-burst 1200ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-pon .fx-word { font-size: clamp(52px, min(22vw, 22vh), 118px); color: #fff3cc;
+  text-shadow: 0 0 10px #ffc04a, 0 0 26px #ff8a1c, 0 3px 0 #6a3a00, 0 5px 8px rgba(0, 0, 0, 0.6);
+  animation: fx-word-slam 1200ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-pon .fx-who { animation: fx-who-in 1200ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-pon .fx-t1 { animation: fx-pon-l 1200ms ease-out both; }
+#fx-layer.fx-pon .fx-t2 { animation: fx-pon-c 1200ms ease-out both; }
+#fx-layer.fx-pon .fx-t3 { animation: fx-pon-r 1200ms ease-out both; }
+@keyframes fx-band-burst {
+  0% { opacity: 0; transform: rotate(var(--fx-tilt)) scaleX(0.05) scaleY(0.4); }
+  12% { opacity: 1; transform: rotate(var(--fx-tilt)) scaleX(1.04) scaleY(1.08); }
+  18% { transform: rotate(var(--fx-tilt)) scaleX(1) scaleY(1); }
+  85% { opacity: 1; transform: rotate(var(--fx-tilt)) scaleX(1) scaleY(1); }
+  100% { opacity: 0; transform: rotate(var(--fx-tilt)) scaleX(1) scaleY(0.2); }
+}
+@keyframes fx-word-slam {
+  0% { opacity: 0; transform: scale(2.2); }
+  12% { opacity: 1; transform: scale(0.92); }
+  19% { transform: scale(1.05); }
+  26% { transform: scale(1); }
+  86% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.06); }
+}
+@keyframes fx-pon-l { 0% { opacity: 0; transform: translate3d(-90px, 0, 0); } 20% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.1); } 28% { transform: scale(1); } 86% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-pon-r { 0% { opacity: 0; transform: translate3d(90px, 0, 0); } 20% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.1); } 28% { transform: scale(1); } 86% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-pon-c { 0% { opacity: 0; transform: translate3d(0, 40px, 0); } 20% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.14); } 28% { transform: scale(1); } 86% { opacity: 1; } 100% { opacity: 0; } }
+.meld.fx-glow-pon { animation: fx-glow-pon 1200ms ease-out both; }
+@keyframes fx-glow-pon { 0% { box-shadow: 0 0 0 0 rgba(255, 190, 70, 0); } 14% { box-shadow: 0 0 14px 5px rgba(255, 190, 70, 0.95); } 70% { box-shadow: 0 0 8px 2px rgba(255, 190, 70, 0.6); } 100% { box-shadow: 0 0 0 0 rgba(255, 190, 70, 0); } }
+
+/* --- ロン（2.2秒）：赤金。冒頭（約0.5秒）に閃光1回・放射状の光条・揺れ。中央で静止して読ませ（〜1.15秒）、
+       後半は中央の表示を消し、画面最上部の小さな帯（宣言者・宣言・和了牌）に替える（結果画面を長く隠さない・眩しさを抑える） --- */
+#fx-layer.fx-ron .fx-band { animation: fx-band-win 2200ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-ron .fx-card { animation: fx-card-win 2200ms cubic-bezier(.3, .8, .3, 1) both; }
+#fx-layer.fx-ron .fx-word { font-size: clamp(60px, min(27vw, 26vh), 150px); color: #fff3c4;
+  text-shadow: 0 0 8px #ffd25a, 0 0 22px #ff9a1c, 0 0 44px #ff4a1c, 0 4px 0 #7a1200, 0 7px 10px rgba(0, 0, 0, 0.6);
+  animation: fx-word-win 2200ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-ron .fx-who { animation: fx-who-win 2200ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-ron .fx-wintile .tile { animation: fx-wintile 2200ms ease-out both; box-shadow: 0 0 20px 6px rgba(255, 190, 70, 0.95), 0 0 36px 10px rgba(255, 70, 30, 0.55); }
 #fx-layer.fx-ron .fx-flash { position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-  background: radial-gradient(circle at 50% 50%, rgba(255, 236, 150, 0.95), rgba(255, 70, 30, 0.6) 45%, rgba(255, 40, 20, 0) 78%);
-  animation: fx-flash-ron 720ms ease-out both; }
+  background: radial-gradient(circle at 50% 50%, rgba(255, 236, 150, 0.9), rgba(255, 70, 30, 0.55) 45%, rgba(255, 40, 20, 0) 78%);
+  animation: fx-flash-once 600ms ease-out both; }
 #fx-layer.fx-ron .fx-rays { position: absolute; left: 50%; top: 50%; width: 150vmin; height: 150vmin; margin: -75vmin 0 0 -75vmin; border-radius: 50%;
   background: repeating-conic-gradient(from 0deg, rgba(255, 205, 90, 0.7) 0deg 5deg, rgba(255, 90, 30, 0) 5deg 15deg);
   -webkit-mask-image: radial-gradient(circle, #000 0, rgba(0, 0, 0, 0.6) 40%, transparent 70%); mask-image: radial-gradient(circle, #000 0, rgba(0, 0, 0, 0.6) 40%, transparent 70%);
-  animation: fx-rays 1000ms ease-out both; }
-@keyframes fx-ron-word {
-  0% { opacity: 0; transform: scale(3); }
-  12% { opacity: 1; transform: scale(0.88); }
-  22% { transform: scale(1.14); }
-  32% { transform: scale(1); }
-  52% { transform: scale(1.05); }
-  64% { transform: scale(1); }
-  88% { opacity: 1; transform: scale(1); }
-  100% { opacity: 0; transform: scale(1.1); }
+  animation: fx-rays 1100ms ease-out both; }
+
+/* --- ツモ（2.0秒）：青白金。冒頭に閃光1回と光の輪。ロンと同じく中央で静止し、後半は最上部の小さな帯に替える --- */
+#fx-layer.fx-tsumo .fx-band { animation: fx-band-win 2000ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-tsumo .fx-card { animation: fx-card-win 2000ms cubic-bezier(.3, .8, .3, 1) both; }
+#fx-layer.fx-tsumo .fx-word { font-size: clamp(58px, min(26vw, 25vh), 140px); color: #f4fbff;
+  text-shadow: 0 0 10px #7fd0ff, 0 0 28px #3a9bff, 0 0 18px #ffd86a, 0 3px 0 #0b2a66, 0 6px 10px rgba(0, 0, 0, 0.6);
+  animation: fx-word-win 2000ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-tsumo .fx-who { animation: fx-who-win 2000ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-tsumo .fx-wintile .tile { animation: fx-wintile 2000ms ease-out both; box-shadow: 0 0 18px 5px rgba(150, 215, 255, 0.95), 0 0 30px 8px rgba(255, 214, 110, 0.55); }
+#fx-layer.fx-tsumo .fx-flash { position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: radial-gradient(circle at 50% 50%, rgba(235, 248, 255, 0.9), rgba(110, 190, 255, 0.5) 40%, rgba(255, 215, 110, 0.22) 62%, rgba(80, 120, 255, 0) 78%);
+  animation: fx-flash-once 560ms ease-out both; }
+#fx-layer.fx-tsumo .fx-halo { position: absolute; left: 50%; top: 50%; width: 70vmin; height: 70vmin; margin: -35vmin 0 0 -35vmin; border-radius: 50%;
+  border: 4px solid rgba(190, 230, 255, 0.95); box-shadow: 0 0 26px 8px rgba(120, 190, 255, 0.8), inset 0 0 26px 6px rgba(255, 220, 130, 0.6);
+  animation: fx-halo 1000ms ease-out both; }
+
+/* ロン・ツモ共通の段階：0〜約20% 強い登場 → 〜50% 中央で静止（読ませる） → 〜58% 中央の表示が消え、最上部の小さな帯に替わる → 〜92% 帯で静かに表示 → 消える */
+@keyframes fx-band-win {
+  0% { opacity: 0; transform: rotate(var(--fx-tilt)) translate3d(-100vw, 0, 0); }
+  10% { opacity: 1; transform: rotate(var(--fx-tilt)) translate3d(0, 0, 0); }
+  50% { opacity: 1; transform: rotate(var(--fx-tilt)) translate3d(0, 0, 0); }
+  60% { opacity: 0; transform: rotate(var(--fx-tilt)) translate3d(0, 0, 0) scaleY(0.3); }
+  100% { opacity: 0; transform: rotate(var(--fx-tilt)) translate3d(0, 0, 0) scaleY(0.3); }
 }
-@keyframes fx-flash { 0% { opacity: 0; } 14% { opacity: 1; } 100% { opacity: 0; } }
-@keyframes fx-flash-ron { 0% { opacity: 0; } 10% { opacity: 1; } 30% { opacity: 0.25; } 42% { opacity: 0.8; } 100% { opacity: 0; } }
+@keyframes fx-card-win {
+  0%, 50% { transform: translate3d(0, 0, 0) scale(1); opacity: 1; }
+  58%, 100% { transform: translate3d(0, -4vh, 0) scale(0.92); opacity: 0; }
+}
+/* 後半：画面最上部の小さな帯（宣言者・宣言・和了牌）。結果画面の内容をほとんど隠さず、誰の和了かを示し続ける */
+#fx-layer .fx-banner { position: absolute; z-index: 4; top: max(6px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; white-space: nowrap; max-width: calc(100vw - 16px);
+  padding: 4px 14px; border-radius: 999px; background: rgba(8, 10, 18, 0.86); border: 2px solid var(--fx-accent);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5); color: #fff; font-weight: 900; font-size: clamp(16px, 4.6vw, 22px); }
+#fx-layer .fx-banner .fx-pos { font-size: 0.7em; }
+#fx-layer .fx-banner .fx-bword { color: var(--fx-accent); font-size: 1.15em; }
+#fx-layer .fx-banner .tile { box-shadow: 0 0 8px 2px var(--fx-glow); }
+#fx-layer.fx-ron .fx-banner { animation: fx-banner 2200ms ease-out both; }
+#fx-layer.fx-tsumo .fx-banner { animation: fx-banner 2000ms ease-out both; }
+@keyframes fx-banner {
+  0%, 50% { opacity: 0; transform: translate3d(-50%, -14px, 0); }
+  58% { opacity: 1; transform: translate3d(-50%, 0, 0); }
+  92% { opacity: 1; transform: translate3d(-50%, 0, 0); }
+  100% { opacity: 0; transform: translate3d(-50%, 0, 0); }
+}
+@keyframes fx-word-win {
+  0% { opacity: 0; transform: scale(2.8); }
+  7% { opacity: 1; transform: scale(0.9); }
+  12% { transform: scale(1.1); }
+  17% { transform: scale(1); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes fx-who-win {
+  0%, 6% { opacity: 0; transform: translate3d(0, -16px, 0) scale(0.9); }
+  13% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.08); }
+  18%, 100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes fx-wintile {
+  0%, 5% { opacity: 0; transform: scale(0.4); }
+  12% { opacity: 1; transform: scale(1.35); }
+  18% { transform: scale(1.15); }
+  100% { opacity: 1; transform: scale(1.15); }
+}
+@keyframes fx-flash-once { 0% { opacity: 0; } 18% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes fx-rays { 0% { opacity: 0; transform: scale(0.5); } 14% { opacity: 1; } 100% { opacity: 0; transform: scale(1.25); } }
-@keyframes fx-pop { 0% { opacity: 0; transform: scale(0.4); } 25% { opacity: 1; transform: scale(1.25); } 40% { transform: scale(1); } 82% { opacity: 1; } 100% { opacity: 0; } }
-@keyframes fx-pop-ron { 0% { opacity: 0; transform: scale(0.4); } 16% { opacity: 1; transform: scale(1.3); } 28% { transform: scale(1); } 90% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-halo { 0% { opacity: 0; transform: scale(0.15); } 12% { opacity: 1; } 100% { opacity: 0; transform: scale(2.1); } }
 .table.fx-shake { animation: fx-shake 520ms linear both; animation-delay: 60ms; }
 /* ロンの揺れ：最初の衝撃を強めに、その後は減衰させる（不快にならないよう、振れ幅は 5px まで） */
 .table.fx-shake.fx-shake-ron { animation: fx-shake-ron 700ms linear both; animation-delay: 60ms; }
@@ -467,81 +619,64 @@ table.values td.undef { color: #999; font-size: 12px; }
   100% { transform: translate3d(0, 0, 0); }
 }
 
-/* ツモ（Ver.0.5-C）：ロンと同格（1.0秒）。青白〜金で、ロン（赤金）と見分ける。自力で引き当てた神秘感として、閃光に光の輪を重ねる */
-#fx-layer.fx-tsumo .fx-word { font-size: clamp(60px, 26vw, 140px); color: #f4fbff;
-  text-shadow: 0 0 10px #7fd0ff, 0 0 28px #3a9bff, 0 0 56px #4f7dff, 0 0 18px #ffd86a, 0 3px 0 #0b2a66;
-  animation: fx-tsumo-word 1000ms cubic-bezier(.2, .9, .3, 1) both; }
-#fx-layer.fx-tsumo .fx-wintile .tile { animation: fx-pop 1000ms ease-out both; box-shadow: 0 0 18px 5px rgba(150, 215, 255, 0.95), 0 0 30px 8px rgba(255, 214, 110, 0.55); }
-#fx-layer.fx-tsumo .fx-flash { position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-  background: radial-gradient(circle at 50% 50%, rgba(235, 248, 255, 0.95), rgba(110, 190, 255, 0.55) 40%, rgba(255, 215, 110, 0.25) 62%, rgba(80, 120, 255, 0) 78%);
-  animation: fx-flash 560ms ease-out both; }
-#fx-layer.fx-tsumo .fx-halo { position: absolute; left: 50%; top: 50%; width: 70vmin; height: 70vmin; margin: -35vmin 0 0 -35vmin; border-radius: 50%;
-  border: 4px solid rgba(190, 230, 255, 0.95); box-shadow: 0 0 26px 8px rgba(120, 190, 255, 0.8), inset 0 0 26px 6px rgba(255, 220, 130, 0.6);
-  animation: fx-halo 900ms ease-out both; }
-@keyframes fx-tsumo-word {
-  0% { opacity: 0; transform: scale(0.4); filter: blur(6px); }
-  18% { opacity: 1; transform: scale(1.18); filter: blur(0); }
-  32% { transform: scale(0.97); }
-  44% { transform: scale(1); }
-  86% { opacity: 1; transform: scale(1); }
-  100% { opacity: 0; transform: scale(1.06); }
-}
-@keyframes fx-halo { 0% { opacity: 0; transform: scale(0.15); } 12% { opacity: 1; } 100% { opacity: 0; transform: scale(2.1); } }
-
-/* リーチ（Ver.0.5-D）：0.7秒。ロン・ツモより短く、ポン・チーより特別感を出す。紫〜金の発光と白銀の鋭い閃光（十字の光条）、宣言牌を大きく */
-#fx-layer.fx-riichi .fx-word { font-size: clamp(54px, 23vw, 120px); color: #f6efff;
+/* --- リーチ（0.9秒）：紫〜金の発光と白銀の鋭い閃光（十字の光条）、宣言牌を大きく --- */
+#fx-layer.fx-riichi .fx-word { font-size: clamp(50px, min(22vw, 22vh), 120px); color: #f6efff;
   text-shadow: 0 0 8px #d9b8ff, 0 0 22px #9a5cff, 0 0 44px #6a2cff, 0 0 16px #ffd86a, 0 3px 0 #2a0f5a;
-  animation: fx-riichi-word 700ms cubic-bezier(.15, .9, .25, 1) both; }
-#fx-layer.fx-riichi .fx-decl .tile { animation: fx-riichi-decl 700ms ease-out both; box-shadow: 0 0 16px 4px rgba(220, 190, 255, 0.95), 0 0 28px 8px rgba(255, 214, 110, 0.6); }
+  animation: fx-riichi-word 900ms cubic-bezier(.15, .9, .25, 1) both; }
+#fx-layer.fx-riichi .fx-who { animation: fx-who-in 900ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-riichi .fx-decl .tile { animation: fx-riichi-decl 900ms ease-out both; box-shadow: 0 0 16px 4px rgba(220, 190, 255, 0.95), 0 0 28px 8px rgba(255, 214, 110, 0.6); }
 #fx-layer.fx-riichi .fx-flash { position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-  background: radial-gradient(circle at 50% 50%, rgba(246, 240, 255, 0.9), rgba(160, 110, 255, 0.5) 38%, rgba(255, 214, 110, 0.18) 60%, rgba(90, 50, 200, 0) 78%);
-  animation: fx-flash 420ms ease-out both; }
+  background: radial-gradient(circle at 50% 50%, rgba(246, 240, 255, 0.85), rgba(160, 110, 255, 0.45) 38%, rgba(255, 214, 110, 0.16) 60%, rgba(90, 50, 200, 0) 78%);
+  animation: fx-flash-once 420ms ease-out both; }
 #fx-layer.fx-riichi .fx-streak { position: absolute; left: 50%; top: 50%; background: linear-gradient(90deg, rgba(255, 255, 255, 0), rgba(235, 240, 255, 0.98) 50%, rgba(255, 255, 255, 0)); box-shadow: 0 0 14px 3px rgba(190, 170, 255, 0.9); }
-#fx-layer.fx-riichi .fx-streak-h { width: 120vmax; height: 3px; margin: -1px 0 0 -60vmax; animation: fx-streak-h 460ms cubic-bezier(.2, .9, .3, 1) both; }
-#fx-layer.fx-riichi .fx-streak-v { width: 3px; height: 120vmax; margin: -60vmax 0 0 -1px; animation: fx-streak-v 460ms cubic-bezier(.2, .9, .3, 1) 40ms both; }
-@keyframes fx-riichi-word { 0% { opacity: 0; transform: scale(1.7) translateY(-8px); letter-spacing: 0.3em; } 22% { opacity: 1; transform: scale(0.96) translateY(0); letter-spacing: 0.05em; } 36% { transform: scale(1.03); } 50% { transform: scale(1); } 86% { opacity: 1; } 100% { opacity: 0; } }
-@keyframes fx-riichi-decl { 0% { opacity: 0; transform: scale(0.5) rotate(-20deg); } 24% { opacity: 1; transform: scale(1.2) rotate(0deg); } 40% { transform: scale(1); } 86% { opacity: 1; } 100% { opacity: 0; } }
+#fx-layer.fx-riichi .fx-streak-h { width: 120vmax; height: 3px; margin: -1px 0 0 -60vmax; animation: fx-streak-h 520ms cubic-bezier(.2, .9, .3, 1) both; }
+#fx-layer.fx-riichi .fx-streak-v { width: 3px; height: 120vmax; margin: -60vmax 0 0 -1px; animation: fx-streak-v 520ms cubic-bezier(.2, .9, .3, 1) 40ms both; }
+@keyframes fx-riichi-word { 0% { opacity: 0; transform: scale(1.7) translateY(-8px); letter-spacing: 0.3em; } 18% { opacity: 1; transform: scale(0.96) translateY(0); letter-spacing: 0.05em; } 28% { transform: scale(1.03); } 38% { transform: scale(1); } 88% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes fx-riichi-decl { 0% { opacity: 0; transform: scale(0.5) rotate(-20deg); } 20% { opacity: 1; transform: scale(1.2) rotate(0deg); } 32% { transform: scale(1); } 88% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes fx-streak-h { 0% { opacity: 0; transform: scaleX(0); } 20% { opacity: 1; transform: scaleX(1); } 100% { opacity: 0; transform: scaleX(1); } }
 @keyframes fx-streak-v { 0% { opacity: 0; transform: scaleY(0); } 20% { opacity: 1; transform: scaleY(1); } 100% { opacity: 0; transform: scaleY(1); } }
-.tile.fx-glow-riichi { animation: fx-glow-riichi 700ms ease-out both; }
-@keyframes fx-glow-riichi { 0% { box-shadow: 0 0 0 0 rgba(190, 150, 255, 0); } 20% { box-shadow: 0 0 14px 6px rgba(200, 170, 255, 0.95), 0 0 24px 8px rgba(255, 214, 110, 0.6); } 100% { box-shadow: 0 0 0 0 rgba(190, 150, 255, 0); } }
+.tile.fx-glow-riichi { animation: fx-glow-riichi 900ms ease-out both; }
+@keyframes fx-glow-riichi { 0% { box-shadow: 0 0 0 0 rgba(190, 150, 255, 0); } 18% { box-shadow: 0 0 14px 6px rgba(200, 170, 255, 0.95), 0 0 24px 8px rgba(255, 214, 110, 0.6); } 100% { box-shadow: 0 0 0 0 rgba(190, 150, 255, 0); } }
 
-/* ポン：中くらい（0.52秒）。3枚が左右・上から集まって衝撃。面子が金色に光る */
-#fx-layer.fx-pon .fx-word { font-size: clamp(52px, 21vw, 112px); color: #ffeab0;
-  text-shadow: 0 0 10px #ffc04a, 0 0 26px #ff9a1c, 0 3px 0 #7a4a00;
-  animation: fx-pon-word 520ms cubic-bezier(.2, .9, .3, 1) both; }
-#fx-layer.fx-pon .fx-t1 { animation: fx-pon-l 520ms ease-out both; }
-#fx-layer.fx-pon .fx-t2 { animation: fx-pon-c 520ms ease-out both; }
-#fx-layer.fx-pon .fx-t3 { animation: fx-pon-r 520ms ease-out both; }
-@keyframes fx-pon-word { 0% { opacity: 0; transform: scale(1.9); } 24% { opacity: 1; transform: scale(0.94); } 40% { transform: scale(1.04); } 55% { transform: scale(1); } 85% { opacity: 1; } 100% { opacity: 0; } }
-@keyframes fx-pon-l { 0% { opacity: 0; transform: translate3d(-90px, 0, 0); } 35% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.08); } 50% { transform: scale(1); } 85% { opacity: 1; } 100% { opacity: 0; } }
-@keyframes fx-pon-r { 0% { opacity: 0; transform: translate3d(90px, 0, 0); } 35% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.08); } 50% { transform: scale(1); } 85% { opacity: 1; } 100% { opacity: 0; } }
-@keyframes fx-pon-c { 0% { opacity: 0; transform: translate3d(0, 40px, 0); } 35% { opacity: 1; transform: translate3d(0, 0, 0) scale(1.12); } 50% { transform: scale(1); } 85% { opacity: 1; } 100% { opacity: 0; } }
-.meld.fx-glow-pon { animation: fx-glow-pon 520ms ease-out both; }
-@keyframes fx-glow-pon { 0% { box-shadow: 0 0 0 0 rgba(255, 190, 70, 0); } 20% { box-shadow: 0 0 14px 5px rgba(255, 190, 70, 0.95); } 100% { box-shadow: 0 0 0 0 rgba(255, 190, 70, 0); } }
-
-/* チー：ポンより軽く素早い（0.42秒）。青〜緑で、左から流れるように */
-#fx-layer.fx-chi .fx-word { font-size: clamp(44px, 18vw, 92px); color: #d9f7ff;
-  text-shadow: 0 0 10px #3ec6ff, 0 0 24px #2fd49a, 0 3px 0 #0b4a52;
-  animation: fx-chi-word 420ms cubic-bezier(.25, .8, .3, 1) both; }
-#fx-layer.fx-chi .fx-t1 { animation: fx-chi-t 420ms ease-out both; }
-#fx-layer.fx-chi .fx-t2 { animation: fx-chi-t 420ms ease-out 45ms both; }
-#fx-layer.fx-chi .fx-t3 { animation: fx-chi-t 420ms ease-out 90ms both; }
-#fx-layer.fx-chi .fx-tiles .fx-t { box-shadow: 0 0 12px 2px rgba(80, 210, 230, 0.7); }
-@keyframes fx-chi-word { 0% { opacity: 0; transform: translate3d(-40px, 0, 0); } 30% { opacity: 1; transform: translate3d(0, 0, 0); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate3d(24px, 0, 0); } }
-@keyframes fx-chi-t { 0% { opacity: 0; transform: translate3d(-44px, 0, 0); } 35% { opacity: 1; transform: translate3d(0, 0, 0); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate3d(14px, 0, 0); } }
-.meld.fx-glow-chi { animation: fx-glow-chi 420ms ease-out both; }
-@keyframes fx-glow-chi { 0% { box-shadow: 0 0 0 0 rgba(70, 200, 230, 0); } 20% { box-shadow: 0 0 12px 4px rgba(70, 200, 230, 0.95); } 100% { box-shadow: 0 0 0 0 rgba(70, 200, 230, 0); } }
-
-/* 簡易表示・視差の少ない設定：文字だけ（フラッシュ・揺れ・牌・発光なし）。動きは不透明度のみ。 */
-#fx-layer.lite .fx-word { animation-name: fx-lite !important; }
-#fx-layer.lite .fx-flash, #fx-layer.lite .fx-halo, #fx-layer.lite .fx-rays, #fx-layer.lite .fx-streak, #fx-layer.lite .fx-tiles, #fx-layer.lite .fx-wintile, #fx-layer.lite .fx-decl { display: none; }
-@keyframes fx-lite { 0% { opacity: 0; } 20% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) {
-  .table.fx-shake, .table.fx-shake.fx-shake-ron, .meld.fx-glow-pon, .meld.fx-glow-chi, .tile.fx-glow-riichi { animation: none; }
+/* --- 宣言者の席の発光（Ver.0.5-E）：宣言した人の欄（自分は手牌の欄、AI は各席の欄）を、宣言の色で1回光らせてから静かに縁取る --- */
+.panel.fx-seat, .self.fx-seat { position: relative; z-index: 1; }
+.fx-seat-chi { --fx-seat: 60, 220, 210; }
+.fx-seat-pon { --fx-seat: 255, 175, 50; }
+.fx-seat-ron { --fx-seat: 255, 80, 40; }
+.fx-seat-tsumo { --fx-seat: 110, 190, 255; }
+.fx-seat-riichi { --fx-seat: 180, 130, 255; }
+.fx-seat.fx-seat-chi { animation: fx-seat 1000ms ease-out both; }
+.fx-seat.fx-seat-pon { animation: fx-seat 1200ms ease-out both; }
+.fx-seat.fx-seat-ron { animation: fx-seat 2200ms ease-out both; }
+.fx-seat.fx-seat-tsumo { animation: fx-seat 2000ms ease-out both; }
+.fx-seat.fx-seat-riichi { animation: fx-seat 900ms ease-out both; }
+@keyframes fx-seat {
+  0% { box-shadow: 0 0 0 0 rgba(var(--fx-seat), 0); border-color: rgba(var(--fx-seat), 1); }
+  12% { box-shadow: 0 0 0 3px rgba(var(--fx-seat), 1), 0 0 22px 6px rgba(var(--fx-seat), 0.85); border-color: rgba(var(--fx-seat), 1); }
+  45% { box-shadow: 0 0 0 3px rgba(var(--fx-seat), 0.9), 0 0 10px 2px rgba(var(--fx-seat), 0.5); border-color: rgba(var(--fx-seat), 1); }
+  100% { box-shadow: 0 0 0 2px rgba(var(--fx-seat), 0); }
 }
-@media (max-width: 360px) {
-  #fx-layer .fx-who { font-size: 13px; }
+/* 簡易表示：席は点滅させず、枠の色だけで示す */
+.fx-seat-lite { box-shadow: 0 0 0 3px rgba(var(--fx-seat), 0.95) !important; border-color: rgba(var(--fx-seat), 1) !important; }
+
+/* 簡易表示・視差の少ない設定：宣言者と文字だけ（帯・閃光・揺れ・牌・発光なし）。動きは不透明度のみ。読みやすいよう暗い下地を敷く。
+   ロン・ツモは結果画面を隠さないよう、画面上部に出す。 */
+#fx-layer.lite .fx-card { animation: none !important; background: rgba(8, 10, 18, 0.78); border: 2px solid var(--fx-accent); border-radius: 16px; padding: 10px 18px; }
+#fx-layer.lite .fx-word, #fx-layer.lite .fx-who { animation-name: fx-lite !important; animation-timing-function: linear !important; }
+#fx-layer.lite .fx-word { font-size: clamp(40px, min(16vw, 16vh), 84px); }
+#fx-layer.lite .fx-who { box-shadow: none; }
+#fx-layer.lite.fx-ron, #fx-layer.lite.fx-tsumo { align-items: flex-start; padding-top: max(10px, 4vh); }
+#fx-layer.lite .fx-banner, #fx-layer.lite .fx-flash, #fx-layer.lite .fx-halo, #fx-layer.lite .fx-rays, #fx-layer.lite .fx-streak, #fx-layer.lite .fx-band, #fx-layer.lite .fx-tiles, #fx-layer.lite .fx-wintile, #fx-layer.lite .fx-decl { display: none; }
+@keyframes fx-lite { 0% { opacity: 0; } 8% { opacity: 1; } 92% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .table.fx-shake, .table.fx-shake.fx-shake-ron, .meld.fx-glow-pon, .meld.fx-glow-chi, .tile.fx-glow-riichi, .fx-seat { animation: none; }
+  #fx-layer .fx-band-lines { animation: none; }
+}
+/* 横向き（高さが低い）画面：文字・牌を少し詰めて画面内に収める */
+@media (max-height: 460px) {
+  #fx-layer { --fx-tilt: -3.5deg; }
+  #fx-layer .fx-card { gap: 3px; }
+  #fx-layer .fx-tiles .tile, #fx-layer .fx-wintile .tile, #fx-layer .fx-decl .tile { zoom: 0.85; }
 }
 
 /* 演出の画面揺れ（盤面を ±5px 動かす）で、一瞬ページが横にはみ出して横スクロールできてしまわないよう、はみ出しを切る。

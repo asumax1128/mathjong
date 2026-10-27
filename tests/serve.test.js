@@ -158,3 +158,20 @@ test('実際のリポジトリ：ゲームのアセットは取得でき、.git 
   }
   assert.ok(REPO_ROOT);
 });
+
+test('宣言ボイス（Ver.0.5-E の準備）：src/ui/voice-*.m4a|mp3 だけを音声として配信。ほかの場所・名前・形式の音声は配信しない', async () => {
+  await writeFile(join(root, 'src', 'ui', 'voice-test-ron.m4a'), 'DUMMY-M4A');
+  await writeFile(join(root, 'src', 'ui', 'voice-test-chi.mp3'), 'DUMMY-MP3');
+  await writeFile(join(root, 'src', 'ui', 'other.mp3'), 'DUMMY-OTHER');
+  await writeFile(join(root, 'src', 'ui', 'voice-test.wav'), 'DUMMY-WAV');
+  await writeFile(join(root, 'src', 'engine', 'voice-x.mp3'), 'DUMMY-ENGINE');
+  let r = await get(server, `${BASE}src/ui/voice-test-ron.m4a`);
+  assert.deepEqual([r.status, r.body, r.headers['content-type']], [200, 'DUMMY-M4A', 'audio/mp4']);
+  r = await get(server, `${BASE}src/ui/voice-test-chi.mp3`);
+  assert.deepEqual([r.status, r.headers['content-type']], [200, 'audio/mpeg']);
+  for (const path of ['src/ui/other.mp3', 'src/ui/voice-test.wav', 'src/engine/voice-x.mp3']) {
+    r = await get(server, `${BASE}${path}`);
+    assert.equal(r.status, 404, path);
+    assert.ok(!r.body.includes('DUMMY'), path);
+  }
+});
