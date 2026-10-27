@@ -3,6 +3,7 @@ import { createRules } from '../engine/rules.js';
 import { makeConfig, MODES, DEFAULT_MODE, ENGINE_VERSION } from '../engine/config.js';
 import { Game } from '../engine/game.js';
 import { decide, applyAction, PERSONALITIES } from '../engine/ai.js';
+import { decideCharacter, rosterForLevel } from '../engine/character-ai.js';
 import { matchInfo } from '../engine/ai-levels.js';
 import { createRng } from '../engine/rng.js';
 import { trigExact } from '../engine/exact.js';
@@ -52,20 +53,18 @@ function rulesForMode(mode) {
 const modeLabel = (r) => (MODES[r.config.mode] ? MODES[r.config.mode].label : '旧規則');
 const HUMAN = 0;
 const POS = ['自分', '下家', '対面', '上家'];
-const PLAYERS = [
+let PLAYERS = [
   { name: 'あなた', kind: 'human' },
-  { name: 'AI-A', kind: 'ai', personality: 'speed' },
-  { name: 'AI-B', kind: 'ai', personality: 'value' },
-  { name: 'AI-C', kind: 'ai', personality: 'closed' },
+  ...rosterForLevel('intermediate').map((c) => ({ ...c, kind: 'ai' })),
 ];
 
 
 // AI 難易度（Ver.0.4-B）。性格（速攻型・役重視型・門前重視型）とは別の軸で、AI 3人すべてに同じ難易度を使う。
 // 判断は src/engine/ai.js（中級）・src/engine/ai-levels.js（初級・上級）。AI の速さ（待ち時間）とは別の設定。
 const AI_LEVELS = [
-  { id: 'beginner', label: '初級', desc: '鳴かず、打牌も単純。和了できるときは和了します' },
-  { id: 'intermediate', label: '中級', desc: 'これまでのAI（性格ごとの打ち方）' },
-  { id: 'advanced', label: '上級', desc: '中級を強化。河・公開面子から危険な牌を避けます' },
+  { id: 'beginner', label: '初級', desc: 'かなた・みつき・あおと。3人それぞれの打ち方' },
+  { id: 'intermediate', label: '中級', desc: 'おうすけ・なつき・ゆき。点差で打ち方が変わります' },
+  { id: 'advanced', label: '上級', desc: 'ふくやま・かおる・アスマ。危険と高得点を読み合う' },
 ];
 const parseLen = (v) => (v === 4 || v === 8 || v === '4' || v === '8' ? Number(v) : null);
 const parseAi = (v) => (AI_LEVELS.some((a) => a.id === v) ? v : null);
@@ -224,7 +223,8 @@ function step(changed = false) {
     if (g !== S.game) return;
     if (drag && drag.isDragging()) { S.stepDeferred = true; return; }
     // AI 難易度は試合の開始時に確定した値（試合の途中で変えない）。試合の公開情報（持ち点・親番）は上級だけが使う。
-    const action = decide(g, p.seat, PLAYERS[p.seat].personality, S.aiRng, S.matchSettings.ai, matchInfo(S.match));
+    const action = decideCharacter(g, p.seat, PLAYERS[p.seat].id, S.aiRng,
+      matchInfo(S.match), PLAYERS.map((x) => x.id || 'human'));
     S.aiDecisions[S.matchSettings.ai] = (S.aiDecisions[S.matchSettings.ai] || 0) + 1; // 難易度ごとの判断回数（確認用）
     applyAction(g, p.seat, action);
     // 描画は step() が行う（自分の宣言を自動で見送る場合は、宣言ボタンを一度も描画しない）
@@ -1372,6 +1372,8 @@ if (IS_LOCAL) window.__mathjong = { S, get rules() { return rules; }, decide, st
 function startMatch({ fromUrl = false, settings = null } = {}) {
   const cfg = settings || { mode: S.nextMode, length: S.length, ai: S.ai };
   S.matchSettings = { mode: cfg.mode, length: cfg.length, ai: cfg.ai }; // この試合の設定（「もう一度遊ぶ」「最終結果」で使う）
+  PLAYERS = [{ name: 'あなた', kind: 'human' },
+    ...rosterForLevel(cfg.ai).map((c) => ({ ...c, kind: 'ai' }))]; // 試合開始時にキャラクター3人を確定
   S.mode = cfg.mode;
   rules = rulesForMode(S.mode);
   S.screen = 'game';
