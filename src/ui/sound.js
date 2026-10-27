@@ -134,6 +134,11 @@ export function createMasterChain(ctx) {
   comp.release.value = 0.12;
   master.connect(comp);
   comp.connect(ctx.destination);
+  // 出力の連鎖を丸ごと外す（中断した音を、復帰後に鳴らさないため。圧縮器の内部に残った分も出さない）
+  master.teardown = () => {
+    try { master.disconnect(); } catch { /* すでに外れている */ }
+    try { comp.disconnect(); } catch { /* すでに外れている */ }
+  };
   return master;
 }
 
@@ -193,8 +198,36 @@ export function createSoundPlayer({ getCtor, isOn }) {
     ctx: null, master: null, noise: null,
     log: [], // 確認用：{ kind, status }（status：played／off／blocked／nocontext／error）。最新100件
     unlocked: false,
+    buses: new Set(), // 鳴っている（予約済みを含む）音ごとの出力。{ bus, timer }
+    drops: 0, // 確認用：中断で古い音を破棄した回数
   };
   const note = (kind, status) => { P.log.push({ kind, status }); if (P.log.length > 100) P.log.shift(); return status; };
+
+  // ---- 中断した音の破棄 ----
+  // AudioContext が suspended／interrupted になると、context.currentTime が止まり、予約済みの音の「続き」が復帰後に鳴ってしまう
+  // （終わったはずのリーチ音の後半が、遅れて出る）。そこで、止まったことを知った時点で、鳴っている音の出力をすべて外す。
+  //   ・音ごとの出力（bus）と、全体の出力の連鎖（音量 → 圧縮器 → 出力）を丸ごと切断する。古い音源は何にもつながらないので、復帰しても聞こえない。
+  //   ・復帰後の新しい音は、新しい出力の連鎖につなぐ（AudioContext は作り直さない）。
+  //   ・止まったことを知るきっかけ：statechange、画面が隠れた／離れた（app.js から drop）、unlock・play が止まった状態を見つけたとき。
+  //   ・さらに、各 bus は「音の長さ＋余裕」の実時間（setTimeout）でも外す。止まったことに気づけなくても、終わった音は再び鳴らない。
+  const retire = (rec) => {
+    clearTimeout(rec.timer);
+    P.buses.delete(rec);
+    try { rec.bus.disconnect(); } catch { /* すでに外れている */ }
+  };
+  P.drop = () => {
+    const had = P.buses.size > 0 || !!P.master;
+    for (const rec of [...P.buses]) retire(rec);
+    const m = P.master;
+    P.master = null;
+    if (m) { try { if (m.teardown) m.teardown(); else m.disconnect(); } catch { /* 切断できなくても進行には関係しない */ } }
+    if (had) P.drops++;
+  };
+  const onState = () => { if (P.ctx && P.ctx.state !== 'running') P.drop(); };
+  const tryResume = (ctx) => {
+    if (typeof ctx.resume !== 'function') return;
+    try { const r = ctx.resume(); if (r && typeof r.catch === 'function') r.catch(() => {}); } catch { /* 再開できなくても進行には関係しない */ }
+  };
 
   // ユーザーの操作の中で呼ぶ。context を作り（なければ）、止まっていれば resume() し、無音を1回鳴らして iOS の再生許可を確実にする。
   P.unlock = () => {
@@ -203,11 +236,12 @@ export function createSoundPlayer({ getCtor, isOn }) {
         const C = getCtor && getCtor();
         if (!C) return false;
         P.ctx = new C();
+        if (typeof P.ctx.addEventListener === 'function') P.ctx.addEventListener('statechange', onState); // context ごとに1回だけ
       }
       const ctx = P.ctx;
-      if (ctx.state !== 'running' && typeof ctx.resume === 'function') {
-        const r = ctx.resume();
-        if (r && typeof r.catch === 'function') r.catch(() => {});
+      if (ctx.state !== 'running') {
+        P.drop(); // 止まっている間に残った古い音は、再開する前に切り離す
+        tryResume(ctx);
       }
       if (!P.unlocked) {
         // 無音の1サンプルを再生（iOS の再生許可のきっかけ）
@@ -230,8 +264,9 @@ export function createSoundPlayer({ getCtor, isOn }) {
       if (!P.ctx) return note(kind, 'nocontext'); // まだ操作がない・AudioContext を持たない環境：無音
       const ctx = P.ctx;
       if (ctx.state !== 'running') {
-        // 止まっている：再開を試みるだけで待たない。この音は鳴らさない（遅れて鳴ると場面とずれる）
-        if (typeof ctx.resume === 'function') { const r = ctx.resume(); if (r && typeof r.catch === 'function') r.catch(() => {}); }
+        // 止まっている：古い音を切り離し、再開を試みるだけで待たない。この音は鳴らさない（遅れて鳴ると場面とずれる）
+        P.drop();
+        tryResume(ctx);
         return note(kind, 'blocked');
       }
       if (!P.master) {
@@ -240,22 +275,31 @@ export function createSoundPlayer({ getCtor, isOn }) {
         nb.getChannelData(0).set(makeNoiseData(nb.length));
         P.noise = nb;
       }
-      scheduleRecipe(ctx, P.master, kind, ctx.currentTime + 0.005, P.noise);
+      const bus = ctx.createGain();
+      bus.connect(P.master);
+      const rec = { bus, timer: null };
+      P.buses.add(rec);
+      const end = scheduleRecipe(ctx, bus, kind, ctx.currentTime + 0.005, P.noise);
+      rec.timer = setTimeout(() => retire(rec), Math.max(0, end - ctx.currentTime) * 1000 + 250);
+      if (rec.timer && typeof rec.timer.unref === 'function') rec.timer.unref(); // Node のテストで終了を妨げない
       return note(kind, 'played');
     } catch { return note(kind, 'error'); }
   };
 
   // 鳴っている音を短く絞って止める（新しい局・タイトルへ戻るとき）。次の play は新しい出力の連鎖で鳴る。
+  // 止まっている context では絞る処理が進まないので、そのまま切り離す。
   P.silence = () => {
     try {
+      if (!P.ctx || P.ctx.state !== 'running') { P.drop(); return; }
       const m = P.master;
       P.master = null;
-      if (!m || !P.ctx) return;
+      for (const rec of [...P.buses]) { clearTimeout(rec.timer); P.buses.delete(rec); }
+      if (!m) return;
       const t = P.ctx.currentTime;
       m.gain.cancelScheduledValues(t);
       m.gain.setValueAtTime(m.gain.value, t);
       m.gain.linearRampToValueAtTime(0, t + 0.03);
-      setTimeout(() => { try { m.disconnect(); } catch { /* すでに外れている */ } }, 120);
+      setTimeout(() => { try { if (m.teardown) m.teardown(); else m.disconnect(); } catch { /* すでに外れている */ } }, 120);
     } catch { /* 無音にできなくても進行には関係しない */ }
   };
   return P;

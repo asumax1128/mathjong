@@ -320,6 +320,11 @@ for (const t of ['touchend', 'pointerup', 'click', 'keydown']) {
   window.addEventListener(t, () => { if (S.sound.on) sound.unlock(); }, { capture: true, passive: true });
 }
 
+// 画面が隠れた・ページを離れた（iPhone のバックグラウンド移行・ホーム画面・タブ切替）：鳴っている音を切り離す。
+// 復帰したあと、隠れる前の音の続きが鳴らないようにする（新しい音は復帰後に新しい出力で鳴る）。リスナーは1回だけ登録。
+document.addEventListener('visibilitychange', () => { if (document.hidden) sound.drop(); });
+window.addEventListener('pagehide', () => sound.drop());
+
 // 演出の中身（HTML）。簡易表示（lite）は文字だけ。牌は公開されている情報（鳴いた面子・和了牌）だけを使う。
 // lite は演出の開始時に決めた値（S.fx.current.lite）を渡す。設定をいま読み直さない。
 function fxHTML(kind, ev, lite) {
@@ -895,7 +900,7 @@ function settingsHTML() {
       <p class="note mode-note">いまの対局：${modeLabel(rules)}。${S.nextMode !== rules.config.mode && !LEGACY ? '下の「新しい対局」で切り替わります（いまの局は変わりません）。' : 'モードの変更は「新しい対局」から反映されます。'}</p>
     </fieldset>
     <label class="setting">AIの速さ <select data-action="speed">${publicSpeedNames().map(opt).join('')}</select></label>
-    <label class="setting">ロン・ポン・チーの演出 <select data-action="fx-mode"><option value="full" ${S.fx.mode === 'full' ? 'selected' : ''}>通常</option><option value="lite" ${S.fx.mode === 'lite' ? 'selected' : ''}>簡易（文字だけ）</option></select></label>
+    <label class="setting">視覚演出 <select data-action="fx-mode"><option value="full" ${S.fx.mode === 'full' ? 'selected' : ''}>通常</option><option value="lite" ${S.fx.mode === 'lite' ? 'selected' : ''}>簡易（文字だけ）</option></select></label>
     <label class="setting">効果音 <select data-action="sound"><option value="1" ${S.sound.on ? 'selected' : ''}>オン</option><option value="0" ${S.sound.on ? '' : 'selected'}>オフ</option></select></label>
     <p class="note sound-note">打牌・チー・ポン・リーチ・ロン・ツモの効果音です。オフでもゲームは同じように進みます。音が出ないときは、画面を一度タップしてからお試しください（マナーモードでは鳴らない端末があります）。</p>
     <p class="note setting-note">チー・ポンの自動パスは、対戦画面の手牌の下のボタンで切り替えます（いま：チー ${S.chiAutoPass ? 'ON' : 'OFF'}・ポン ${S.ponAutoPass ? 'ON' : 'OFF'}）。チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。</p>

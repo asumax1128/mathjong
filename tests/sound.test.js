@@ -247,3 +247,206 @@ test('構造：sound.js はエンジンを読み込まない。app.js は音の�
   assert.ok(app.includes("soundScan(); //"), 'step() の先頭で、演出と同じく1回だけ判定する');
   assert.ok(app.includes('sound.silence()'), '新しい局・タイトルで音を止める');
 });
+
+// ---- P2（Codex 監査）：中断した音を、復帰後に鳴らさない ----
+// 接続関係を持つ偽の AudioContext：ノードのつながりを記録し、「この音源は出力（destination）まで届くか」を調べられる。
+function graphCtx(state = 'running') {
+  const reg = { sources: [], listeners: [], created: 0, addCalls: 0, resumes: 0 };
+  const param = () => ({ value: 1, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {} });
+  const node = () => {
+    const n = { out: new Set(), type: '', buffer: null, gain: param(), frequency: param(), Q: param(), threshold: param(), knee: param(), ratio: param(), attack: param(), release: param(), start() {}, stop() {} };
+    n.connect = (d) => { n.out.add(d); return d; };
+    n.disconnect = () => { n.out.clear(); };
+    return n;
+  };
+  class Ctx {
+    constructor() { reg.created++; reg.ctx = this; this.state = state; this.sampleRate = 44100; this.currentTime = 1; this.destination = node(); this.destination.isDest = true; }
+    addEventListener(type, fn) { reg.addCalls++; if (type === 'statechange') reg.listeners.push(fn); }
+    resume() { reg.resumes++; return Promise.resolve(); }
+    setState(s) { this.state = s; for (const fn of reg.listeners) fn(); } // 状態の変化と statechange
+    createBuffer(ch, len) { const d = new Float32Array(len); return { length: len, getChannelData: () => d }; }
+    createGain() { return node(); }
+    createDynamicsCompressor() { return node(); }
+    createBiquadFilter() { return node(); }
+    createOscillator() { const n = node(); reg.sources.push(n); return n; }
+    createBufferSource() { const n = node(); reg.sources.push(n); return n; }
+  }
+  const reaches = (n, seen = new Set()) => {
+    if (n.isDest) return true;
+    if (seen.has(n)) return false;
+    seen.add(n);
+    return [...n.out].some((d) => reaches(d, seen));
+  };
+  // 声（レシピの音源）だけ。unlock の無音の1サンプルは除く
+  const voices = () => reg.sources.filter((s) => !(s.buffer && s.buffer.length === 1));
+  return { Ctx, reg, reaches, voices };
+}
+
+test('P2：suspended になったら、鳴っている音（予約済みを含む）を切り離す。復帰しても古い音は出力に届かず、新しい音は届く', () => {
+  const { Ctx, reg, reaches, voices } = graphCtx();
+  const P = createSoundPlayer({ getCtor: () => Ctx, isOn: () => true });
+  P.unlock();
+  assert.equal(P.play('riichi'), 'played');
+  const old = voices().slice();
+  assert.equal(old.length, RECIPES.riichi.length);
+  assert.ok(old.every((s) => reaches(s)), '鳴らした直後はすべて出力に届く');
+  assert.equal(P.buses.size, 1);
+  reg.ctx.setState('suspended'); // 音の途中で中断（statechange）
+  assert.ok(old.every((s) => !reaches(s)), '中断したら、古い音源は出力に届かない');
+  assert.equal(P.buses.size, 0);
+  assert.equal(P.master, null);
+  assert.equal(P.drops, 1);
+  reg.ctx.setState('running'); // 復帰
+  assert.ok(old.every((s) => !reaches(s)), '復帰しても古い音は出力に届かない（再接続されない）');
+  assert.equal(P.play('discard'), 'played');
+  const fresh = voices().slice(old.length);
+  assert.equal(fresh.length, RECIPES.discard.length);
+  assert.ok(fresh.every((s) => reaches(s)), '復帰後の新しい音は出力に届く');
+  assert.ok(old.every((s) => !reaches(s)), '新しい音を鳴らしても古い音は戻らない');
+  assert.equal(reg.created, 1, 'AudioContext は作り直さない');
+});
+
+test('P2：6種類すべて、中断で切り離される。interrupted（iOS）も同じ', () => {
+  for (const kind of KINDS) {
+    for (const st of ['suspended', 'interrupted']) {
+      const { Ctx, reg, reaches, voices } = graphCtx();
+      const P = createSoundPlayer({ getCtor: () => Ctx, isOn: () => true });
+      P.unlock();
+      P.play(kind);
+      const old = voices().slice();
+      assert.ok(old.length === RECIPES[kind].length && old.every((s) => reaches(s)));
+      reg.ctx.setState(st);
+      assert.ok(old.every((s) => !reaches(s)), `${kind}/${st}`);
+      reg.ctx.setState('running');
+      assert.ok(old.every((s) => !reaches(s)), `${kind}/${st}：復帰後`);
+    }
+  }
+});
+
+test('P2：statechange を受け取れなくても、unlock・play が止まった状態を見つけて古い音を切り離してから再開する', () => {
+  for (const via of ['unlock', 'play']) {
+    const { Ctx, reg, reaches, voices } = graphCtx();
+    const P = createSoundPlayer({ getCtor: () => Ctx, isOn: () => true });
+    P.unlock();
+    P.play('ron');
+    const old = voices().slice();
+    reg.ctx.state = 'suspended'; // イベントなしで止まった
+    const r0 = reg.resumes;
+    if (via === 'unlock') P.unlock(); else assert.equal(P.play('tsumo'), 'blocked', '中断中の要求は鳴らさない');
+    assert.ok(old.every((s) => !reaches(s)), `${via}：再開を試みる前に切り離す`);
+    assert.equal(reg.resumes, r0 + 1, '再開は試みる');
+    assert.equal(voices().length, old.length, '中断中の要求は声を予約しない');
+    reg.ctx.state = 'running';
+    assert.ok(old.every((s) => !reaches(s)), `${via}：復帰後も古い音は出力に届かない`);
+    assert.equal(P.play('chi'), 'played');
+  }
+});
+
+test('P2：中断中に新しい音を要求しても、復帰後に鳴らない（その場で無音・待たない・溜めない）', () => {
+  const { Ctx, reg, reaches, voices } = graphCtx();
+  const P = createSoundPlayer({ getCtor: () => Ctx, isOn: () => true });
+  P.unlock();
+  reg.ctx.setState('suspended');
+  const before = voices().length;
+  for (const k of KINDS) assert.equal(P.play(k), 'blocked');
+  assert.equal(voices().length, before, '予約しない');
+  assert.equal(P.buses.size, 0);
+  reg.ctx.setState('running');
+  assert.equal(voices().length, before);
+  assert.ok(voices().every((s) => !reaches(s)));
+});
+
+test('P2：複数回の中断・復帰。AudioContext・statechange のリスナー・出力は増え続けない', () => {
+  const { Ctx, reg, reaches, voices } = graphCtx();
+  const P = createSoundPlayer({ getCtor: () => Ctx, isOn: () => true });
+  for (let i = 0; i < 5; i++) P.unlock(); // 連続した unlock
+  assert.equal(reg.created, 1);
+  assert.equal(reg.addCalls, 1, 'リスナーは1つ');
+  const all = [];
+  for (let i = 0; i < 6; i++) {
+    P.play(KINDS[i % 6]);
+    all.push(...voices().slice(all.length));
+    reg.ctx.setState(i % 2 ? 'interrupted' : 'suspended');
+    P.unlock(); P.unlock();
+    reg.ctx.setState('running');
+    assert.equal(P.buses.size, 0);
+  }
+  assert.ok(all.length > 0 && all.every((s) => !reaches(s)), '何度中断・復帰しても、古い音は出力に届かない');
+  assert.equal(reg.created, 1);
+  assert.equal(reg.addCalls, 1);
+  assert.equal(P.play('ron'), 'played');
+  assert.ok(voices().slice(all.length).every((s) => reaches(s)));
+});
+
+test('P2：drop は何度呼んでも安全。何も鳴っていなければ破棄回数を増やさない', () => {
+  const { Ctx } = graphCtx();
+  const P = createSoundPlayer({ getCtor: () => Ctx, isOn: () => true });
+  assert.doesNotThrow(() => P.drop());
+  assert.equal(P.drops, 0);
+  P.unlock();
+  P.drop();
+  assert.equal(P.drops, 0);
+  P.play('pon');
+  P.drop(); P.drop();
+  assert.equal(P.drops, 1);
+  assert.equal(P.play('pon'), 'played');
+});
+
+test('P2：鳴り終わる時刻（実時間）を過ぎた音の出力は、気づけなくても切り離される。短時間に何度鳴らしても溜まらない', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { Ctx, reaches, voices } = graphCtx();
+  const P = createSoundPlayer({ getCtor: () => Ctx, isOn: () => true });
+  P.unlock();
+  P.play('ron');
+  const ron = voices().slice();
+  t.mock.timers.tick(400);
+  assert.ok(ron.every((s) => reaches(s)), '鳴っている最中は切り離さない');
+  t.mock.timers.tick(1200);
+  assert.ok(ron.every((s) => !reaches(s)), '音の長さ（0.95秒）＋余裕の実時間のあとに切り離す');
+  assert.equal(P.buses.size, 0);
+  for (let i = 0; i < 40; i++) P.play(KINDS[i % 6]);
+  assert.equal(P.buses.size, 40);
+  t.mock.timers.tick(2000);
+  assert.equal(P.buses.size, 0, '溜まらない');
+});
+
+test('P2：silence は止まった context では絞る処理が進まないので切り離す。動いているときは従来どおり絞ってから外す', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  {
+    const { Ctx, reg, reaches, voices } = graphCtx();
+    const P = createSoundPlayer({ getCtor: () => Ctx, isOn: () => true });
+    P.unlock(); P.play('ron');
+    const v = voices().slice();
+    reg.ctx.state = 'suspended';
+    P.silence();
+    assert.ok(v.every((s) => !reaches(s)));
+    assert.equal(P.master, null);
+  }
+  {
+    const { Ctx, reaches, voices } = graphCtx();
+    const P = createSoundPlayer({ getCtor: () => Ctx, isOn: () => true });
+    P.unlock(); P.play('ron');
+    const v = voices().slice();
+    P.silence();
+    assert.equal(P.master, null);
+    assert.ok(v.every((s) => reaches(s)), '絞っている間（約0.03秒）はまだつながっている');
+    t.mock.timers.tick(200);
+    assert.ok(v.every((s) => !reaches(s)), 'そのあと切り離す');
+    assert.equal(P.play('chi'), 'played', '次の再生は新しい出力で鳴る');
+  }
+});
+
+test('P2 構造：画面が隠れた・ページを離れたとき drop する（リスナーは1回だけ登録）。P3：設定名は「視覚演出」で選択肢・保存キー・動作は不変', () => {
+  const app = readFileSync(new URL('../src/ui/app.js', import.meta.url), 'utf8');
+  assert.equal((app.match(/addEventListener\('visibilitychange'/g) || []).length, 1);
+  assert.equal((app.match(/addEventListener\('pagehide'/g) || []).length, 1);
+  assert.ok(app.includes("document.addEventListener('visibilitychange', () => { if (document.hidden) sound.drop(); })"));
+  assert.ok(app.includes("window.addEventListener('pagehide', () => sound.drop())"));
+  const m = app.match(/<label class="setting">([^<]*)<select data-action="fx-mode">(.*?)<\/select>/);
+  assert.ok(m, '演出の設定項目');
+  assert.equal(m[1].trim(), '視覚演出');
+  assert.ok(/value="full"[^>]*>通常<\/option>/.test(m[2]) && /value="lite"[^>]*>簡易（文字だけ）<\/option>/.test(m[2]), '選択肢は 通常／簡易（文字だけ）');
+  assert.ok(!app.includes('>ロン・ポン・チーの演出 <select'), '旧名称は残さない');
+  const fx = readFileSync(new URL('../src/ui/effects.js', import.meta.url), 'utf8');
+  assert.ok(fx.includes("EFFECT_MODE_KEY = 'mj-effects'"), '保存キーは不変');
+});

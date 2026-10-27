@@ -4728,6 +4728,13 @@ async function v05dSound(browser) {
     assert.equal(await page.evaluate(() => window.__mathjong.S.sound.on), true, '既定はオン');
     await page.locator('button[data-action="settings"]').tap();
     assert.equal(await page.locator('select[data-action="sound"]').inputValue(), '1');
+    // P3：演出の設定名は「視覚演出」（リーチ・ツモも対象）。選択肢と保存キーは従来どおり
+    const fxLabel = await page.locator('label.setting:has(select[data-action="fx-mode"])').innerText();
+    assert.ok(fxLabel.trim().startsWith('視覚演出') && !fxLabel.includes('ロン・ポン・チーの演出'), fxLabel);
+    assert.deepEqual(await page.locator('select[data-action="fx-mode"] option').allInnerTexts(), ['通常', '簡易（文字だけ）']);
+    await page.locator('select[data-action="fx-mode"]').selectOption('lite');
+    assert.equal(await page.evaluate(() => localStorage.getItem('mj-effects')), 'lite', '保存キー mj-effects は不変');
+    await page.locator('select[data-action="fx-mode"]').selectOption('full');
     await page.locator('select[data-action="sound"]').selectOption('0');
     assert.equal(await page.evaluate(() => localStorage.getItem('mj-sound')), '0', 'オフが保存される');
     await page.locator('.modal-actions button[data-action="close"]').tap();
@@ -4868,6 +4875,288 @@ async function v05dSound(browser) {
   console.log('✓ Ver.0.5-D：公開サイトでは開発用フック（sound を含む）が無効');
 }
 
+// ---- Ver.0.5-D P2 修正：実際の AudioContext（Chromium）で、中断（suspend）した効果音が復帰後に鳴らないこと ----
+// 本物の AudioContext を継承し、出力（destination）の手前に録音用のノード（ScriptProcessor）を挟んで、実際に出力へ流れた波形のピークを時刻つきで記録する。
+// 数えるもの：created（AudioContext を作った数）・stateListeners（statechange の登録数）・gains（createGain の数）。
+const REAL_TAP_FN = () => {
+  const Real = window.AudioContext;
+  const R = window.__rec = { blocks: [], created: 0, stateListeners: 0, gains: 0 };
+  class TapCtx extends Real {
+    constructor(...a) {
+      super(...a);
+      R.created++;
+      const tap = super.createGain();
+      tap.connect(super.destination);
+      this.__tap = tap;
+      const sp = super.createScriptProcessor(1024, 1, 1);
+      tap.connect(sp);
+      sp.connect(super.destination);
+      sp.onaudioprocess = (e) => {
+        const d = e.inputBuffer.getChannelData(0);
+        let pk = 0;
+        for (let i = 0; i < d.length; i++) { const v = Math.abs(d[i]); if (v > pk) pk = v; }
+        R.blocks.push({ w: performance.now(), ct: this.currentTime, peak: pk });
+      };
+      this.__sp = sp;
+    }
+    get destination() { return this.__tap; }
+    createGain() { R.gains++; return super.createGain(); }
+    addEventListener(type, ...rest) { if (type === 'statechange') R.stateListeners++; return super.addEventListener(type, ...rest); }
+  }
+  window.AudioContext = TapCtx; window.webkitAudioContext = undefined;
+};
+const realPage = (browser, mode = 'math1', opts = {}) => v3Page(browser, mode, { ...opts, init: { fn: REAL_TAP_FN, arg: null } });
+const rcMark = (page) => page.evaluate(() => window.__rec.blocks.length);
+// 区間 [from, to) の出力ピークの最大値
+const rcPeak = (page, from, to = null) => page.evaluate(([f, t]) => { const b = window.__rec.blocks.slice(f, t === null ? undefined : t); return b.reduce((m, x) => Math.max(m, x.peak), 0); }, [from, to]);
+const rcState = (page) => page.evaluate(() => { const s = window.__mathjong.sound; return { state: s.state(), buses: s.buses ? s.buses.size : null, master: !!s.master, drops: s.drops ?? null }; });
+const rcRunning = (page) => page.waitForFunction(() => window.__mathjong.sound.state() === 'running', null, { timeout: 5000 });
+// 最初の操作（unlock）：手牌を1回タップ（選択だけ）
+async function rcUnlock(page) {
+  await page.locator('.hand .tile.tap').first().tap();
+  await rcRunning(page);
+}
+// 牌を捨てない操作（上部の余白のタップ）。2回目の牌のタップは打牌になってしまうので、復帰の操作には使わない
+const rcTap = (page) => page.locator('.top').first().tap({ position: { x: 4, y: 4 } });
+// kind の音を鳴らし、鳴らし始めから ms 後に実際の AudioContext を suspend する（ページ内で測るので、時間のずれが小さい）
+const rcPlaySuspend = (page, kind, ms) => page.evaluate(async ([k, d]) => {
+  const s = window.__mathjong.sound;
+  const st = s.play(k);
+  await new Promise((r) => setTimeout(r, d));
+  await s.ctx.suspend();
+  return st;
+}, [kind, ms]);
+const RC_SUSPEND_MS = { discard: 30, chi: 70, pon: 80, riichi: 100, ron: 100, tsumo: 100 };
+const SND_MS = { discard: 90, chi: 220, pon: 240, riichi: 800, ron: 950, tsumo: 900 };
+const RC_EPS = 1e-4;
+
+async function v05dSoundSuspend(browser) {
+  // (1) 6種類すべて：鳴らし始めてすぐ suspend → 演出時間を超えて待つ → 操作で resume → 中断前の音の後半は出力されない。その後の新しい音は出る
+  for (const kind of Object.keys(RC_SUSPEND_MS)) {
+    const { ctx, page, errors } = await realPage(browser);
+    await rcUnlock(page);
+    const m0 = await rcMark(page);
+    assert.equal(await rcPlaySuspend(page, kind, RC_SUSPEND_MS[kind]), 'played');
+    await page.waitForFunction(() => window.__mathjong.sound.ctx.state === 'suspended', null, { timeout: 3000 });
+    const m1 = await rcMark(page);
+    assert.ok(await rcPeak(page, m0, m1) > 0.01, `${kind}：中断前は実際に出力された（録音の確認）`);
+    await page.waitForTimeout(SND_MS[kind] + 700); // 音も演出も終わる時間
+    await rcTap(page); // 操作で復帰
+    await rcRunning(page);
+    const m2 = await rcMark(page);
+    await page.waitForTimeout(SND_MS[kind] + 500);
+    const m3 = await rcMark(page);
+    assert.ok(m3 - m2 >= 10, `${kind}：復帰後も録音が進んでいる（${m3 - m2}ブロック）`);
+    assert.ok(await rcPeak(page, m2, m3) < RC_EPS, `${kind}：復帰後に中断前の音が出力されない（ピーク ${await rcPeak(page, m2, m3)}）`);
+    // 新しい音は正常に出る
+    assert.equal(await page.evaluate((k) => window.__mathjong.sound.play(k), kind), 'played');
+    await page.waitForTimeout(SND_MS[kind] * 0.6 + 80);
+    const m4 = await rcMark(page);
+    assert.ok(await rcPeak(page, m3, m4) > 0.01, `${kind}：復帰後の新しい音は出力される`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：実際の AudioContext で、6種類の音とも suspend → 待機 → resume 後に古い音が出力されず、新しい音は出力される（出力波形のピークで確認）');
+
+  // (2) 実際のゲームの流れ：AI がリーチ → リーチ音の途中で suspend → 画面のリーチ演出が終わるまで待つ → 操作で resume → 古いリーチ音は出ず、次の新しい打牌音・リーチ音は出る
+  {
+    const { ctx, page, errors } = await realPage(browser);
+    await rcUnlock(page);
+    await v3Scene(page, presetWall(['=-1/√3', '=-1/√3', '=-√3/2', '=-√3/2', '=-1/√2', '=-1/√2', '=√3', '=√3'], ['=-1', '0'], [RI_HAND, RI_O2, RI_O3]));
+    await apDiscardDrawn(page); // 自分の打牌（打牌音）
+    await page.waitForFunction(() => window.__mathjong.sound.log.some((x) => x.kind === 'riichi'), null, { timeout: 8000 });
+    // 以後 AI の手番を止める（復帰後の無音区間に新しいゲームイベントを混ぜない）
+    const m0 = await page.evaluate(async () => {
+      const m = window.__mathjong; clearTimeout(m.S.timer); m.S.timer = null;
+      const n = window.__rec.blocks.length;
+      await new Promise((r) => setTimeout(r, 60));
+      await m.sound.ctx.suspend();
+      return n;
+    });
+    await page.waitForFunction(() => window.__mathjong.sound.ctx.state === 'suspended');
+    const m1 = await rcMark(page);
+    assert.ok(await rcPeak(page, m0, m1) > 0.01, 'AI のリーチ音は中断前に出力された');
+    await page.waitForTimeout(1500); // 画面のリーチ演出（0.7秒）より長く待つ
+    assert.equal((await fxState(page)).cls, '', 'リーチ演出は終わっている');
+    await rcTap(page);
+    await rcRunning(page);
+    const m2 = await rcMark(page);
+    await page.waitForTimeout(1200);
+    const m3 = await rcMark(page);
+    assert.ok(await rcPeak(page, m2, m3) < RC_EPS, `復帰後に古いリーチ音が出力されない（ピーク ${await rcPeak(page, m2, m3)}）`);
+    assert.deepEqual((await sndKinds(page)).filter((k) => k === 'riichi').length, 1, 'リーチ音のゲームイベントは1回だけ');
+    // 復帰後の新しいゲームイベント：自分の打牌（打牌音）。続けて新しいリーチ音
+    const before = (await sndLog(page)).length;
+    await page.evaluate(() => window.__mathjong.sound.play('discard'));
+    await page.waitForTimeout(120);
+    const m4 = await rcMark(page);
+    assert.ok(await rcPeak(page, m3, m4) > 0.01, '復帰後の新しい打牌音は出力される');
+    await page.evaluate(() => window.__mathjong.sound.play('riichi'));
+    await page.waitForTimeout(500);
+    assert.ok(await rcPeak(page, m4) > 0.05, '復帰後の新しいリーチ音は出力される');
+    assert.equal((await sndLog(page)).length, before + 2);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：AI のリーチ → 音の途中で suspend → 演出終了後に resume しても古いリーチ音は出ず、新しい打牌音・リーチ音は出る');
+
+  // (3) 中断中に新しい音を要求しても、復帰後に鳴らない（その場で無音・待たない）。複数回の中断・復帰。AudioContext を作り直さない・ノード／リスナーが増え続けない
+  {
+    const { ctx, page, errors } = await realPage(browser);
+    await rcUnlock(page);
+    const base = await page.evaluate(() => ({ ...window.__rec, blocks: undefined }));
+    assert.deepEqual([base.created, base.stateListeners], [1, 1]);
+    for (let round = 0; round < 3; round++) {
+      const a = await rcMark(page);
+      assert.equal(await rcPlaySuspend(page, 'ron', 80), 'played', `${round}回目`);
+      await page.waitForFunction(() => window.__mathjong.sound.ctx.state === 'suspended');
+      // 中断中に新しい音を要求（ron・tsumo・pon・chi・discard・riichi）：すべて blocked
+      const st = await page.evaluate(() => ['ron', 'tsumo', 'pon', 'chi', 'discard', 'riichi'].map((k) => window.__mathjong.sound.play(k)));
+      assert.deepEqual(st, ['blocked', 'blocked', 'blocked', 'blocked', 'blocked', 'blocked'], '中断中の要求は無音で戻る（待たない）');
+      assert.equal((await rcState(page)).buses, 0, '中断中は鳴っている音の出力を持たない');
+      await page.waitForTimeout(1100);
+      await rcTap(page);
+      await rcRunning(page);
+      const b = await rcMark(page);
+      await page.waitForTimeout(1100);
+      assert.ok(await rcPeak(page, b) < RC_EPS, `${round}回目：復帰後に、中断前の音も中断中に要求した音も出ない（ピーク ${await rcPeak(page, b)}）`);
+      assert.ok(await rcPeak(page, a, b) > 0.01, `${round}回目：中断前の音は出力された`);
+    }
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.play('tsumo')), 'played');
+    await page.waitForTimeout(400);
+    assert.ok(await rcPeak(page, await rcMark(page) - 12) > 0.05, '3回の中断・復帰のあとも新しい音は出力される');
+    const end = await page.evaluate(() => ({ ...window.__rec, blocks: undefined }));
+    assert.equal(end.created, 1, 'AudioContext は作り直さない');
+    assert.equal(end.stateListeners, 1, 'statechange のリスナーは増えない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：中断中の要求は無音で待たず復帰後も鳴らない・3回の中断復帰・AudioContext とリスナーを増やさない');
+
+  // (4) 再開の失敗（resume が拒否される）：例外を出さず、止まっている間は鳴らさず、再開できるようになれば古い音なしで鳴る
+  {
+    const { ctx, page, errors } = await realPage(browser);
+    await rcUnlock(page);
+    assert.equal(await rcPlaySuspend(page, 'riichi', 100), 'played');
+    await page.waitForFunction(() => window.__mathjong.sound.ctx.state === 'suspended');
+    await page.evaluate(() => { const c = window.__mathjong.sound.ctx; c.__resume = c.resume; c.resume = () => Promise.reject(new Error('NotAllowedError')); });
+    await page.waitForTimeout(1000);
+    const a = await rcMark(page);
+    await rcTap(page); await rcTap(page); // 再開に失敗する操作
+    assert.equal((await rcState(page)).state, 'suspended');
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.play('pon')), 'blocked');
+    await page.evaluate(() => { const c = window.__mathjong.sound.ctx; c.resume = c.__resume; }); // 再開できるようになった
+    await rcTap(page);
+    await rcRunning(page);
+    const b = await rcMark(page);
+    await page.waitForTimeout(1000);
+    assert.ok(await rcPeak(page, b) < RC_EPS, `再開に失敗した後に再開できても、古い音は出ない（ピーク ${await rcPeak(page, b)}）`);
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.play('chi')), 'played');
+    await page.waitForTimeout(260);
+    assert.ok(await rcPeak(page, b) > 0.01, 'その後の新しい音は出力される');
+    void a;
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：再開の失敗でも例外なし・失敗中は無音・再開後に古い音は出ない');
+
+  // (5) 画面が隠れた（iPhone のバックグラウンド移行）：running のままでも鳴っている音を切り離し、戻っても続きは鳴らない。新しい音は鳴る
+  {
+    const { ctx, page, errors } = await realPage(browser);
+    await rcUnlock(page);
+    await page.evaluate(() => window.__mathjong.sound.play('tsumo'));
+    await page.waitForTimeout(120);
+    const a = await rcMark(page);
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
+    assert.deepEqual([(await rcState(page)).buses, (await rcState(page)).master], [0, false], '隠れたら鳴っている音の出力を切り離す');
+    await page.waitForTimeout(80); // 録音の1ブロック分の遅れ
+    const b = await rcMark(page);
+    await page.waitForTimeout(1000);
+    assert.ok(await rcPeak(page, b) < RC_EPS, `隠れた後は、続きが出力されない（ピーク ${await rcPeak(page, b)}）`);
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
+    const c = await rcMark(page);
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.play('ron')), 'played');
+    await page.waitForTimeout(300);
+    assert.ok(await rcPeak(page, c) > 0.05, '戻った後の新しい音は出力される');
+    // pagehide でも同様
+    await page.waitForTimeout(900);
+    await page.evaluate(() => window.__mathjong.sound.play('riichi'));
+    await page.waitForTimeout(100);
+    await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+    assert.equal((await rcState(page)).buses, 0);
+    await page.waitForTimeout(80);
+    const d = await rcMark(page);
+    await page.waitForTimeout(900);
+    assert.ok(await rcPeak(page, d) < RC_EPS, 'pagehide の後も続きは出力されない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：画面が隠れた・ページを離れたときも、鳴っている音を切り離し、戻っても続きは鳴らない');
+
+  // (6) 次の局・タイトル移動：ロン音の途中で移動すると音が止まる（中断復帰の処理が通常の音声停止を壊さない）。中断中の移動でも古い音が残らない
+  for (const nav of ['next', 'title', 'next-suspended']) {
+    const { ctx, page, errors } = await realPage(browser);
+    await rcUnlock(page);
+    await v3Scene(page, presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['0', '=-1/√3'], [['=1', 'sin', '0', '90', '90', '=-√3', '=√3', '150'], FX_O2, FX_O3]));
+    await apDiscardDrawn(page);
+    await apForce(page, 1, 'v:1');
+    await v3WaitHuman(page);
+    const a = await rcMark(page);
+    await page.locator('button[data-action="ron"]').tap();
+    assert.deepEqual((await sndKinds(page)).slice(-1), ['ron']);
+    await page.waitForTimeout(150);
+    if (nav === 'next-suspended') { await page.evaluate(() => window.__mathjong.sound.ctx.suspend()); await page.waitForFunction(() => window.__mathjong.sound.ctx.state === 'suspended'); }
+    if (nav === 'title') {
+      await page.evaluate(() => { const m = window.__mathjong; m.S.modal = 'settings'; m.render(); });
+      await page.locator('button[data-action="ask-title"]').tap();
+      await page.locator('button[data-action="to-title"]').tap();
+      await page.waitForSelector('.title-screen');
+    } else {
+      await page.locator('button[data-action="next"]').tap();
+      await page.waitForSelector('.hand .tile');
+    }
+    assert.equal((await rcState(page)).master, false, `${nav}：出力の連鎖は切り離される`);
+    if (nav === 'next-suspended') { await page.waitForTimeout(1200); await rcTap(page); await rcRunning(page); }
+    await page.waitForTimeout(250); // 絞りの時間と録音の遅れ
+    const b = await rcMark(page);
+    await page.waitForTimeout(1200);
+    assert.ok(await rcPeak(page, b) < RC_EPS, `${nav}：移動の後に古い音が出力されない（ピーク ${await rcPeak(page, b)}）`);
+    assert.ok(await rcPeak(page, a, b) > 0.05, `${nav}：移動前のロン音は出力された`);
+    if (nav !== 'title') {
+      assert.equal(await page.evaluate(() => window.__mathjong.sound.play('discard')), 'played', `${nav}：次の局でも新しい音が鳴る`);
+      await page.waitForTimeout(120);
+      assert.ok(await rcPeak(page, b) > 0.01);
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：次の局・タイトル移動（中断中を含む）で音が止まり、古い音が残らない');
+
+  // (7) 効果音オフ・連続 unlock：オフでは AudioContext を作らない。連打しても AudioContext・リスナー・ノードは増えない。短時間に大量に鳴らしても出力（bus）は溜まらない
+  {
+    const { ctx, page, errors } = await realPage(browser);
+    await page.evaluate(() => { window.__mathjong.S.sound.on = false; });
+    await page.locator('.hand .tile.tap').first().tap();
+    assert.equal((await page.evaluate(() => window.__rec.created)), 0, 'オフでは AudioContext を作らない');
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.play('ron')), 'off');
+    await page.evaluate(() => { window.__mathjong.S.sound.on = true; });
+    for (let i = 0; i < 8; i++) await rcTap(page); // 連続操作
+    await rcRunning(page);
+    const a = await page.evaluate(() => ({ created: window.__rec.created, listeners: window.__rec.stateListeners, gains: window.__rec.gains }));
+    assert.deepEqual([a.created, a.listeners], [1, 1], '連続 unlock でも AudioContext・リスナーは1つ');
+    for (let i = 0; i < 6; i++) await rcTap(page);
+    const b = await page.evaluate(() => ({ created: window.__rec.created, listeners: window.__rec.stateListeners, gains: window.__rec.gains }));
+    assert.deepEqual(b, a, '操作のたびにノードを作らない（unlock はノードを増やさない）');
+    for (let i = 0; i < 30; i++) await page.evaluate((k) => window.__mathjong.sound.play(k), ['discard', 'chi', 'pon'][i % 3]);
+    assert.ok((await rcState(page)).buses <= 30);
+    await page.waitForTimeout(1000);
+    assert.equal((await rcState(page)).buses, 0, '鳴り終わった音の出力は実時間で外れ、溜まらない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：効果音オフでは AudioContext を作らない・連続 unlock で増えない・鳴り終えた音の出力は溜まらない');
+}
+
 const server = await startServer(0, { base: BASE, host: '127.0.0.1' });
 PORT = server.address().port;
 LOCAL = `http://localhost:${PORT}${BASE}`;
@@ -4880,7 +5169,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound };
+    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
   } else {
@@ -4921,6 +5210,7 @@ try {
   await v05cTitleLogo(browser);
   await v05dRiichiFx(browser);
   await v05dSound(browser);
+  await v05dSoundSuspend(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
