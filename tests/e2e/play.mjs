@@ -3585,7 +3585,7 @@ const fxState = (page) => page.evaluate(() => {
   const g = S.game;
   const p = g && g.pending();
   return {
-    cls: l.className, word: (l.querySelector('.fx-word') || {}).textContent || '', who: (l.querySelector('.fx-who') || {}).textContent || '',
+    cls: l.className, word: (l.querySelector('.fx-word') || {}).textContent || '', who: (l.querySelector('.fx-who .fx-name') || {}).textContent || '',
     tiles: l.querySelectorAll('.fx-tiles .fx-t').length, win: l.querySelectorAll('.fx-wintile .tile').length, flash: l.querySelectorAll('.fx-flash').length,
     history: [...S.fx.history], shake: document.querySelectorAll('.table.fx-shake').length, glow: document.querySelectorAll('.meld.fx-glow').length,
     events: g ? g.events.length : null, p: p && { seat: p.seat, type: p.type }, modal: S.modal, mode: S.fx.mode,
@@ -3709,7 +3709,7 @@ async function v05bEffects(browser) {
   }
   console.log('✓ Ver.0.5-B：AI のロン・ポンでも演出（AI の名前を表示）');
 
-  // (4) 重なり：表示中のロンを後から来たポン・チーで潰さない。ポン → ロン は入れ替わる。進行・記録は変わらない
+  // (4) 重なり：表示中のロンを後から来たポン・チーで潰さない。チー表示中のポン・チーは待ち、ロンが来たら捨てる（Ver.0.5-E）。進行・記録は変わらない
   {
     const { ctx, page, errors } = await v3Page(browser, 'math1');
     await v3Scene(page, presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['0', '=-1/√3'], [FX_O1, FX_O2, FX_O3]));
@@ -3720,16 +3720,18 @@ async function v05bEffects(browser) {
       const ev = g.events.length;
       const out = [];
       const snap = () => out.push(document.getElementById('fx-layer').className);
-      fx.fire('chi', { type: 'chi', seat: 1, tile: g.hands[1][0] }); snap();
-      fx.fire('pon', { type: 'pon', seat: 2, tile: g.hands[2][0] }); snap(); // 高い優先度は入れ替える
-      fx.fire('chi', { type: 'chi', seat: 1, tile: g.hands[1][0] }); snap(); // 低い優先度は無視
-      fx.fire('ron', { type: 'win', seat: 3, how: 'ron', from: 0 }); snap();
-      fx.fire('pon', { type: 'pon', seat: 2, tile: g.hands[2][0] }); snap(); // ロン表示中は潰さない
-      fx.fire('chi', { type: 'chi', seat: 1, tile: g.hands[1][0] }); snap();
-      return { out, history: [...S.fx.history], eventsSame: g.events.length === ev, pending: JSON.stringify(g.pending()) };
+      const q = [];
+      fx.fire('chi', { type: 'chi', seat: 1, tile: g.hands[1][0] }); snap(); q.push(S.fx.queue.length);
+      fx.fire('pon', { type: 'pon', seat: 2, tile: g.hands[2][0] }); snap(); q.push(S.fx.queue.length); // Ver.0.5-E：表示中のチーを消さず、ポンは待つ
+      fx.fire('chi', { type: 'chi', seat: 1, tile: g.hands[1][0] }); snap(); q.push(S.fx.queue.length); // これも待つ
+      fx.fire('ron', { type: 'win', seat: 3, how: 'ron', from: 0 }); snap(); q.push(S.fx.queue.length); // ロンは最優先：すぐ表示し、待っている演出を捨てる
+      fx.fire('pon', { type: 'pon', seat: 2, tile: g.hands[2][0] }); snap(); q.push(S.fx.queue.length); // ロン表示中は潰さない
+      fx.fire('chi', { type: 'chi', seat: 1, tile: g.hands[1][0] }); snap(); q.push(S.fx.queue.length);
+      return { out, q, history: [...S.fx.history], eventsSame: g.events.length === ev, pending: JSON.stringify(g.pending()) };
     });
-    assert.deepEqual(seq.out, ['fx-chi', 'fx-pon', 'fx-pon', 'fx-ron', 'fx-ron', 'fx-ron']);
-    assert.deepEqual(seq.history, ['chi', 'pon', 'ron'], '潰された演出は記録に残らない');
+    assert.deepEqual(seq.out, ['fx-chi', 'fx-chi', 'fx-chi', 'fx-ron', 'fx-ron', 'fx-ron']);
+    assert.deepEqual(seq.q, [0, 1, 2, 0, 0, 0], '待つ演出の数（ロンで捨てる）');
+    assert.deepEqual(seq.history, ['chi', 'ron'], '出さなかった演出は記録に残らない');
     assert.equal(seq.eventsSame, true, '演出はゲームの記録を変えない');
     assert.equal(JSON.stringify((await page.evaluate(() => window.__mathjong.S.game.pending()))), seq.pending, '進行は変わらない');
     await fxGone(page);
@@ -3976,7 +3978,7 @@ async function v05bFxModeFixed(browser) {
       const { S, fx } = window.__mathjong; const g = S.game; const e = (k) => ({ type: k, seat: 1, tile: g.hands[1][0], how: 'ron', from: 0 });
       fx.fire('chi', e('chi')); fx.fire('pon', e('pon')); fx.fire('ron', { type: 'win', seat: 1, how: 'ron', from: 0 }); fx.fire('pon', e('pon'));
     });
-    assert.deepEqual((await page.evaluate(() => [...window.__mathjong.S.fx.history])), ['chi', 'pon', 'ron'], 'ロン＞ポン＞チー');
+    assert.deepEqual((await page.evaluate(() => [...window.__mathjong.S.fx.history])), ['chi', 'ron'], 'ロン＞ポン＞チー（Ver.0.5-E：チー表示中のポンは待ち、ロンで捨てる）');
     await fxSetMode(page, 'lite');
     assert.equal((await fxLook(page)).cur.kind, 'ron', '設定変更でも優先度の結果は変わらない');
     await page.evaluate(() => window.__mathjong.startRound());
@@ -4450,7 +4452,7 @@ async function v05dRiichiFx(browser) {
     assert.deepEqual((await fxState(page)).history, ['riichi']);
     assert.deepEqual(await sndKinds(page), ['riichi']);
     const dur = await fxDuration(page);
-    assert.ok(dur >= 700 && dur <= 900, `リーチ演出は約 0.7 秒（${dur}ms）`);
+    assert.ok(dur >= 900 && dur <= 1150, `リーチ演出は約 0.9 秒（Ver.0.5-E）（${dur}ms）`);
     const e = await fxState(page);
     assert.deepEqual([e.cls, (await fxLook(page)).glow], ['', 0]);
     // 以後は通常どおり（ツモ切りだけ）。AI の打牌音は1打牌1回
@@ -4519,7 +4521,7 @@ async function v05dRiichiFx(browser) {
     assert.deepEqual(res.delta, [6 * res.points, -6 * res.points, 0, 0]);
     assert.deepEqual(await sndKinds(page), ['riichi', 'discard', 'ron'], '音：リーチ → AI の打牌 → ロン（各1回）');
     const dur = await fxDuration(page);
-    assert.ok(dur >= 1100 && dur <= 1350, `ロン演出は約 1.1 秒（${dur}ms）`);
+    assert.ok(dur >= 2200 && dur <= 2450, `ロン演出は約 2.2 秒（Ver.0.5-E）（${dur}ms）`);
     await page.locator('button[data-action="next"]').tap();
     await page.waitForSelector('.hand .tile');
     assert.deepEqual(errors, []);
@@ -4563,7 +4565,7 @@ async function v05dRiichiFx(browser) {
     assert.equal(await page.evaluate(() => window.__mathjong.S.game.result.analysis.riichi), true);
     assert.deepEqual(await sndKinds(page), ['riichi', 'discard', 'discard', 'discard', 'tsumo']);
     const dur = await fxDuration(page);
-    assert.ok(dur >= 1000 && dur <= 1250, `ツモ演出は 1.0 秒のまま（${dur}ms）`);
+    assert.ok(dur >= 2000 && dur <= 2250, `ツモ演出は約 2.0 秒（Ver.0.5-E）（${dur}ms）`);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -4585,7 +4587,7 @@ async function v05dRiichiFx(browser) {
     });
     assert.deepEqual([r.rays, r.flash, r.win, r.shake, r.ronShake, r.barInTable], [1, 1, 1, true, true, false]);
     assert.equal(r.anim, 'fx-shake-ron');
-    assert.equal(r.dur, '1.1s', 'ロンの文字の動きも 1.1 秒');
+    assert.equal(r.dur, '2.2s', 'ロンの文字の動きも 2.2 秒（Ver.0.5-E）');
     assert.ok(r.over <= 0, '横スクロールなし');
     await ctx.close();
   }
@@ -5157,6 +5159,418 @@ async function v05dSoundSuspend(browser) {
   console.log('✓ Ver.0.5-D P2：効果音オフでは AudioContext を作らない・連続 unlock で増えない・鳴り終えた音の出力は溜まらない');
 }
 
+// ---- Ver.0.5-E：カットイン演出・宣言者の表示・席の発光・演出キュー・宣言ボイスの導入準備 ----
+const E_POS = ['自分', '下家', '対面', '上家'];
+const E_NAME = ['あなた', 'AI-A', 'AI-B', 'AI-C'];
+const E_MS = { chi: 1000, pon: 1200, ron: 2200, tsumo: 2000, riichi: 900 };
+const E_MIN = { chi: 700, pon: 800, ron: 2200, tsumo: 2000, riichi: 650 };
+// 演出レイヤーの変化を記録する（表示の瞬間の宣言者・席・発光している席・キューの長さ・ゲームの記録との対応）
+const eObserve = (page) => page.evaluate(() => {
+  const L = document.getElementById('fx-layer');
+  const rec = window.__fxrec = [];
+  new MutationObserver(() => {
+    const m = window.__mathjong; const c = m.S.fx.current; const who = L.querySelector('.fx-who');
+    const glow = [...document.querySelectorAll('.fx-seat, .fx-seat-lite')].map((el) => (el.classList.contains('self') ? 0 : Number((el.className.match(/seat-(\d)/) || [])[1])));
+    rec.push({
+      t: performance.now(), cls: L.className, kind: c ? c.kind : null, serial: m.S.gameSerial,
+      name: who ? who.querySelector('.fx-name').textContent : null, pos: who && who.querySelector('.fx-pos') ? who.querySelector('.fx-pos').textContent : null,
+      dataSeat: who ? Number(who.dataset.seat) : null, evSeat: c ? c.event.seat : null, evInLog: c ? m.S.game.events.includes(c.event) || c.event.type === 'win' && m.S.game.events.some((e) => e.type === 'win' && e.seat === c.event.seat) : null,
+      glow, queue: m.S.fx.queue.length,
+    });
+  }).observe(L, { childList: true });
+});
+// 表示中の演出の要素の位置と不透明度
+const eLook = (page) => page.evaluate(() => {
+  const box = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom, op: Number(getComputedStyle(e).opacity) }; };
+  return { who: box('#fx-layer .fx-who'), word: box('#fx-layer .fx-word'), tiles: box('#fx-layer .fx-tiles, #fx-layer .fx-wintile, #fx-layer .fx-decl'), band: box('#fx-layer .fx-band'),
+    banner: box('#fx-layer .fx-banner'), card: box('#fx-layer .fx-card'), vw: innerWidth, vh: innerHeight, sx: document.documentElement.scrollWidth - innerWidth,
+    flashes: document.querySelectorAll('#fx-layer .fx-flash').length };
+});
+// 鳴いた面子を用意して、その席の演出を出す（表示の確認用。本物の記録がなくても演出だけを出す）
+const eFire = (page, kind, seat) => page.evaluate(([k, s]) => {
+  const { S, fx } = window.__mathjong; const g = S.game;
+  if (k === 'ron' || k === 'tsumo') { g.result = { ...(g.result || {}), tile: g.hands[s][0] }; fx.fire(k, { type: 'win', seat: s, how: k, from: (s + 1) % 4 }); return; }
+  if (k === 'riichi') { fx.fire(k, { type: 'riichi', seat: s, tile: g.hands[s][0] }); return; }
+  g.melds[s].push({ meld: 0, kind: 'formula', call: k, tiles: g.hands[s].slice(0, 3), claimed: g.hands[s][0], from: (s + 3) % 4 });
+  fx.fire(k, { type: k, seat: s, tile: g.hands[s][0] });
+}, [kind, seat]);
+
+async function v05eCutin(browser) {
+  // (1) 宣言者の表示と席の発光：4人 × チー・ポン・ロン・ツモ・リーチ。名前・席（下家／対面／上家）・発光する席が、記録の seat と一致する
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    for (const kind of ['chi', 'pon', 'riichi', 'tsumo', 'ron']) {
+      for (const seat of [0, 1, 2, 3]) {
+        await page.evaluate(() => window.__mathjong.fx.clear());
+        await eFire(page, kind, seat);
+        const st = await page.evaluate(() => {
+          const L = document.getElementById('fx-layer'); const w = L.querySelector('.fx-who');
+          return { cls: L.className, name: w.querySelector('.fx-name').textContent, pos: w.querySelector('.fx-pos') ? w.querySelector('.fx-pos').textContent : null, of: w.querySelector('.fx-of').textContent,
+            word: L.querySelector('.fx-word').textContent, seats: [...document.querySelectorAll('.fx-seat')].map((el) => (el.classList.contains('self') ? 0 : Number(el.className.match(/seat-(\d)/)[1]))),
+            seatKind: [...document.querySelectorAll('.fx-seat')].map((el) => [...el.classList].find((c) => /^fx-seat-[a-z]+$/.test(c) && c !== 'fx-seat-lite')) };
+        });
+        assert.equal(st.cls, `fx-${kind}`);
+        assert.equal(st.name, E_NAME[seat], `${kind}/席${seat}：宣言者の名前`);
+        assert.equal(st.pos, seat === 0 ? null : E_POS[seat], `${kind}/席${seat}：席（AI だけ）`);
+        assert.equal(`${st.name} ${st.of}${st.word}`, `${E_NAME[seat]} の${{ chi: 'チー！', pon: 'ポン！', ron: 'ロン！', tsumo: 'ツモ！', riichi: 'リーチ！' }[kind]}`, '「AI-B のロン！」のように読める');
+        assert.deepEqual(st.seats, [seat], `${kind}/席${seat}：発光するのは宣言者の席だけ`);
+        assert.deepEqual(st.seatKind, [`fx-seat-${kind}`], '宣言の色で発光');
+      }
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E：宣言者（あなた／AI-A・B・C と席）を大きく表示し、宣言者の席だけを宣言の色で発光（5種類 × 4席）');
+
+  // (2) 演出の長さ（本物の宣言）：チー 1.0秒・ポン 1.2秒・ロン 2.2秒・ツモ 2.0秒・リーチ 0.9秒。中央の静止時間に文字・宣言者・牌が読める
+  const hold = async (page, kind) => {
+    // 静止区間の中ほど（登場が終わった後）で、文字・宣言者・牌がはっきり見えて画面内にある
+    await page.waitForTimeout(kind === 'ron' || kind === 'tsumo' ? 650 : Math.round(E_MS[kind] * 0.45));
+    const l = await eLook(page);
+    for (const k of ['who', 'word', 'tiles']) {
+      assert.ok(l[k] && l[k].op >= 0.95, `${kind}：${k} が見える（${JSON.stringify(l[k])}）`);
+      assert.ok(l[k].l >= -1 && l[k].r <= l.vw + 1 && l[k].t >= -1 && l[k].b <= l.vh + 1, `${kind}：${k} が画面内`);
+    }
+    return l;
+  };
+  {
+    // 自分のチー・ポン
+    for (const [kind, hand] of [['chi', ['=1/2', '45', 'sin', '30', '0', '0', '135', '=-√3']], ['pon', ['=1/2', '=1/2', 'sin', '0', '135', '=-√3', 'tan', '150']]]) {
+      const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+      await fxToClaim(page, hand);
+      await page.locator(`button[data-action="${kind}"]`).first().tap();
+      assert.equal((await fxState(page)).cls, `fx-${kind}`);
+      const l = await hold(page, kind);
+      assert.ok(l.band && l.band.op >= 0.95, `${kind}：カットインの帯`);
+      const dur = await fxDuration(page);
+      assert.ok(dur >= E_MS[kind] && dur <= E_MS[kind] + 250, `${kind}：${E_MS[kind]}ms（${dur}ms）`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+    // 自分のリーチ・ツモ・ロン
+    {
+      const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+      await v3Scene(page, presetWall(RI_HAND, RI_DRAWS, [RI_O1, RI_O2, RI_O3]));
+      await riDeclare(page);
+      await hold(page, 'riichi');
+      const dur = await fxDuration(page);
+      assert.ok(dur >= 900 && dur <= 1150, `riichi：900ms（${dur}ms）`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+    {
+      const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+      await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
+      await page.locator('button[data-action="tsumo"]').tap();
+      assert.equal((await fxState(page)).modal, 'result', '結果画面は演出を待たずに開く');
+      await hold(page, 'tsumo');
+      const dur = await fxDuration(page);
+      assert.ok(dur >= 2000 && dur <= 2250, `tsumo：2000ms（${dur}ms）`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  }
+  console.log('✓ Ver.0.5-E：演出の長さ（チー1.0・ポン1.2・リーチ0.9・ツモ2.0秒）と、静止時間に文字・宣言者・牌が見えて画面内にある');
+
+  // (3) ロン：冒頭は強い演出（閃光1回・光条・揺れ）→ 中央で静止 → 後半は中央の表示を消して最上部の小さな帯に替える（結果画面を長く隠さない）
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(['=1', 'sin', 'sin', '0', '90', '=-√3', '=√3', '150'], ['45', '=-1/√3', '=-√3/2', '=-1/√2'], [['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], FX_O2, FX_O3]));
+    const id = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'v:1'); });
+    await page.locator(`.hand .tile[data-id="${id}"]`).tap(); await page.locator(`.hand .tile[data-id="${id}"]`).tap();
+    await page.waitForFunction(() => window.__mathjong.S.fx.history.includes('ron'), null, { timeout: 8000 });
+    const t0 = await page.evaluate(() => window.__mathjong.S.fx.current.startedAt);
+    const early = await eLook(page);
+    assert.equal(early.flashes, 1, '閃光は1つ');
+    const flash = await page.evaluate(() => { const s = getComputedStyle(document.querySelector('#fx-layer .fx-flash')); return [s.animationName, s.animationIterationCount, parseFloat(s.animationDuration)]; });
+    assert.deepEqual(flash, ['fx-flash-once', '1', 0.6], '閃光は冒頭の1回だけ（繰り返さない）');
+    assert.equal((await fxState(page)).who, 'AI-A');
+    assert.equal(await page.locator('.overlay .result').isVisible(), true, '結果画面はすぐ開く');
+    await hold(page, 'ron');
+    // 後半（約1.3秒以降）：中央の表示は消え、最上部の小さな帯だけが残る
+    await page.waitForFunction((s) => performance.now() - s > 1400, t0);
+    const late = await eLook(page);
+    assert.ok(late.card.op < 0.05, `後半は中央の表示を消す（不透明度 ${late.card.op}）`);
+    assert.ok(late.banner.op > 0.95 && late.banner.t >= 0 && late.banner.b <= 70, `最上部の小さな帯（${JSON.stringify(late.banner)}）`);
+    assert.equal(await page.locator('#fx-layer .fx-banner .fx-name').textContent(), 'AI-A');
+    // 演出中も結果画面のボタンを押せる（演出はタップを通す）。次の局へ進むと演出を消す
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.hand .tile');
+    const st = await page.evaluate(() => ({ cls: document.getElementById('fx-layer').className, cur: window.__mathjong.S.fx.current, q: window.__mathjong.S.fx.queue.length, glow: document.querySelectorAll('.fx-seat').length }));
+    assert.deepEqual(st, { cls: '', cur: null, q: 0, glow: 0 }, '新しい局へ持ち越さない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E：ロンは閃光1回→静止→最上部の小さな帯（結果画面を長く隠さない）。結果画面はすぐ開き、演出中も次の局へ進める');
+
+  // (4) 実際の速い対局（AI 待ち時間 0）：AI 同士のチー・ポンを含め、表示した演出の宣言者・席・発光が記録の seat と一致。
+  //     チー・ポン・リーチは最低表示時間を守り（ロン・ツモで置き換えた場合と局の切替を除く）、キューは2以下。宣言の音は表示と同じ順・同じ数
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    await ctx.addInitScript(SND_FN, { resume: 'ok' });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?mode=math1&seed=11&speed=test`);
+    await page.waitForSelector('.hand .tile');
+    await paSettings(page, true, true); // 自分のチー・ポンは自動で見送る（AI 同士の鳴きを増やす）
+    await page.evaluate(() => { const s = window.__mathjong.sound; const orig = s.play; window.__calls = []; s.play = (k, o) => { window.__calls.push(k); return orig(k, o); }; });
+    await eObserve(page);
+    const summary = await page.evaluate(async () => {
+      const m = window.__mathjong; const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const calls = { aiCalls: 0, rounds: 0 };
+      for (const round of [7, 19, 22, 25, 26, 27, 28]) { // seed 11（数学Ⅰ）で AI 同士のチー・ポンが起きる局（事前に調べた）
+        m.goRound(round);
+        for (let guard = 0; guard < 4000; guard++) {
+          const g = m.S.game; const p = g.pending();
+          if (!p) break;
+          if (p.seat === 0) {
+            if (p.type === 'turn') g.discard(0, g.drawn !== null && g.drawn !== undefined ? g.drawn : g.hands[0][0]);
+            else g.respond(0, { type: 'pass' });
+            m.step(true);
+          }
+          await sleep(20);
+        }
+        calls.aiCalls += m.S.game.events.filter((e) => (e.type === 'chi' || e.type === 'pon') && e.seat !== 0).length;
+        calls.rounds++;
+        await sleep(2400); // 和了の演出を最後まで
+      }
+      return calls;
+    });
+    const rec = await page.evaluate(() => window.__fxrec);
+    const shows = rec.filter((r) => r.cls && !r.cls.includes('lite'));
+    assert.ok(summary.aiCalls >= 5, `AI 同士のチー・ポンが起きた（${JSON.stringify(summary)}）`);
+    assert.ok(shows.some((r) => (r.kind === 'chi' || r.kind === 'pon') && r.dataSeat !== 0), 'AI 同士のチー・ポンの演出が表示された');
+    for (const r of shows) {
+      assert.equal(r.dataSeat, r.evSeat, '宣言者はゲームの記録の seat');
+      assert.equal(r.evInLog, true, '表示した演出は、実際の記録に対応する');
+      assert.equal(r.name, E_NAME[r.evSeat]);
+      assert.equal(r.pos, r.evSeat === 0 ? null : E_POS[r.evSeat]);
+      assert.deepEqual(r.glow, [r.evSeat], '発光するのは宣言者の席だけ');
+      assert.ok(r.queue <= 2, 'キューは上限以下');
+    }
+    // 最低表示時間：次の表示または消去までの時間（同じ局で、ロン・ツモに置き換えられた場合を除く）
+    let checked = 0;
+    for (let i = 0; i < rec.length - 1; i++) {
+      const a = rec[i]; const b = rec[i + 1];
+      if (!a.cls || a.serial !== b.serial) continue;
+      if (b.kind === 'ron' || b.kind === 'tsumo') continue;
+      const kind = a.kind;
+      const need = b.cls ? E_MIN[kind] : E_MS[kind];
+      assert.ok(b.t - a.t >= need - 40, `${kind} の表示時間 ${Math.round(b.t - a.t)}ms ≥ ${need}ms`);
+      checked++;
+    }
+    assert.ok(checked >= 3, `表示時間を確認した演出 ${checked}`);
+    // 宣言の音は、表示した演出と同じ順・同じ数（待って出した演出は表示と同時に鳴り、捨てた演出は鳴らない）
+    const callSounds = (await page.evaluate(() => window.__calls)).filter((k) => k !== 'discard');
+    assert.deepEqual(callSounds, shows.map((r) => r.kind), '宣言の効果音と演出が一致');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+    console.log(`  （${summary.rounds}局・AI 同士のチー/ポン ${summary.aiCalls}回・表示 ${shows.length}回・最低表示時間の確認 ${checked}回）`);
+  }
+  console.log('✓ Ver.0.5-E：速い実対局で、AI 同士のチー・ポンも宣言者・席・発光が記録と一致。最低表示時間を守り、キューは2以下、宣言の音は表示と一致');
+
+  // (5) 演出キュー（画面）：チー表示中のポンは待って、チーの最低表示時間の後に表示。ロンが来たら待っている演出を捨ててすぐロン。音は表示の時に鳴る
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    await rcUnlock(page).catch(() => {}); // 偽の AudioContext では resume で running になる
+    await page.locator('.hand .tile.tap').first().tap();
+    await eObserve(page);
+    await eFire(page, 'chi', 3);
+    await page.waitForTimeout(100);
+    await eFire(page, 'pon', 2);
+    assert.deepEqual(await page.evaluate(() => [window.__mathjong.S.fx.current.kind, window.__mathjong.S.fx.queue.length]), ['chi', 1], 'ポンは待つ');
+    assert.equal((await sndKinds(page)).filter((k) => k === 'pon').length, 0, 'ポンの音はまだ鳴らない（表示と一緒に鳴らす）');
+    await page.waitForFunction(() => window.__mathjong.S.fx.current && window.__mathjong.S.fx.current.kind === 'pon', null, { timeout: 3000 });
+    const rec = await page.evaluate(() => window.__fxrec.filter((r) => r.cls));
+    assert.ok(rec[1].t - rec[0].t >= 700 - 30 && rec[1].t - rec[0].t <= 700 + 200, `チーは最低表示時間（0.7秒）で次へ（${Math.round(rec[1].t - rec[0].t)}ms）`);
+    assert.equal(rec[1].name, 'AI-B');
+    assert.equal((await sndKinds(page)).filter((k) => k === 'pon').length, 1, 'ポンの音は表示と同時に1回');
+    await eFire(page, 'chi', 1);
+    await eFire(page, 'riichi', 3);
+    await eFire(page, 'ron', 2);
+    const st = await page.evaluate(() => ({ cur: window.__mathjong.S.fx.current.kind, q: window.__mathjong.S.fx.queue.length, h: [...window.__mathjong.S.fx.history] }));
+    assert.deepEqual(st, { cur: 'ron', q: 0, h: ['chi', 'pon', 'ron'] }, 'ロンはすぐ表示し、待っていたチー・リーチは捨てる');
+    const k = await sndKinds(page);
+    assert.deepEqual(k.filter((x) => x !== 'discard'), ['chi', 'pon', 'ron'], '捨てた演出の音は鳴らない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E：演出キュー（チー表示中のポンは待って最低表示時間の後に表示・音も表示時・ロンで待ちを捨てる）');
+
+  // (6) 簡易表示・reduced motion：帯・閃光・揺れ・牌を出さず、宣言者と文字を十分な時間表示。席は点滅させず枠の色だけ。ロン・ツモは上部に出す
+  for (const how of ['lite', 'reduced']) {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    if (how === 'reduced') await page.emulateMedia({ reducedMotion: 'reduce' });
+    else await fxSetMode(page, 'lite');
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    for (const [kind, seat] of [['pon', 2], ['chi', 3], ['ron', 1]]) {
+      await page.evaluate(() => window.__mathjong.fx.clear());
+      await eFire(page, kind, seat);
+      const st = await page.evaluate(() => ({ cls: document.getElementById('fx-layer').className, extra: document.querySelectorAll('#fx-layer .fx-band, #fx-layer .fx-flash, #fx-layer .fx-rays, #fx-layer .fx-tiles, #fx-layer .fx-wintile, #fx-layer .fx-banner').length,
+        shake: document.querySelectorAll('.fx-shake').length, glowAnim: document.querySelectorAll('.fx-seat').length, outline: [...document.querySelectorAll('.fx-seat-lite')].map((el) => (el.classList.contains('self') ? 0 : Number(el.className.match(/seat-(\d)/)[1]))) }));
+      assert.deepEqual(st, { cls: `fx-${kind} lite`, extra: 0, shake: 0, glowAnim: 0, outline: [seat] }, `${how}/${kind}`);
+      await page.waitForTimeout(Math.round(E_MS[kind] * 0.5));
+      const l = await eLook(page);
+      assert.ok(l.who.op >= 0.95 && l.word.op >= 0.95, `${how}/${kind}：宣言者と文字が見える`);
+      assert.equal(await page.locator('#fx-layer .fx-name').textContent(), E_NAME[seat]);
+      if (kind === 'ron') assert.ok(l.card.t < l.vh * 0.25, `${how}：ロンは上部に出す（${Math.round(l.card.t)}px）`);
+      const dur = await fxDuration(page);
+      assert.ok(dur >= E_MS[kind] * 0.5 - 50, `${how}/${kind}：十分な時間表示`);
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E：簡易表示・reduced motion は宣言者と文字だけ（帯・閃光・揺れ・牌なし）・席は枠の色だけ・ロンは上部・表示時間は通常と同じ');
+
+  // (7) iPhone 相当の縦横画面：文字・宣言者・牌が見切れず、横スクロールなし。演出中も手牌を操作できる
+  for (const [w, h] of [[320, 568], [375, 667], [390, 844], [430, 932], [568, 320], [667, 375], [844, 390], [932, 430]]) {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' }, 'math1', { viewport: { width: w, height: h } });
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    for (const kind of ['chi', 'pon', 'ron', 'tsumo', 'riichi']) {
+      await page.evaluate(() => window.__mathjong.fx.clear());
+      await eFire(page, kind, 2);
+      await page.waitForTimeout(kind === 'ron' || kind === 'tsumo' ? 650 : Math.round(E_MS[kind] * 0.45));
+      const l = await eLook(page);
+      for (const k of ['who', 'word', 'tiles']) assert.ok(l[k].l >= -1 && l[k].r <= w + 1 && l[k].t >= -1 && l[k].b <= h + 1, `${w}x${h} ${kind} ${k} ${JSON.stringify(l[k])}`);
+      assert.ok(l.sx <= 0, `${w}x${h} 横スクロール`);
+      assert.ok(l.who.b - l.who.t >= 22, `${w}x${h} 宣言者の文字が大きい（${Math.round(l.who.b - l.who.t)}px）`);
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/v05e-${kind}-${w}x${h}.png` });
+    }
+    // 演出中のタップ：手牌の牌を選べる
+    await page.evaluate(() => window.__mathjong.fx.clear());
+    await eFire(page, 'pon', 1);
+    await page.locator('.hand .tile.tap').first().tap();
+    assert.equal(await page.locator('.hand .tile.selected').count(), 1, `${w}x${h}：演出中も牌を選べる`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E：320〜932px の縦横画面で文字・宣言者・牌が見切れず、横スクロールなし・演出中も操作できる');
+}
+
+// 宣言ボイス（導入の準備）：テスト用の音声（440Hz の音。人の声ではない）を本物の AudioContext で鳴らして確かめる
+function eWav(seconds = 0.8, hz = 440, rate = 22050) {
+  const n = Math.floor(seconds * rate);
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVE', 8); buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22); buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
+  buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(Math.sin((2 * Math.PI * hz * i) / rate) * 0.5 * 32767), 44 + i * 2);
+  return buf;
+}
+const E_VOICE_M = { id: 'test', credit: 'テスト用の音（人の声ではありません）', gain: 1, sfxGain: 0.5, files: { chi: 'src/ui/voice-test-chi.m4a', pon: 'src/ui/voice-test-pon.m4a', ron: 'src/ui/voice-test-ron.m4a', tsumo: 'src/ui/voice-test-tsumo.m4a' } };
+async function eVoicePage(browser, { missing = [] } = {}) {
+  const { ctx, page, errors } = await realPage(browser);
+  const wav = eWav();
+  await page.route('**/src/ui/voice-test-*.m4a', (route) => {
+    if (missing.some((m) => route.request().url().includes(m))) return route.fulfill({ status: 404, body: 'not found' });
+    return route.fulfill({ status: 200, contentType: 'audio/wav', body: wav });
+  });
+  await page.evaluate((m) => window.__mathjong.voice.setManifest(m), E_VOICE_M);
+  return { ctx, page, errors };
+}
+const eVoiceLog = (page) => page.evaluate(() => window.__mathjong.voice.log.map((x) => `${x.kind}:${x.status}`));
+
+async function v05eVoice(browser) {
+  // (1) 採用された音声がないとき（現状）：設定に出さず、何も読み込まない
+  {
+    const { ctx, page, errors } = await realPage(browser);
+    const reqs = [];
+    page.on('request', (r) => { if (/voice-/.test(r.url())) reqs.push(r.url()); });
+    await rcUnlock(page);
+    await page.locator('button[data-action="settings"]').tap();
+    assert.equal(await page.locator('select[data-action="voice"]').count(), 0, '宣言ボイスの設定は出さない（音声が未採用）');
+    await page.locator('.modal-actions button[data-action="close"]').tap();
+    await eFire(page, 'pon', 2);
+    assert.deepEqual(await eVoiceLog(page), ['pon:none']);
+    assert.deepEqual(reqs, [], '音声ファイルを読みに行かない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E 声：正式採用された音声がない現状では、設定にも出さず、何も読み込まない（効果音だけ）');
+
+  // (2) テスト用の音声で：演出が実際に始まったときに声が鳴り、宣言の効果音は下げる。待った演出の声は表示のときに鳴る。設定のオン／オフと保存
+  {
+    const { ctx, page, errors } = await eVoicePage(browser);
+    await rcUnlock(page);
+    await page.waitForFunction(() => Object.keys(window.__mathjong.voice.buffers).length === 4, null, { timeout: 5000 });
+    const m0 = await rcMark(page);
+    await eFire(page, 'chi', 3);
+    await page.waitForTimeout(100);
+    await eFire(page, 'pon', 2); // 待つ
+    assert.deepEqual(await eVoiceLog(page), ['chi:played'], 'ポンの声はまだ（演出の表示と一緒）');
+    const s = await page.evaluate(() => window.__mathjong.sound.log.slice(-2).map((x) => `${x.kind}:${x.status}`));
+    assert.deepEqual(s, ['voice:chi:played', 'chi:played']);
+    await page.waitForFunction(() => window.__mathjong.S.fx.current && window.__mathjong.S.fx.current.kind === 'pon', null, { timeout: 3000 });
+    assert.deepEqual(await eVoiceLog(page), ['chi:played', 'pon:played'], 'ポンの声は表示のときに1回');
+    await page.waitForTimeout(300);
+    assert.ok(await rcPeak(page, m0) > 0.05, '声（テスト用の音）が実際に出力された');
+    // 設定：オフにすると鳴らない・保存される
+    await page.evaluate(() => window.__mathjong.fx.clear());
+    await page.locator('button[data-action="settings"]').tap();
+    assert.equal(await page.locator('select[data-action="voice"]').inputValue(), '1', '既定はオン');
+    assert.equal(await page.locator('.voice-credit').textContent(), E_VOICE_M.credit, '利用条件の表記を出す');
+    await page.locator('select[data-action="voice"]').selectOption('0');
+    assert.equal(await page.evaluate(() => localStorage.getItem('mj-voice')), '0');
+    await page.locator('.modal-actions button[data-action="close"]').tap();
+    await eFire(page, 'ron', 1);
+    assert.equal((await eVoiceLog(page)).at(-1), 'ron:off');
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.log.at(-1).kind), 'ron', '効果音は鳴る（音量は通常）');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E 声：演出の開始と同時に声（待った演出は表示時）・効果音を下げる・設定オン／オフと保存・利用条件の表記');
+
+  // (3) 読み込み失敗：その種類は鳴らさず、効果音だけで続く（例外なし）
+  {
+    const { ctx, page, errors } = await eVoicePage(browser, { missing: ['voice-test-ron'] });
+    await rcUnlock(page);
+    await page.waitForFunction(() => Object.keys(window.__mathjong.voice.buffers).length === 3 && window.__mathjong.voice.errors.ron, null, { timeout: 5000 });
+    await eFire(page, 'ron', 1);
+    assert.equal((await eVoiceLog(page)).at(-1), 'ron:notready');
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.log.at(-1).kind + ':' + window.__mathjong.sound.log.at(-1).status), 'ron:played', '効果音は鳴る');
+    assert.deepEqual(errors.filter((e) => !/HTTP 404 .*voice-test-ron/.test(e) && !/404/.test(e)), [], '404 以外のエラーなし');
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E 声：読み込みに失敗した声は鳴らさず、効果音だけで正常に続く');
+
+  // (4) P2（Ver.0.5-D）の再発防止：声の途中で suspend → 待つ → resume で、古い声も効果音も出力されない。次の局・画面が隠れたときも止まる
+  for (const how of ['suspend', 'next', 'hidden']) {
+    const { ctx, page, errors } = await eVoicePage(browser);
+    await rcUnlock(page);
+    await page.waitForFunction(() => Object.keys(window.__mathjong.voice.buffers).length === 4, null, { timeout: 5000 });
+    const a0 = await rcMark(page);
+    await eFire(page, 'tsumo', 0);
+    await page.waitForTimeout(120);
+    assert.equal((await eVoiceLog(page)).at(-1), 'tsumo:played', `${how}：声が鳴っている最中`);
+    assert.ok(await rcPeak(page, a0) > 0.01, `${how}：中断前は出力された`);
+    if (how === 'suspend') {
+      await page.evaluate(() => window.__mathjong.sound.ctx.suspend());
+      await page.waitForFunction(() => window.__mathjong.sound.ctx.state === 'suspended');
+      await page.waitForTimeout(1500);
+      await rcTap(page);
+      await rcRunning(page);
+    } else if (how === 'next') {
+      await page.evaluate(() => window.__mathjong.startRound());
+    } else {
+      await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
+    }
+    await page.waitForTimeout(150);
+    const b = await rcMark(page);
+    await page.waitForTimeout(1200);
+    assert.ok(await rcPeak(page, b) < RC_EPS, `${how}：古い声・効果音は出力されない（ピーク ${await rcPeak(page, b)}）`);
+    if (how === 'hidden') await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); });
+    await page.evaluate(() => window.__mathjong.fx.clear());
+    await eFire(page, 'chi', 3);
+    await page.waitForTimeout(300);
+    assert.ok(await rcPeak(page, b) > 0.05, `${how}：その後の新しい声・効果音は出力される`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2 の再発なし：声の途中の中断→復帰・次の局・画面が隠れたとき、古い声も効果音も出力されない（本物の AudioContext）');
+}
+
 const server = await startServer(0, { base: BASE, host: '127.0.0.1' });
 PORT = server.address().port;
 LOCAL = `http://localhost:${PORT}${BASE}`;
@@ -5169,7 +5583,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend };
+    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
   } else {
@@ -5211,6 +5625,8 @@ try {
   await v05dRiichiFx(browser);
   await v05dSound(browser);
   await v05dSoundSuspend(browser);
+  await v05eCutin(browser);
+  await v05eVoice(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
