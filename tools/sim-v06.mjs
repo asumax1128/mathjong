@@ -47,9 +47,11 @@ export function buildCases(exp) {
   if (exp === 'same' || exp === 'all') {
     for (const l of LEVELS) cases.push({ kind: 'same', challenger: null, level: l, lineup: [...IDS[l], `L:${l}:speed`] });
   }
-  if (exp === 'ref') {
-    for (const l of LEVELS) for (const r of ['L:intermediate:speed', 'L:intermediate:value', 'L:intermediate:closed', 'L:advanced:speed']) {
-      cases.push({ kind: 'ref', challenger: r, level: l, lineup: [r, ...IDS[l]] });
+  if (exp === 'ref' || exp === 'refv05') {
+    // refv05：比較のため、Ver.0.5-E の同難易度AI（速攻・役重視・門前）3人の卓も測る（v05-<level>）
+    const tables = exp === 'ref' ? LEVELS.map((l) => [l, IDS[l]]) : LEVELS.map((l) => [`v05-${l}`, legacyIds(l)]);
+    for (const [l, opp] of tables) for (const r of ['L:intermediate:speed', 'L:intermediate:value', 'L:intermediate:closed', 'L:advanced:speed']) {
+      cases.push({ kind: 'ref', challenger: r, level: l, lineup: [r, ...opp] });
     }
   }
   if (exp === 'legacy' || exp === 'all') {
@@ -256,7 +258,7 @@ function summarize({ exp, mode, length, groups, seed, tune, cases, results, seco
     }
   }
   // ref：基準の打ち手の順位を、相手の難易度ごとに集める
-  for (const l of LEVELS) {
+  for (const l of [...new Set(cases.filter((c) => c.kind === 'ref').map((c) => c.level))]) {
     const rows = [];
     cases.forEach((c, ci) => {
       if (c.kind !== 'ref' || c.level !== l) return;

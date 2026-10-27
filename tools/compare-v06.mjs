@@ -16,3 +16,7 @@ for (const cb of b.cases) {
   const n = d.length, m = d.reduce((s, x) => s + x, 0) / n, sd = Math.sqrt(d.reduce((s, x) => s + (x - m) ** 2, 0) / (n - 1));
   console.log(`| ${cb.kind}${cb.level ? `(vs ${cb.level})` : ''} | ${cb.challenger} | ${ca.players[ca.challenger].rank.mean} | ${cb.players[cb.challenger].rank.mean} | ${m.toFixed(3)}±${(1.96 * sd / Math.sqrt(n)).toFixed(3)} | ${n} |`);
 }
+if (all.length) {
+  const n = all.length, m = all.reduce((s, x) => s + x, 0) / n, sd = Math.sqrt(all.reduce((s, x) => s + (x - m) ** 2, 0) / (n - 1));
+  console.log(`| 全体 | （対にした全試合） | | | ${m.toFixed(3)}±${(1.96 * sd / Math.sqrt(n)).toFixed(3)} | ${n} |`);
+}

@@ -20,12 +20,16 @@ export const CHARACTER_PARAMS = {
   natsuki: { callLoosen: 2.5 },
   // ゆき：下位（トップとの差 trail 点以上）では役のある鳴きを強める（判断の精度は落とさない）
   yuki: { trail: 12, callLoosen: 0.65 },
-  // ふくやま：放銃の重み（defense）が大きい。下位では守りを緩める（終盤はさらに緩める）
-  fukuyama: { style: 'speed', defense: { math1: 1.75, math2: 2.1 }, trailingDefense: 1.15, lateTrailingDefense: 0.8, callLoosen: 1.75 },
-  // かおる：上級の標準。アスマが大差の4位のとき、公開情報から見たアスマへの危険を稀に甘く見る
-  kaoru: { style: 'value', defense: 1.5, favorP: 0.07, favorDeficit: 20, favorWeight: 0.6 },
-  // アスマ：得点重視。勝負手（bigHand）では放銃の重みを大きく下げる
-  asuma: { style: 'value', defense: 1.2, bigHandDefense: 0.2, valueExp: 1.3, callLoosen: 1.25 },
+  // ふくやま：放銃の重み（defense）が大きい。下位では守りを緩める（終盤はさらに緩める）。
+  //   Ver.0.6 最終調整：危険度を Ver.0.6 の当てはめ（通った牌は 0）に、攻めの見込みを和了点の期待値に、最後の局は2位以内なら守り・3位以下なら攻め。
+  fukuyama: { style: 'speed', defense: { math1: 1.75, math2: 2.1 }, trailingDefense: 1.15, lateTrailingDefense: 0.8, callLoosen: 1.75,
+    danger: 'v06', evPoints: { math1: 3.0, math2: 3.1 }, placement: { lateHands: 1, target: 2, safeMult: 1.6, pushMult: 0.6 } },
+  // かおる：上級の標準。アスマが大差の4位のとき、公開情報から見たアスマへの危険を稀に甘く見る。
+  //   Ver.0.6 最終調整：和了点の期待値で比べる。鳴きは、鳴いた後の価値が1.5倍以上になるときだけ（門前のリーチを生かす）。
+  kaoru: { style: 'value', defense: 1.5, favorP: 0.07, favorDeficit: 20, favorWeight: 0.6, evPoints: { math1: 3.0, math2: 3.1 }, callLoosen: 1.5 },
+  // アスマ：得点重視。勝負手（bigHand）では放銃の重みを大きく下げる。
+  //   Ver.0.6 最終調整：危険度を Ver.0.6 の当てはめに、攻めの見込みを和了点の期待値に（高い手ほど押す）。
+  asuma: { style: 'value', defense: 1.2, bigHandDefense: 0.2, valueExp: 1.3, callLoosen: 1.25, danger: 'v06', evPoints: { math1: 3.0, math2: 3.1 } },
 };
 const modeValue = (x, mode) => (x !== null && typeof x === 'object' ? (x[mode] ?? x.math2) : x);
 
