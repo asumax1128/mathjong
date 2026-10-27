@@ -10,24 +10,28 @@ import { decide, applyAction } from '../src/engine/ai.js';
 import { createRng } from '../src/engine/rng.js';
 import { rulesFor } from './helpers.js';
 
-test('演出の仕様：ロン 0.8秒・ツモ 1.0秒・ポン 0.52秒・チー 0.42秒、優先度 ロン・ツモ ＞ ポン ＞ チー（指示の長さの範囲内）', () => {
-  assert.deepEqual(Object.keys(EFFECTS), ['ron', 'tsumo', 'pon', 'chi']);
-  assert.ok(EFFECTS.tsumo.ms >= 900 && EFFECTS.tsumo.ms <= 1100, 'ツモはロンと同程度（0.9〜1.1秒）');
+test('演出の仕様：ロン 1.1秒・ツモ 1.0秒・リーチ 0.7秒・ポン 0.52秒・チー 0.42秒、優先度 ロン・ツモ ＞ リーチ ＞ ポン ＞ チー（指示の長さの範囲内）', () => {
+  assert.deepEqual(Object.keys(EFFECTS), ['ron', 'tsumo', 'riichi', 'pon', 'chi']);
+  assert.equal(EFFECTS.tsumo.ms, 1000, 'ツモの 1.0 秒は据え置き');
   assert.equal(EFFECTS.tsumo.prio, EFFECTS.ron.prio, 'ツモはロンと同格');
   assert.equal(EFFECTS.tsumo.text, 'ツモ！');
-  assert.ok(EFFECTS.ron.ms >= 600 && EFFECTS.ron.ms <= 900);
+  assert.ok(EFFECTS.ron.ms >= 1000 && EFFECTS.ron.ms <= 1200, 'ロンは 800ms → 約 1100ms に延長');
+  assert.ok(EFFECTS.riichi.ms >= 600 && EFFECTS.riichi.ms <= 800, 'リーチは 0.6〜0.8 秒');
+  assert.ok(EFFECTS.riichi.ms < EFFECTS.tsumo.ms && EFFECTS.riichi.ms < EFFECTS.ron.ms, 'リーチはロン・ツモより短い');
+  assert.ok(EFFECTS.riichi.ms > EFFECTS.pon.ms, 'リーチはポン・チーより特別感がある（長い）');
   assert.ok(EFFECTS.pon.ms >= 450 && EFFECTS.pon.ms <= 600);
   assert.ok(EFFECTS.chi.ms >= 350 && EFFECTS.chi.ms <= 500);
-  assert.ok(EFFECTS.ron.prio > EFFECTS.pon.prio && EFFECTS.pon.prio > EFFECTS.chi.prio);
-  assert.deepEqual([EFFECTS.ron.text, EFFECTS.pon.text, EFFECTS.chi.text], ['ロン！', 'ポン！', 'チー！']);
+  assert.ok(EFFECTS.ron.prio > EFFECTS.riichi.prio && EFFECTS.riichi.prio > EFFECTS.pon.prio && EFFECTS.pon.prio > EFFECTS.chi.prio);
+  assert.deepEqual([EFFECTS.ron.text, EFFECTS.riichi.text, EFFECTS.pon.text, EFFECTS.chi.text], ['ロン！', 'リーチ！', 'ポン！', 'チー！']);
 });
 
-test('記録 → 演出の種類：ロン・ツモ和了・ポン・チーだけ。打牌・ツモ（牌を引く）・流局・リーチ宣言は出さない', () => {
+test('記録 → 演出の種類：ロン・ツモ和了・リーチ（成立の記録）・ポン・チーだけ。打牌・ツモ（牌を引く）・流局は出さない', () => {
   assert.equal(effectKindOf({ type: 'win', seat: 1, how: 'ron', from: 0 }), 'ron');
   assert.equal(effectKindOf({ type: 'win', seat: 1, how: 'tsumo', from: null }), 'tsumo');
   assert.equal(effectKindOf({ type: 'pon', seat: 2 }), 'pon');
   assert.equal(effectKindOf({ type: 'chi', seat: 1 }), 'chi');
-  for (const e of [{ type: 'win', how: 'unknown' }, { type: 'discard' }, { type: 'draw' }, { type: 'riichi' }, { type: 'exhaustive-draw' }, null, undefined]) assert.equal(effectKindOf(e), null);
+  assert.equal(effectKindOf({ type: 'riichi', seat: 0, tile: 5 }), 'riichi', 'リーチは、エンジンが宣言を受け付けて記録した時だけ');
+  for (const e of [{ type: 'win', how: 'unknown' }, { type: 'discard' }, { type: 'draw' }, { type: 'exhaustive-draw' }, null, undefined]) assert.equal(effectKindOf(e), null);
 });
 
 test('pickEffect：新しい記録だけを見る。同じ記録で2回出さない。優先度が高いものを選ぶ。別の局（記録が短い）は数え直す', () => {

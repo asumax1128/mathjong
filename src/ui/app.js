@@ -18,10 +18,11 @@ import { YAKU_GUIDE, GUIDE_NOTES, guideCondition } from './guide.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, MAX_ROUND } from './params.js';
 import { validateReplay, replayQuery } from './replay.js';
 import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, pickEffect, shouldReplace, fxProgress, isLiteEffect } from './effects.js';
+import { SOUND_KEY, parseSoundSetting, pickSound, createSoundPlayer } from './sound.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
-const APP_VERSION = '0.5.0-c';
+const APP_VERSION = '0.5.0-d';
 document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`;
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -91,6 +92,13 @@ S.speed = resolveSpeed(params.get('speed'), store.get('mj-speed', null), IS_LOCA
 // ロン・ポン・チーの演出（Ver.0.5-B）。画面だけの機能で、ゲームの進行・判定・得点には関わらない。
 // mode：'full'（通常）／'lite'（簡易：文字だけ）。seen：演出を判定済みの記録（Game.events）の件数。history：出した演出（確認用）。
 S.fx = { mode: parseEffectMode(store.get(EFFECT_MODE_KEY, null)), seen: 0, serial: -1, current: null, timer: null, history: [] };
+// 効果音（Ver.0.5-D）。画面だけの機能。on：設定（保存キー mj-sound、'0' のときだけオフ）。seen：音を判定済みの記録の件数。
+// 音はすべて自作の合成音（音声ファイルなし）。iPhone Safari は最初の操作で再生を許可する（下の unlock）。
+S.sound = { on: parseSoundSetting(store.get(SOUND_KEY, null)), seen: 0, serial: -1 };
+const sound = createSoundPlayer({
+  getCtor: () => window.AudioContext || window.webkitAudioContext || null,
+  isOn: () => S.sound.on,
+});
 // 対局中のモード（S.mode）と、次の新しい対局で使うモード（S.nextMode）
 S.mode = parseMode(params.get('mode')) || parseMode(store.get(MODE_KEY, null)) || DEFAULT_MODE;
 S.nextMode = S.mode;
@@ -137,6 +145,7 @@ function startRound() {
   S.claimPolicy = null; // 宣言ごとの表示方針（局ごとに初期化）
   S.riichiSelect = false; // リーチの宣言牌を選んでいる途中か（局ごとに初期化）
   fxClear(); // 前の局の演出を残さない
+  sound.silence(); // 前の局の効果音の残りも止める
   S.autoPass.noticePending = false;
   S.autoPass.noticeKind = null;
   S.autoPass.noticeKey = null;
@@ -167,6 +176,7 @@ function step(changed = false) {
   S.timer = null;
   if (!S.game) return; // タイトル画面へ戻った後（遅れて呼ばれた step は何もしない）
   fxScan(); // ゲームの記録に新しいロン・ポン・チーがあれば演出を出す（ゲーム状態は読むだけ）
+  soundScan(); // 同じく、新しい記録に応じて効果音を鳴らす（待たない・ゲーム状態は読むだけ）
   // 手牌の並び替え（dragging）中は AI を進めない。指を離すか中止した時点で step() を1回だけ呼び直す。
   // AI の判断・乱数は局面だけで決まるので、待つ時間は結果に影響しない。
   if (drag && drag.isDragging()) { S.stepDeferred = true; return; }
@@ -293,6 +303,28 @@ function fxScan() {
   if (pick.kind) fxFire(pick.kind, pick.event);
 }
 
+// ゲームの記録に新しい打牌・チー・ポン・リーチ・ロン・ツモがあれば、効果音を1つ鳴らす。同じ記録で2回は鳴らさない。
+// 優先度は ロン・ツモ ＞ リーチ ＞ ポン ＞ チー ＞ 打牌。演出（fxScan）と同じ step() の先頭で、同じ記録を一度だけ読む。
+function soundScan() {
+  const g = S.game;
+  if (!g) return;
+  if (S.sound.serial !== S.gameSerial) { S.sound.serial = S.gameSerial; S.sound.seen = 0; }
+  const pick = pickSound(g.events, S.sound.seen);
+  S.sound.seen = pick.next;
+  if (pick.kind) sound.play(pick.kind);
+}
+
+// iPhone Safari：最初のタップなどの操作の中で AudioContext を作って再生を許可する。以降も、止まっていれば操作のたびに再開を試みる。
+// 受け身（passive）の記録だけで、操作の挙動（タップ・スクロール・ドラッグ）は変えない。
+for (const t of ['touchend', 'pointerup', 'click', 'keydown']) {
+  window.addEventListener(t, () => { if (S.sound.on) sound.unlock(); }, { capture: true, passive: true });
+}
+
+// 画面が隠れた・ページを離れた（iPhone のバックグラウンド移行・ホーム画面・タブ切替）：鳴っている音を切り離す。
+// 復帰したあと、隠れる前の音の続きが鳴らないようにする（新しい音は復帰後に新しい出力で鳴る）。リスナーは1回だけ登録。
+document.addEventListener('visibilitychange', () => { if (document.hidden) sound.drop(); });
+window.addEventListener('pagehide', () => sound.drop());
+
 // 演出の中身（HTML）。簡易表示（lite）は文字だけ。牌は公開されている情報（鳴いた面子・和了牌）だけを使う。
 // lite は演出の開始時に決めた値（S.fx.current.lite）を渡す。設定をいま読み直さない。
 function fxHTML(kind, ev, lite) {
@@ -300,10 +332,16 @@ function fxHTML(kind, ev, lite) {
   const word = `<div class="fx-word">${EFFECTS[kind].text}</div>`;
   const who = `<div class="fx-who">${nameOf(ev.seat)}</div>`;
   if (lite) return `<div class="fx-card">${word}${who}</div>`;
+  if (kind === 'riichi') {
+    // リーチ：白銀の鋭い閃光（十字の光条）と紫〜金の発光。宣言牌（いま捨てた牌）を大きく見せる。
+    const decl = ev.tile !== undefined && ev.tile !== null ? `<div class="fx-decl">${tileHTML(T(g.typeOf(ev.tile)), { size: 'm' })}</div>` : '';
+    return `<div class="fx-flash"></div><div class="fx-streak fx-streak-h"></div><div class="fx-streak fx-streak-v"></div><div class="fx-card">${word}${who}${decl}</div>`;
+  }
   if (kind === 'ron' || kind === 'tsumo') {
-    // 和了牌（ロンは打牌、ツモは引いた牌）を大きく見せる。ツモは閃光に加えて、広がる光の輪（halo）を重ねる
+    // 和了牌（ロンは打牌、ツモは引いた牌）を大きく見せる。ツモは閃光に加えて、広がる光の輪（halo）を重ねる。
+    // ロンは、閃光に加えて放射状の光条（rays）を重ねる（赤〜金）。
     const tile = g.result && g.result.tile !== undefined ? `<div class="fx-wintile">${tileHTML(T(g.typeOf(g.result.tile)), { size: 'm' })}</div>` : '';
-    const halo = kind === 'tsumo' ? '<div class="fx-halo"></div>' : '';
+    const halo = kind === 'tsumo' ? '<div class="fx-halo"></div>' : '<div class="fx-rays"></div>';
     return `<div class="fx-flash"></div>${halo}<div class="fx-card">${word}${who}${tile}</div>`;
   }
   const meld = g.melds[ev.seat].find((m) => m.claimed === ev.tile) || g.melds[ev.seat][g.melds[ev.seat].length - 1];
@@ -334,14 +372,22 @@ function fxFire(kind, ev) {
 function fxApply() {
   const table = app.querySelector('.table');
   for (const el of app.querySelectorAll('.fx-shake, .fx-glow')) {
-    el.classList.remove('fx-shake', 'fx-glow', 'fx-glow-pon', 'fx-glow-chi');
+    el.classList.remove('fx-shake', 'fx-shake-ron', 'fx-glow', 'fx-glow-pon', 'fx-glow-chi', 'fx-glow-riichi');
     el.style.removeProperty('animation-delay');
   }
   const c = S.fx.current;
   const { active, elapsed } = fxProgress(c, fxNow());
   if (!c || !active || c.lite || !S.game) return; // 簡易表示で始まった演出は、途中で設定が変わっても揺れ・発光を付けない
   if (c.kind === 'ron' || c.kind === 'tsumo') {
-    if (table) { table.classList.add('fx-shake'); table.style.animationDelay = `-${Math.round(elapsed)}ms`; }
+    // ロンは、長くなった演出に合わせて、揺れも少し長く減衰させる（fx-shake-ron）。ツモの揺れは従来どおり。
+    if (table) { table.classList.add('fx-shake'); if (c.kind === 'ron') table.classList.add('fx-shake-ron'); table.style.animationDelay = `-${Math.round(elapsed)}ms`; }
+    return;
+  }
+  if (c.kind === 'riichi') {
+    // 宣言牌（河の横向きの牌）を光らせる
+    const rsel = c.seat === HUMAN ? '.river.mine .tile.riichi-decl' : `.panel.seat-${c.seat} .river .tile.riichi-decl`;
+    const rel = app.querySelector(rsel);
+    if (rel) { rel.classList.add('fx-glow', 'fx-glow-riichi'); rel.style.animationDelay = `-${Math.round(elapsed)}ms`; }
     return;
   }
   const sel = c.seat === HUMAN ? '.self .melds .meld:last-child' : `.panel.seat-${c.seat} .melds .meld:last-child`;
@@ -854,7 +900,9 @@ function settingsHTML() {
       <p class="note mode-note">いまの対局：${modeLabel(rules)}。${S.nextMode !== rules.config.mode && !LEGACY ? '下の「新しい対局」で切り替わります（いまの局は変わりません）。' : 'モードの変更は「新しい対局」から反映されます。'}</p>
     </fieldset>
     <label class="setting">AIの速さ <select data-action="speed">${publicSpeedNames().map(opt).join('')}</select></label>
-    <label class="setting">ロン・ポン・チーの演出 <select data-action="fx-mode"><option value="full" ${S.fx.mode === 'full' ? 'selected' : ''}>通常</option><option value="lite" ${S.fx.mode === 'lite' ? 'selected' : ''}>簡易（文字だけ）</option></select></label>
+    <label class="setting">視覚演出 <select data-action="fx-mode"><option value="full" ${S.fx.mode === 'full' ? 'selected' : ''}>通常</option><option value="lite" ${S.fx.mode === 'lite' ? 'selected' : ''}>簡易（文字だけ）</option></select></label>
+    <label class="setting">効果音 <select data-action="sound"><option value="1" ${S.sound.on ? 'selected' : ''}>オン</option><option value="0" ${S.sound.on ? '' : 'selected'}>オフ</option></select></label>
+    <p class="note sound-note">打牌・チー・ポン・リーチ・ロン・ツモの効果音です。オフでもゲームは同じように進みます。音が出ないときは、画面を一度タップしてからお試しください（マナーモードでは鳴らない端末があります）。</p>
     <p class="note setting-note">チー・ポンの自動パスは、対戦画面の手牌の下のボタンで切り替えます（いま：チー ${S.chiAutoPass ? 'ON' : 'OFF'}・ポン ${S.ponAutoPass ? 'ON' : 'OFF'}）。チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。</p>
     ${reportInfoHTML()}
     <div class="modal-actions"><button data-action="reset">新しい対局（得点リセット）</button>
@@ -1128,6 +1176,7 @@ app.addEventListener('click', (ev) => {
       if (drag && drag.isDragging()) drag.cancel('render');
       closeHint();
       fxClear();
+      sound.silence();
       S.confirmTitle = false;
       S.modal = null;
       S.game = null;
@@ -1148,6 +1197,12 @@ app.addEventListener('change', (ev) => {
     // 値の保存だけ（ゲームは進めない）。表示中の演出は変えず、次の演出から反映する。
     S.fx.mode = parseEffectMode(ev.target.value);
     store.set(EFFECT_MODE_KEY, S.fx.mode);
+  }
+  if (ev.target.dataset.action === 'sound') {
+    // 値の保存だけ（ゲームは進めない）。オンにしたときはこの操作の中で再生を許可しておく。
+    S.sound.on = parseSoundSetting(ev.target.value);
+    store.set(SOUND_KEY, S.sound.on ? '1' : '0');
+    if (S.sound.on) sound.unlock();
   }
   if (ev.target.dataset.action === 'speed') {
     S.speed = resolveSpeed(ev.target.value, null, false);
@@ -1210,7 +1265,7 @@ function goRound(n, dealer = (n - 1) % 4) {
   S.round = n;
   startRound();
 }
-if (IS_LOCAL) window.__mathjong = { S, get rules() { return rules; }, decide, startRound, startMatch, goRound, render, step, drag, fx: { fire: fxFire, clear: fxClear, scan: fxScan } };
+if (IS_LOCAL) window.__mathjong = { S, get rules() { return rules; }, decide, startRound, startMatch, goRound, render, step, drag, fx: { fire: fxFire, clear: fxClear, scan: fxScan }, sound, soundScan };
 
 // 試合を始める。fromUrl：?seed= の再現・テスト用 URL（親番・連荘・親の席を URL から）
 // settings：{ mode, length, ai } 試合の設定（採用元は呼び出し側が決める：タイトル／もう一度遊ぶ／設定画面）
