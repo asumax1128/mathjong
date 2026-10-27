@@ -55,6 +55,7 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 | [Ver.0.5-B（仮）ロン・ポン・チーの演出](docs/21-ver0.5-b-call-effects.md) | ロン・ポン・チーの視覚演出（CSS 中心・簡易表示あり）。Draft PR・監査待ち |
 | [Ver.0.5-C（仮）タイトル画像＋ツモ演出](docs/22-ver0.5-c-title-tsumo.md) | 正式採用のタイトル画像（背景透過 PNG、画面に合わせて3つの大きさから選択）、ツモ演出の強化。Draft PR・監査待ち |
 | [Ver.0.5-D（仮）リーチ演出＋効果音](docs/23-ver0.5-d-riichi-sound.md) | リーチ専用演出、効果音（自作の合成音・設定でオン／オフ・iPhone Safari の再生許可に対応）、ロン演出を約1.1秒に強化。Draft PR・監査待ち |
+| [Ver.0.5-E（仮）カットイン演出＋宣言ボイスの準備](docs/24-ver0.5-e-cutin-voice.md) | チー・ポン・ロン・ツモのカットイン、宣言者の大きな表示と席の発光、演出キュー、宣言ボイスの導入準備（音声は未採用）。Draft PR・監査待ち |
 | [iPhone 実機テスト手順](docs/12-iphone-test-guide.md) | テストURL、Pages 設定、固定seed、報告方法 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |
