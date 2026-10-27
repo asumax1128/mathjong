@@ -56,6 +56,10 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 | [Ver.0.5-C（仮）タイトル画像＋ツモ演出](docs/22-ver0.5-c-title-tsumo.md) | 正式採用のタイトル画像（背景透過 PNG、画面に合わせて3つの大きさから選択）、ツモ演出の強化。Draft PR・監査待ち |
 | [Ver.0.5-D（仮）リーチ演出＋効果音](docs/23-ver0.5-d-riichi-sound.md) | リーチ専用演出、効果音（自作の合成音・設定でオン／オフ・iPhone Safari の再生許可に対応）、ロン演出を約1.1秒に強化。Draft PR・監査待ち |
 | [Ver.0.5-E（仮）カットイン演出＋宣言ボイスの準備](docs/24-ver0.5-e-cutin-voice.md) | チー・ポン・ロン・ツモのカットイン、宣言者の大きな表示と席の発光、演出キュー、宣言ボイスの導入準備（音声は未採用）。Draft PR・監査待ち |
+| [Ver.0.6 キャラクターAI 設計](docs/25-ver0.6-character-ai-design.md) | 9人のキャラクター（初級・中級・上級 各3人）の個性と判断の設計。Draft PR #17 |
+| [Ver.0.6-A キャラクターAI 実装報告](docs/26-ver0.6-a-character-ai-report.md) | 9人のAI・対局中の名前表示の実装と新旧比較 |
+| [Ver.0.6-A 難易度間の強さ（192試合）](docs/27-ver0.6-a-cross-level-strength-report.md) | 初級1 vs 中級3・中級1 vs 上級3 の小規模シミュレーションと課題 |
+| [Ver.0.6 最終調整・品質検証](docs/28-ver0.6-b-final-tuning.md) | 並列シミュレーター、上級3人の公開情報での改善、調整用／最終評価用 seed、95%CI、個性の指標、未解決の課題 |
 | [iPhone 実機テスト手順](docs/12-iphone-test-guide.md) | テストURL、Pages 設定、固定seed、報告方法 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |
