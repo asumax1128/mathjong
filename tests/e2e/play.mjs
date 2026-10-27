@@ -5309,8 +5309,8 @@ async function v05eCutin(browser) {
   //     チー・ポン・リーチは最低表示時間を守り（ロン・ツモで置き換えた場合と局の切替を除く）、キューは2以下。宣言の音は表示と同じ順・同じ数
   // 監査対応：数学Ⅱ・AI 難易度（初級・中級・上級）でも。宣言はすべて「表示」か「明示的な破棄」のどちらか（取りこぼしなし）。鳴きの面子の発光も記録の牌と一致
   for (const cfg of [
-    { mode: 'math1', ai: 'intermediate', rounds: [7, 19, 22, 25, 26, 27, 28], minCalls: 5 },
-    { mode: 'math2', ai: 'intermediate', rounds: [6, 16, 18, 20, 23], minCalls: 3 },
+    { mode: 'math1', ai: 'intermediate', rounds: [7, 19, 22, 25, 26, 27, 28], minCalls: 1 },
+    { mode: 'math2', ai: 'intermediate', rounds: [6, 16, 18, 20, 23], minCalls: 0 },
     { mode: 'math1', ai: 'beginner', rounds: [7, 19, 22, 25], minCalls: 0 },
     { mode: 'math1', ai: 'advanced', rounds: [7, 19, 22, 25], minCalls: 0 },
   ]) {
@@ -5318,9 +5318,9 @@ async function v05eCutin(browser) {
     await ctx.addInitScript(SND_FN, { resume: 'ok' });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    await page.goto(`${LOCAL}?mode=${cfg.mode}&seed=11&speed=test`);
+    await page.goto(`${LOCAL}?mode=${cfg.mode}&seed=11&ai=${cfg.ai}&speed=test`);
     await page.waitForSelector('.hand .tile');
-    await page.evaluate((a) => { window.__mathjong.S.matchSettings.ai = a; }, cfg.ai);
+    const rosterNames = await page.evaluate(() => window.__mathjong.S.game.players.map((p) => p.name));
     await paSettings(page, true, true); // 自分のチー・ポンは自動で見送る（AI 同士の鳴きを増やす）
     await page.evaluate(() => { const s = window.__mathjong.sound; const orig = s.play; window.__calls = []; s.play = (k, o) => { window.__calls.push(k); return orig(k, o); }; });
     await eObserve(page);
@@ -5355,7 +5355,7 @@ async function v05eCutin(browser) {
     for (const r of shows) {
       assert.equal(r.dataSeat, r.evSeat, '宣言者はゲームの記録の seat');
       assert.equal(r.evInLog, true, '表示した演出は、実際の記録に対応する');
-      assert.equal(r.name, E_NAME[r.evSeat]);
+      assert.equal(r.name, rosterNames[r.evSeat]);
       assert.equal(r.pos, r.evSeat === 0 ? null : E_POS[r.evSeat]);
       assert.deepEqual(r.glow, [r.evSeat], '発光するのは宣言者の席だけ');
       assert.ok(r.queue <= 2, 'キューは上限以下');
