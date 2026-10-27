@@ -897,7 +897,7 @@ function settingsHTML() {
     <label class="setting">AIの速さ <select data-action="speed">${publicSpeedNames().map(opt).join('')}</select></label>
     <label class="setting">ロン・ポン・チーの演出 <select data-action="fx-mode"><option value="full" ${S.fx.mode === 'full' ? 'selected' : ''}>通常</option><option value="lite" ${S.fx.mode === 'lite' ? 'selected' : ''}>簡易（文字だけ）</option></select></label>
     <label class="setting">効果音 <select data-action="sound"><option value="1" ${S.sound.on ? 'selected' : ''}>オン</option><option value="0" ${S.sound.on ? '' : 'selected'}>オフ</option></select></label>
-    <p class="note setting-note">打牌・チー・ポン・リーチ・ロン・ツモの効果音です。オフでもゲームは同じように進みます。音が出ないときは、画面を一度タップしてからお試しください（マナーモードでは鳴らない端末があります）。</p>
+    <p class="note sound-note">打牌・チー・ポン・リーチ・ロン・ツモの効果音です。オフでもゲームは同じように進みます。音が出ないときは、画面を一度タップしてからお試しください（マナーモードでは鳴らない端末があります）。</p>
     <p class="note setting-note">チー・ポンの自動パスは、対戦画面の手牌の下のボタンで切り替えます（いま：チー ${S.chiAutoPass ? 'ON' : 'OFF'}・ポン ${S.ponAutoPass ? 'ON' : 'OFF'}）。チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。</p>
     ${reportInfoHTML()}
     <div class="modal-actions"><button data-action="reset">新しい対局（得点リセット）</button>

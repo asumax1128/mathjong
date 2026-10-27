@@ -2155,7 +2155,7 @@ async function chiAutoPass(browser) {
     assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.5.0-d');
     assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.5.0-d');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.5\.0-c ・ エンジン v0\.5\.0-a/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.5\.0-d ・ エンジン v0\.5\.0-a/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -3195,6 +3195,8 @@ async function v04bLevels(browser) {
   // (1) タイトルで選んだ難易度が試合の AI 全員に使われる。もう一度遊ぶでも同じ。最終結果に実際の難易度を表示
   for (const [lv, label] of [['beginner', '初級'], ['advanced', '上級']]) {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    // 試合の山の seed は Math.random 由来。AI が数手で和了すると後続の検査が成り立たないので、乱数を固定した列にして再現可能にする（本番のコードには影響しない）
+    await ctx.addInitScript(() => { let x = 20261027; Math.random = () => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 4294967296; }; });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
     await page.goto(`${LOCAL}?speed=test`);
@@ -4108,7 +4110,7 @@ async function v05cTsumo(browser) {
     // 重なり：ツモの演出中に後から来たポン・チーは、ツモを潰さない（優先度ツモ＞ポン＞チー）
     await page.evaluate(() => { const { S, fx } = window.__mathjong; const g = S.game; const t = g.hands[1][0]; fx.fire('pon', { type: 'pon', seat: 1, tile: t }); fx.fire('chi', { type: 'chi', seat: 1, tile: t }); });
     assert.equal((await fxState(page)).cls, 'fx-tsumo');
-    assert.deepEqual((await fxState(page)).history, ['tsumo']);
+    assert.deepEqual((await fxState(page)).history, ['riichi', 'tsumo']);
     await fxGone(page);
     assert.deepEqual(errors, []);
     await ctx.close();
