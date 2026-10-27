@@ -53,14 +53,15 @@ test('first candidate action is deterministic with same seed and no hidden state
 
 test('beginner candidate cannot inspect game wall in its turn decision', () => {
   const game = fixed();
-  // A defensive proxy prevents accidental use of the hidden wall in the prototype.
-  const wrapped = new Proxy(game, {
-    get(target, name, receiver) {
-      if (name === 'wall' || name === 'hands') throw new Error('hidden game data touched');
-      return Reflect.get(target, name, receiver);
-    },
-  });
-  // game.waitsOf is a public method; it only computes legal waits from provided public counts.
+  // Expose only public player information: no access to hands or wall.
+  // viewFor() itself needs hidden state internally; the AI receives only its returned public view.
+  const wrapped = {
+    pending: () => game.pending(),
+    viewFor: (seat) => game.viewFor(seat),
+    waitsOf: (counts, exposed) => game.waitsOf(counts, exposed),
+    rules: game.rules,
+    riichi: game.riichi.map((x) => !!x),
+  };
   const rng = createRng(332211);
   const a = decideBeginnerCharacter(wrapped, 0, 'kanata', rng, {
     seatIds: ['kanata', 'mitsuki', 'aoto', 'baseline'],
