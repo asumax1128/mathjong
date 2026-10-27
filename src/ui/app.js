@@ -528,7 +528,7 @@ function panelHTML(seat) {
   const p = g.pending();
   const active = p && p.seat === seat && p.type === 'turn';
   const pl = PLAYERS[seat];
-  const pers = pl.personality ? `<span class="pers">${PERSONALITIES[pl.personality].label}</span>` : '';
+  const pers = pl.personality ? `<span class="pers">${pl.styleLabel || PERSONALITIES[pl.personality].label}</span>` : '';
   return `<section class="panel seat-${seat} ${active ? 'active' : ''}">
     <header>
       <span class="pos">${POS[seat]}</span><span class="name">${pl.name}</span>${pers}
@@ -820,7 +820,7 @@ function finalHTML() {
   const rk = ranks(m.scores);
   const order = [0, 1, 2, 3].sort((a, b) => rk[a] - rk[b] || a - b);
   const sign = (x) => (x > 0 ? `+${x}` : x < 0 ? `−${-x}` : '±0');
-  const rows = order.map((s) => `<tr class="${s === HUMAN ? 'me' : ''}"><td class="rank">${rk[s]}位</td><th>${s === HUMAN ? 'あなた' : `${PLAYERS[s].name}<small>${PERSONALITIES[PLAYERS[s].personality].label}</small>`}</th>
+  const rows = order.map((s) => `<tr class="${s === HUMAN ? 'me' : ''}"><td class="rank">${rk[s]}位</td><th>${s === HUMAN ? 'あなた' : `${PLAYERS[s].name}<small>${PLAYERS[s].styleLabel || PERSONALITIES[PLAYERS[s].personality].label}</small>`}</th>
       <td class="pts">${m.scores[s]}</td><td>${sign(m.scores[s] - START_POINTS)}</td><td>${m.wins[s]}回</td><td>${m.best[s] ? `+${m.best[s]}<small>（和了点${m.bestBase[s]}）</small>` : '—'}</td></tr>`).join('');
   return `<div class="final">
     <h2>試合終了</h2>
