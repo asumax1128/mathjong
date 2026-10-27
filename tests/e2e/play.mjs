@@ -2152,10 +2152,10 @@ async function chiAutoPass(browser) {
   // (12) バージョン表示：ヘッダー・ページタイトル・再現情報
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.5.0-e');
-    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.5.0-e');
+    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.6.0-a');
+    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.6.0-a');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.5\.0-e ・ エンジン v0\.5\.0-a/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.6\.0-a ・ エンジン v0\.5\.0-a/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
