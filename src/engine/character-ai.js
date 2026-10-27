@@ -112,8 +112,8 @@ export function characterAdvancedDiscard(game, seat, characterId, rng, info, sea
   const scores = info?.scores || null;
   let defense = 1.5;
   if (characterId === 'fukuyama') {
-    defense = 2.4;
-    if (scores && rank(scores, seat) >= 3 && info.hand >= info.length - 2) defense = 1.3;
+    defense = rules.config.mode === 'math1' ? 1.75 : 2.1;
+    if (scores && rank(scores, seat) >= 3) defense = info.hand >= info.length - 2 ? 0.8 : 1.15;
   }
   if (characterId === 'asuma') {
     defense = best > 0 ? 0.2 : 1.2;
