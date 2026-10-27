@@ -1737,9 +1737,15 @@ async function apForce(page, seat, key = null) {
 async function apDiscardDrawn(page) {
   await page.waitForSelector('.hand .tile.tap.drawn');
   const t = page.locator('.hand .tile.tap.drawn');
+  // 打牌の完了は「その牌の打牌が記録された」ことで判断する（手番が他家に移ったかだけを見ると、AI が速いときに
+  // 自分の手番まで一瞬で戻り、条件を見逃して待ち続ける）。局が替わっても判断できるよう、その時点の局を覚えておく。
+  const id = Number(await t.getAttribute('data-id'));
+  await page.evaluate(() => { window.__apGame = window.__mathjong.S.game; });
   if (!(await t.evaluate((e) => e.classList.contains('selected')))) await t.tap(); // 1回目で選択、2回目で打牌
   await t.tap();
-  await page.waitForFunction(() => { const p = window.__mathjong.S.game.pending(); return !p || p.seat !== 0; });
+  await page.waitForFunction((tile) => window.__apGame.events.some((e) => e.type === 'discard' && e.seat === 0 && e.tile === tile), id, { timeout: 8000 });
+  // 2回タップで打牌は1回だけ（その牌の打牌の記録がちょうど1件、河の末尾ではなく記録で数える）
+  assert.equal(await page.evaluate((tile) => window.__apGame.events.filter((e) => e.type === 'discard' && e.seat === 0 && e.tile === tile).length, id), 1, '打牌は1回だけ');
 }
 // 自分の打牌 → 下家・対面の打牌（ツモ牌）まで進め、上家の手番にする
 async function apToSeat3(page) {

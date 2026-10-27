@@ -151,15 +151,25 @@ export function expectedPoints(rules, counts, exposed, unseen) {
   return sw > 0 ? sp / sw + bonus : 0;
 }
 
-// 通った牌（上級の任意の係数 passedSafe）：公開された打牌の順序（ゲームの記録）から、他家 o が今の手でロンしなかった牌の種類を集める。
+// 席 o が「宣言できるロン・ツモを必ず宣言する」と保証されているか。保証されるのは AI の席（kind: 'ai'）だけ
+// （9人のキャラ AI と Ver.0.5-E の AI はロン・ツモを見逃さない。tests/character-ai-v06.test.js で確認）。
+// 人間はロン・ツモを見送れる（フリテンの規則はない）ので、見送った牌が後で当たりになりうる。種類が不明な席も保証しない。
+// 席が人間か AI かは画面に出ている公開情報（他家の手牌・山・待ちは使わない）。
+export function ronGuaranteed(game, o) {
+  return game.players?.[o]?.kind === 'ai';
+}
+
+// 通った牌（上級の任意の係数 passedSafe と危険度 v06 で使う）：公開された打牌の順序（ゲームの記録）から、他家 o が今の手で
+// ロンしなかった牌の種類を集める。
 // ・o がリーチしている：リーチ後は手が変わらないので、リーチ後に誰かが捨てた牌（o 自身のツモ切りを含む）はすべて o の当たりではない。
 // ・o がリーチしていない：o の最後の打牌の後に他家が捨てた牌は、o の今の手では当たりではない。
-// 宣言できるロンは見逃さない（AI は必ずロンする）という前提の推定。他家の手牌や山は見ない。
+// 宣言できるロン・ツモは見逃さない、という前提の推定なので、その前提が保証された席（ronGuaranteed＝AI の席）だけを対象にする。
+// 人間の席は常に空（見送りから安全を断定しない）。他家の手牌や山は見ない。
 export function passedTiles(game, seat) {
   const ev = game.events;
   const out = [new Set(), new Set(), new Set(), new Set()];
   for (let o = 0; o < 4; o++) {
-    if (o === seat) continue;
+    if (o === seat || !ronGuaranteed(game, o)) continue;
     let from = -1;
     let riichi = false;
     for (let i = ev.length - 1; i >= 0; i--) {
@@ -187,7 +197,7 @@ export function passedTiles(game, seat) {
 //          log(w2+0.001), w2>0, リーチ後の o の打牌数]
 //   w ：t で完成する面子（鳴いた o は役の付く面子だけ）について、残りの牌を o が持っている見込みの和（従来と同じ）
 //   w2：w のうち、o が残りの牌（相方）を自分で捨てていない面子だけの和（相方を捨てた面子では待ちにくい）
-// 「通った牌」（passedTiles）は確率 0。係数がないモードは従来の dangerTable を使う。
+// 「通った牌」（passedTiles、AI の席だけ）は確率 0。人間の席は通過の履歴に関係なく回帰式の確率。係数がないモードは従来の dangerTable を使う。
 // 当てはめ：tools/calibrate-v06.mjs（数学Ⅰ 160試合 seed 50001・338,161件、数学Ⅱ 80試合 seed 50002・200,209件。AUC 0.933／0.933）。
 // 「通った牌」は数学Ⅰ 21,701件・数学Ⅱ 12,935件でロン 0件（確率 0 の扱いを確認）。
 export const DANGER_COEF_V06 = {
@@ -253,7 +263,7 @@ export function dangerFeaturesV06(rules, view, unseen, o, rdc = null) {
   }
   return out;
 }
-function dangerTableV06(game, rules, view, unseen, seat) {
+export function dangerTableV06(game, rules, view, unseen, seat) {
   const coef = DANGER_COEF_V06[rules.config.mode];
   if (!coef || !rules.config.rules.riichi) return null;
   const passed = passedTiles(game, seat);

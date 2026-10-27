@@ -12,9 +12,17 @@
 //            （人間から見た難易度：基準の打ち手の平均順位が、初級 < 中級 < 上級 の順に悪くなるか）
 //   all    : cross + same + legacy
 // 1グループ＝4試合（全員が4つの席を1回ずつ回る。親の開始席も回る）。seed はグループ・席・局ごとに決まり、同じ引数なら同じ結果。
+// 対局の seed は「ケースの一意ID（形式・相手の難易度・席の並び）」から作る（--seed-scheme case-id、既定）。ケースの配列番号には
+// 依存しないので、--only や --exp で絞り込んでも、同じケースの対局条件（seed・席の並び）は変わらない。
+// 試合ごとに標本ID（ケースID|グループ|回転）・seed・席の並び・最終得点・順位を出力し、tools/compare-v06.mjs はこれが一致する試合だけを対にする。
+// --seed-scheme index：監査前（Ver.0.6 docs/28）の seed（絞り込み後の配列番号を使う）を再現するためだけの互換用。--only と併用すると
+// 同じケースでも seed が変わるので、比較の基準には使わない。
 // 判断に使う情報は既存と同じ（Game.viewFor の公開情報・試合の持ち点・seed 付き乱数）。このツールは判断を変えず、結果を数えるだけ。
-// 順位は同点を分け合う（同点2人の1位は 1.5 位ずつ）。95% 信頼区間は試合単位の標準誤差 ×1.96。
+// 順位は同点を分け合う（同点2人の1位は 1.5 位ずつ）。1位率・2位以内率・4位率も、最終得点と同点者数から持分で数える
+// （例：4人とも100点なら各人の1位・4位はそれぞれ 0.25）。95% 信頼区間は試合単位の標準誤差 ×1.96。
 // --tune '{"kaoru":{"defense":2}}'：キャラの判断係数（CHARACTER_PARAMS）を、この実行だけ上書きする（比較実験用）。
+// --human challenger：挑戦者の席を「人間の席」（kind: 'human'）として扱う測定用。打ち方は AI のままだが、他の AI は
+//   その席の見送りから安全を推定しない（通った牌を使わない）。人間を相手にしたときの上級の強さの目安（監査 P2-1）。
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { writeFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
@@ -58,7 +66,36 @@ export function buildCases(exp) {
     for (const l of LEVELS) for (const id of IDS[l]) add('legacy', id, legacyIds(l));
   }
   if (!cases.length) throw new Error(`unknown --exp ${exp}`);
+  for (const c of cases) c.id = caseId(c);
+  if (new Set(cases.map((c) => c.id)).size !== cases.length) throw new Error('duplicate case id');
   return cases;
+}
+
+// ケースの一意ID：形式・相手の難易度（ref・same）・席0からの並び。配列番号や絞り込みに依存しない。
+export const caseId = (c) => `${c.kind}:${c.level || '-'}:${c.lineup.join(',')}`;
+// --only の絞り込み（挑戦者のID、ref は相手の難易度、same は難易度）
+export function filterCases(cases, only) {
+  if (!only) return cases;
+  const keys = only.split(',');
+  return cases.filter((c) => keys.includes(c.kind === 'ref' ? c.level : c.challenger || c.level));
+}
+// 文字列の 32bit ハッシュ（FNV-1a）
+const fnv1a = (str) => { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h; };
+export const SEED_SCHEMES = ['case-id', 'index'];
+// 試合（ジョブ）の一覧。seedBase は scheme が case-id ならケースIDから作る（配列番号 ci は集計の並びにだけ使う）。
+export function buildJobs({ cases, mode, length, groups, seed, scheme = 'case-id', human = null }) {
+  if (!SEED_SCHEMES.includes(scheme)) throw new Error(`unknown --seed-scheme ${scheme}`);
+  const jobs = [];
+  cases.forEach((c, ci) => {
+    const id = c.id || caseId(c);
+    for (let g = 0; g < groups; g++) for (let rot = 0; rot < 4; rot++) {
+      const seats = c.lineup.map((_, s) => c.lineup[(s + rot) % 4]);
+      const seedBase = scheme === 'case-id' ? mix(seed, fnv1a(id), g, rot, length) : mix(seed, ci, g, rot, length);
+      const humanIds = human === 'challenger' && c.challenger ? [c.challenger] : [];
+      jobs.push({ mode, length, seats, seedBase, ci, g, rot, caseId: id, sample: `${id}|g${g}|r${rot}`, humanIds });
+    }
+  });
+  return jobs;
 }
 
 const mix = (...xs) => xs.reduce((h, x) => (Math.imul(h ^ (x >>> 0), 0x9e3779b1) + 0x7f4a7c15) >>> 0, 0x12345678);
@@ -76,6 +113,16 @@ const fracRanks = (scores) => scores.map((x) => {
   const tied = scores.filter((y) => y === x).length;
   return higher + (tied + 1) / 2; // 同点は順位を分け合う
 });
+// 順位の持分：席ごとに [1位, 2位, 3位, 4位] の持分（和は1）。上に h 人・自分を含めて t 人が同点なら、h+1〜h+t 位を 1/t ずつ。
+// 平均順位（fracRanks）は Σ k·持分 と一致する。
+export function placeShares(scores) {
+  return scores.map((x) => {
+    const h = scores.filter((y) => y > x).length;
+    const t = scores.filter((y) => y === x).length;
+    return [0, 1, 2, 3].map((k) => (k >= h && k < h + t ? 1 / t : 0));
+  });
+}
+export { fracRanks };
 
 // 判断係数の上書き（キャラごとに浅く結合。入れ子のオブジェクトは丸ごと置き換え）
 export function applyTune(tune) {
@@ -85,7 +132,7 @@ export function applyTune(tune) {
   }
 }
 
-export function playMatch({ mode, length, seats, seedBase }) {
+export function playMatch({ mode, length, seats, seedBase, humanIds = [] }) {
   const rules = getRules(mode);
   const sinKey = 'f:sin';
   let m = createMatch({ length });
@@ -95,7 +142,7 @@ export function playMatch({ mode, length, seats, seedBase }) {
     round++;
     if (round > 200) throw new Error('round cap');
     const gameSeed = (seedBase + round * 7919) >>> 0;
-    const players = seats.map((id) => ({ name: id, kind: 'ai', personality: id.startsWith('L:') ? id.split(':')[2] : 'speed' }));
+    const players = seats.map((id) => ({ name: id, kind: humanIds.includes(id) ? 'human' : 'ai', personality: id.startsWith('L:') ? id.split(':')[2] : 'speed' }));
     const g = new Game({ rules, seed: gameSeed, dealer: dealerOf(m), players });
     const rng = createRng((gameSeed ^ 0x5bd1e995) >>> 0);
     const info = { scores: m.scores.slice(), hand: m.hand, length: m.length, dealer: dealerOf(m), renchan: m.renchan };
@@ -162,7 +209,7 @@ export function playMatch({ mode, length, seats, seedBase }) {
     m = applyRoundResult(m, r);
     if (m.scores.reduce((a, b) => a + b, 0) !== 4 * START_POINTS) throw new Error('score conservation');
   }
-  return { scores: m.scores, ranks: fracRanks(m.scores), stats: st };
+  return { scores: m.scores, ranks: fracRanks(m.scores), shares: placeShares(m.scores), stats: st };
 }
 
 // 公開面子 ex（1〜2つ）に、何か面子を足して役が成立し得るか
@@ -193,6 +240,7 @@ async function runPool(jobs, n, tune) {
     w.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`worker exit ${code}`))));
   })));
   results.sort((a, b) => a.job.ci - b.job.ci || a.job.g - b.job.g || a.job.rot - b.job.rot);
+  if (results.length !== jobs.length) throw new Error(`results ${results.length} / jobs ${jobs.length}`);
   return results;
 }
 
@@ -206,16 +254,16 @@ function meanCI(xs) {
   return { mean: r3(mean), ci95: r3(1.96 * sd / Math.sqrt(n)), n };
 }
 export function playerSummary(rows) {
-  // rows: [{ rank, score, stats }]
+  // rows: [{ rank, share: [1位..4位の持分], score, stats }]
   const sum = (k) => rows.reduce((a, r) => a + r.stats[k], 0);
   const rounds = sum('rounds');
   const per = (k) => r3(sum(k) / rounds);
   return {
     matches: rows.length,
     rank: meanCI(rows.map((r) => r.rank)),
-    top1: meanCI(rows.map((r) => (r.rank <= 1.0001 ? 1 : r.rank < 2 ? 0.5 : 0))),
-    top2: meanCI(rows.map((r) => (r.rank <= 2.0001 ? 1 : r.rank < 3 ? 0.5 : 0))),
-    last: meanCI(rows.map((r) => (r.rank >= 3.9999 ? 1 : r.rank > 3 ? 0.5 : 0))),
+    top1: meanCI(rows.map((r) => r.share[0])),
+    top2: meanCI(rows.map((r) => r.share[0] + r.share[1])),
+    last: meanCI(rows.map((r) => r.share[3])),
     points: meanCI(rows.map((r) => r.score)),
     perRound: { win: per('wins'), ron: per('ron'), tsumo: per('tsumo'), dealIn: per('dealIn'), chi: per('chi'), pon: per('pon'), riichi: per('riichi'), called: per('calledRounds') },
     avgWinPoints: r3(sum('winPoints') / Math.max(1, sum('wins'))),
@@ -234,16 +282,17 @@ export function playerSummary(rows) {
   };
 }
 
-function summarize({ exp, mode, length, groups, seed, tune, cases, results, seconds }) {
+export function summarize({ exp, mode, length, groups, seed, tune, cases, results, seconds, scheme = 'case-id', only = null, human = null }) {
   const byCase = cases.map(() => []);
-  for (const { job, res } of results) byCase[job.ci].push({ seats: job.seats, res });
+  for (const { job, res } of results) byCase[job.ci].push({ seats: job.seats, res, sample: job.sample });
   const caseReports = cases.map((c, ci) => {
     const per = {};
-    for (const { seats, res } of byCase[ci]) seats.forEach((id, s) => (per[id] ||= []).push({ rank: res.ranks[s], score: res.scores[s], stats: res.stats[s] }));
+    for (const { seats, res } of byCase[ci]) seats.forEach((id, s) => (per[id] ||= []).push({ rank: res.ranks[s], share: res.shares[s], score: res.scores[s], stats: res.stats[s] }));
     const players = Object.fromEntries(Object.entries(per).map(([id, rows]) => [id, playerSummary(rows)]));
     // 挑戦者の試合ごとの順位（グループ・席の順。同じ seed の別実行と対にして比べるため）
     const challengerRanks = c.challenger ? byCase[ci].map(({ seats, res }) => res.ranks[seats.indexOf(c.challenger)]) : null;
-    return { kind: c.kind, challenger: c.challenger, level: c.level || null, lineup: c.lineup, players, challengerRanks };
+    const challengerSamples = c.challenger ? byCase[ci].map(({ sample }) => sample) : null;
+    return { id: c.id, kind: c.kind, challenger: c.challenger, level: c.level || null, lineup: c.lineup, players, challengerRanks, challengerSamples };
   });
   // 難易度ごとのまとめ（up/down：挑戦者の順位を難易度で集める）
   const levelAgg = {};
@@ -252,9 +301,9 @@ function summarize({ exp, mode, length, groups, seed, tune, cases, results, seco
       const rows = [];
       cases.forEach((c, ci) => {
         if (c.kind !== kind || LEVEL_OF[c.challenger] !== l) return;
-        for (const { seats, res } of byCase[ci]) { const s = seats.indexOf(c.challenger); rows.push({ rank: res.ranks[s], score: res.scores[s], stats: res.stats[s] }); }
+        for (const { seats, res } of byCase[ci]) { const s = seats.indexOf(c.challenger); rows.push({ rank: res.ranks[s], share: res.shares[s] }); }
       });
-      if (rows.length) (levelAgg[kind] ||= {})[l] = { rank: meanCI(rows.map((r) => r.rank)), top1: meanCI(rows.map((r) => (r.rank <= 1.0001 ? 1 : r.rank < 2 ? 0.5 : 0))), n: rows.length };
+      if (rows.length) (levelAgg[kind] ||= {})[l] = { rank: meanCI(rows.map((r) => r.rank)), top1: meanCI(rows.map((r) => r.share[0])), n: rows.length };
     }
   }
   // ref：基準の打ち手の順位を、相手の難易度ごとに集める
@@ -262,22 +311,25 @@ function summarize({ exp, mode, length, groups, seed, tune, cases, results, seco
     const rows = [];
     cases.forEach((c, ci) => {
       if (c.kind !== 'ref' || c.level !== l) return;
-      for (const { seats, res } of byCase[ci]) { const s = seats.indexOf(c.challenger); rows.push({ rank: res.ranks[s] }); }
+      for (const { seats, res } of byCase[ci]) { const s = seats.indexOf(c.challenger); rows.push({ rank: res.ranks[s], share: res.shares[s] }); }
     });
-    if (rows.length) (levelAgg.ref ||= {})[l] = { rank: meanCI(rows.map((r) => r.rank)), top1: meanCI(rows.map((r) => (r.rank <= 1.0001 ? 1 : r.rank < 2 ? 0.5 : 0))), n: rows.length };
+    if (rows.length) (levelAgg.ref ||= {})[l] = { rank: meanCI(rows.map((r) => r.rank)), top1: meanCI(rows.map((r) => r.share[0])), n: rows.length };
   }
   const brief = { exp, mode, length, groups, seed, matches: results.length, seconds: r3(seconds), levelAgg,
     cases: caseReports.map((c) => ({ kind: c.kind, who: c.challenger || c.level, rank: c.challenger ? c.players[c.challenger].rank : Object.fromEntries(Object.entries(c.players).map(([k, v]) => [k, v.rank.mean])) })) };
-  return { brief, cases: caseReports, levelAgg, meta: { exp, mode, length, groups, seed, tune, matches: results.length, seconds: r3(seconds) } };
+  // 試合ごとの記録（標本ID・seed・席の並び・最終得点・順位）。対比較はこれで試合を対応付ける
+  const matches = results.map(({ job, res }) => ({ caseId: job.caseId, sample: job.sample, g: job.g, rot: job.rot, seedBase: job.seedBase, seats: job.seats, scores: res.scores, ranks: res.ranks }));
+  return { brief, cases: caseReports, levelAgg, matches, meta: { exp, mode, length, groups, seed, seedScheme: scheme, only, human, tune, matches: results.length, seconds: r3(seconds) } };
 }
 
 function toCsv(cases, results) {
-  const head = ['case', 'kind', 'group', 'rotation', 'seat', 'player', 'rank', 'points', 'rounds', 'wins', 'ron', 'tsumo', 'dealIn', 'chi', 'pon', 'riichi', 'winPoints'];
+  const head = ['caseId', 'sample', 'seedBase', 'kind', 'group', 'rotation', 'seat', 'player', 'rank', 'top1', 'top2', 'last', 'points', 'rounds', 'wins', 'ron', 'tsumo', 'dealIn', 'chi', 'pon', 'riichi', 'winPoints'];
   const lines = [head.join(',')];
   for (const { job, res } of results) {
     job.seats.forEach((id, s) => {
       const t = res.stats[s];
-      lines.push([job.ci, cases[job.ci].kind, job.g, job.rot, s, id, res.ranks[s], res.scores[s], t.rounds, t.wins, t.ron, t.tsumo, t.dealIn, t.chi, t.pon, t.riichi, t.winPoints].join(','));
+      const sh = res.shares[s];
+      lines.push([`"${job.caseId}"`, `"${job.sample}"`, job.seedBase, cases[job.ci].kind, job.g, job.rot, s, id, res.ranks[s], r3(sh[0]), r3(sh[0] + sh[1]), r3(sh[3]), res.scores[s], t.rounds, t.wins, t.ron, t.tsumo, t.dealIn, t.chi, t.pon, t.riichi, t.winPoints].join(','));
     });
   }
   return lines.join('\n') + '\n';
@@ -301,19 +353,18 @@ if (!isMainThread) {
   const workers = Math.max(1, Number(opt('--workers', 4)));
   const tune = JSON.parse(opt('--tune', '{}'));
   applyTune(tune); // 不正なキャラ名をここで検出
-  const only = opt('--only', null); // 挑戦者を絞る（例：--only kaoru,asuma）
+  const only = opt('--only', null); // 挑戦者を絞る（例：--only kaoru,asuma）。絞っても同じケースの seed は変わらない
+  const scheme = opt('--seed-scheme', 'case-id');
+  const human = opt('--human', null);
+  if (human !== null && human !== 'challenger') throw new Error('--human は challenger だけ');
   if (!['math1', 'math2'].includes(mode) || ![4, 8].includes(length) || !Number.isInteger(groups) || groups < 1 || !Number.isInteger(seed)) throw new Error('bad options');
-  const cases = buildCases(exp).filter((c) => !only || only.split(',').includes(c.kind === 'ref' ? c.level : c.challenger || c.level));
-  const jobs = [];
-  cases.forEach((c, ci) => {
-    for (let g = 0; g < groups; g++) for (let rot = 0; rot < 4; rot++) {
-      const seats = c.lineup.map((_, s) => c.lineup[(s + rot) % 4]);
-      jobs.push({ mode, length, seats, seedBase: mix(seed, ci, g, rot, length), ci, g, rot });
-    }
-  });
+  const cases = filterCases(buildCases(exp), only);
+  if (!cases.length) throw new Error(`--only ${only}: no case`);
+  if (scheme === 'index' && only) console.error('警告：--seed-scheme index と --only の併用は、同じケースでも seed が変わる（監査前の結果の再現専用）');
+  const jobs = buildJobs({ cases, mode, length, groups, seed, scheme, human });
   const t0 = Date.now();
   const results = await runPool(jobs, workers, tune);
-  const report = summarize({ exp, mode, length, groups, seed, tune, cases, results, seconds: (Date.now() - t0) / 1000 });
+  const report = summarize({ exp, mode, length, groups, seed, tune, cases, results, seconds: (Date.now() - t0) / 1000, scheme, only, human });
   const out = opt('--out', null);
   if (out) writeFileSync(out, JSON.stringify(report, null, 1));
   const csv = opt('--csv', null);
