@@ -560,10 +560,16 @@ table.values td.undef { color: #999; font-size: 12px; }
   58%, 100% { transform: translate3d(0, -4vh, 0) scale(0.92); opacity: 0; }
 }
 /* 後半：画面最上部の小さな帯（宣言者・宣言・和了牌）。結果画面の内容をほとんど隠さず、誰の和了かを示し続ける */
-#fx-layer .fx-banner { position: absolute; z-index: 4; top: max(6px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-  display: flex; align-items: center; gap: 8px; white-space: nowrap; max-width: calc(100vw - 16px);
-  padding: 4px 14px; border-radius: 999px; background: rgba(8, 10, 18, 0.86); border: 2px solid var(--fx-accent);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5); color: #fff; font-weight: 900; font-size: clamp(16px, 4.6vw, 22px); }
+/* 帯の高さは 38px 以内（Ver.0.5-E 監査 P3-B）。結果画面は、この帯の下（--fx-banner-room）から始める（下の .overlay-result） */
+:root { --fx-banner-top: max(6px, env(safe-area-inset-top)); --fx-banner-room: calc(var(--fx-banner-top) + 44px); }
+#fx-layer .fx-banner { position: absolute; z-index: 4; top: var(--fx-banner-top); left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 6px; white-space: nowrap; max-width: calc(100vw - 16px); height: 38px; box-sizing: border-box;
+  padding: 0 12px; border-radius: 999px; background: rgba(8, 10, 18, 0.86); border: 2px solid var(--fx-accent);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5); color: #fff; font-weight: 900; font-size: clamp(15px, 4.2vw, 20px); }
+#fx-layer .fx-banner .tile { zoom: 0.72; }
+/* 結果画面（ロン・ツモの後）：最上部の帯と重ならないよう、帯の分だけ下から始める（下寄せ・中央寄せとも）。精算・次の局のボタンは隠さない */
+.overlay-result { padding-top: var(--fx-banner-room); }
+.overlay-result .modal { max-height: min(90dvh, calc(100dvh - var(--fx-banner-room) - 10px)); }
 #fx-layer .fx-banner .fx-pos { font-size: 0.7em; }
 #fx-layer .fx-banner .fx-bword { color: var(--fx-accent); font-size: 1.15em; }
 #fx-layer .fx-banner .tile { box-shadow: 0 0 8px 2px var(--fx-glow); }
@@ -672,6 +678,15 @@ table.values td.undef { color: #999; font-size: 12px; }
   .table.fx-shake, .table.fx-shake.fx-shake-ron, .meld.fx-glow-pon, .meld.fx-glow-chi, .tile.fx-glow-riichi, .fx-seat { animation: none; }
   #fx-layer .fx-band-lines { animation: none; }
 }
+/* 退出（Ver.0.5-E 監査 P3-A）：後ろに演出が待っていて最低表示時間で切り替えるとき、中央の表示を短く（0.18秒）消してから次へ。
+   閃光・光条はこの時点で終わっているので出さない。簡易表示・reduced motion では動かさず、不透明度だけ。 */
+#fx-layer.fx-leaving > .fx-card { animation: fx-leave 180ms ease-in both !important; }
+#fx-layer.fx-leaving > :not(.fx-card) { display: none; }
+#fx-layer.fx-leaving.lite > .fx-card { animation-name: fx-leave-fade !important; }
+@keyframes fx-leave { from { opacity: 1; transform: translate3d(0, 0, 0); } to { opacity: 0; transform: translate3d(28px, 0, 0) scale(0.97); } }
+@keyframes fx-leave-fade { from { opacity: 1; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { #fx-layer.fx-leaving > .fx-card { animation-name: fx-leave-fade !important; } }
+
 /* 横向き（高さが低い）画面：文字・牌を少し詰めて画面内に収める */
 @media (max-height: 460px) {
   #fx-layer { --fx-tilt: -3.5deg; }

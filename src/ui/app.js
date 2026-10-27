@@ -17,7 +17,7 @@ import { CHI_AUTOPASS_KEY, PON_AUTOPASS_KEY, parseChiAutoPass, parsePonAutoPass,
 import { YAKU_GUIDE, GUIDE_NOTES, guideCondition } from './guide.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, MAX_ROUND } from './params.js';
 import { validateReplay, replayQuery } from './replay.js';
-import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, pickEffect, fxOffer, fxAdvance, fxEndAt, fxProgress, isLiteEffect } from './effects.js';
+import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, scanEffects, fxOffer, fxAdvance, fxTimes, fxProgress, isLiteEffect } from './effects.js';
 import { SOUND_KEY, parseSoundSetting, pickSound, createSoundPlayer } from './sound.js';
 import { VOICE_KEY, parseVoiceSetting, createVoicePlayer } from './voice.js';
 
@@ -93,7 +93,7 @@ S.speed = resolveSpeed(params.get('speed'), store.get('mj-speed', null), IS_LOCA
 // ロン・ポン・チーの演出（Ver.0.5-B）。画面だけの機能で、ゲームの進行・判定・得点には関わらない。
 // mode：'full'（通常）／'lite'（簡易：文字だけ）。seen：演出を判定済みの記録（Game.events）の件数。history：出した演出（確認用）。
 // queue：待っている演出（Ver.0.5-E。宣言が続いたとき順番に見せる）。dropped：出さずに捨てた演出の数（確認用）。
-S.fx = { mode: parseEffectMode(store.get(EFFECT_MODE_KEY, null)), seen: 0, serial: -1, current: null, queue: [], timer: null, history: [], dropped: 0 };
+S.fx = { mode: parseEffectMode(store.get(EFFECT_MODE_KEY, null)), seen: 0, serial: -1, current: null, queue: [], timer: null, leaveTimer: null, history: [], dropped: 0 };
 // 効果音（Ver.0.5-D）。画面だけの機能。on：設定（保存キー mj-sound、'0' のときだけオフ）。seen：音を判定済みの記録の件数。
 // 音はすべて自作の合成音（音声ファイルなし）。iPhone Safari は最初の操作で再生を許可する（下の unlock）。
 S.sound = { on: parseSoundSetting(store.get(SOUND_KEY, null)), seen: 0, serial: -1 };
@@ -291,22 +291,28 @@ const fxNow = () => performance.now();
 // 演出を消す（新しい局・タイトルへ戻る・演出の終了）
 function fxClear() {
   clearTimeout(S.fx.timer);
+  clearTimeout(S.fx.leaveTimer);
   S.fx.timer = null;
+  S.fx.leaveTimer = null;
   S.fx.current = null;
-  S.fx.queue = []; // 待っている演出も捨てる（古い局の演出を新しい局へ持ち越さない）
+  S.fx.dropped += S.fx.queue.length; // 待っている演出も捨てる（古い局の演出を新しい局へ持ち越さない。音・声も鳴らさない）
+  S.fx.queue = [];
   fxLayer.className = '';
   fxLayer.innerHTML = '';
   fxApply();
 }
 
-// ゲームの記録に新しいロン・ポン・チーがあれば演出を出す。同じ記録で2回は出さない。別の局（記録が短くなった）は数え直す。
+// ゲームの記録に新しい宣言があれば演出を出す。同じ記録で2回は出さない。別の局（記録が短くなった）は数え直す。
+// 同じ回に増えた宣言は、すべて記録の順に演出キューへ渡す（Ver.0.5-E 監査 P2-A。1件だけ選ぶと残りが消えていた）。
+// 同じ回にロン・ツモがあれば、和了だけを渡し、それより前の通常の宣言は破棄する（表示も音・声もなし）。
 function fxScan() {
   const g = S.game;
   if (!g) return;
   if (S.fx.serial !== S.gameSerial) { S.fx.serial = S.gameSerial; S.fx.seen = 0; }
-  const pick = pickEffect(g.events, S.fx.seen);
-  S.fx.seen = pick.next;
-  if (pick.kind) fxFire(pick.kind, pick.event);
+  const r = scanEffects(g.events, S.fx.seen);
+  S.fx.seen = r.next; // 宣言はすべて offers か dropped に入っているので、ここで進めても失われない
+  S.fx.dropped += r.dropped.length;
+  for (const o of r.offers) fxFire(o.kind, o.event);
 }
 
 // ゲームの記録に新しい打牌・チー・ポン・リーチ・ロン・ツモがあれば、効果音を1つ鳴らす。同じ記録で2回は鳴らさない。
@@ -318,14 +324,24 @@ function soundScan() {
   const pick = pickSound(g.events, S.sound.seen);
   S.sound.seen = pick.next;
   // 宣言（チー・ポン・リーチ・ロン・ツモ）の音は、その演出が実際に始まったとき（fxShow）に鳴らす。演出キューで待った宣言は、
-  // 表示と同時に鳴り、出さずに捨てた宣言は鳴らさない（演出と音を一致させる）。ここで鳴らすのは打牌だけ。
+  // 表示と同時に鳴り、出さずに捨てた宣言は鳴らさない（演出と音を一致させる）。ここで鳴らすのは打牌だけで、1回の判定で最大1回。
+  // 同じ回に宣言があれば打牌音は鳴らさない（その回の音は宣言の音が代表する。リーチの宣言牌の打牌音と重ねないのと同じ規則）。
   if (pick.kind === 'discard') sound.play('discard');
 }
 
+// 効果音と宣言ボイスは独立した設定（Ver.0.5-E 監査 P2-B）。AudioContext が要るのは、効果音がオン、または採用された声がありボイスがオンのとき。
+// 両方オフ・声が未採用でボイスだけオンのときは、何も作らず、何も読み込まない。
+const voiceWanted = () => voice.available() && S.voice.on;
+const audioWanted = () => S.sound.on || voiceWanted();
+function audioUnlock() {
+  if (!audioWanted()) return;
+  sound.unlock();
+  if (voiceWanted()) voice.load();
+}
 // iPhone Safari：最初のタップなどの操作の中で AudioContext を作って再生を許可する。以降も、止まっていれば操作のたびに再開を試みる。
 // 受け身（passive）の記録だけで、操作の挙動（タップ・スクロール・ドラッグ）は変えない。
 for (const t of ['touchend', 'pointerup', 'click', 'keydown']) {
-  window.addEventListener(t, () => { if (S.sound.on) { sound.unlock(); voice.load(); } }, { capture: true, passive: true });
+  window.addEventListener(t, audioUnlock, { capture: true, passive: true });
 }
 
 // 画面が隠れた・ページを離れた（iPhone のバックグラウンド移行・ホーム画面・タブ切替）：鳴っている音を切り離す。
@@ -358,7 +374,8 @@ function fxHTML(kind, ev, lite) {
     const small = g.result && g.result.tile !== undefined ? tileHTML(T(g.typeOf(g.result.tile)), { size: 's' }) : '';
     back += `<div class="fx-banner">${pos}<span class="fx-name">${nameOf(ev.seat)}</span><span class="fx-of">の</span><span class="fx-bword">${EFFECTS[kind].text}</span>${small}</div>`;
   } else {
-    const meld = g.melds[ev.seat].find((m) => m.claimed === ev.tile) || g.melds[ev.seat][g.melds[ev.seat].length - 1];
+    // 演出の元の宣言の面子（鳴いた牌＝記録の tile）だけを使う。見つからなければ、別の面子で代用しない（Ver.0.5-E 監査 P2-C）
+    const meld = g.melds[ev.seat].find((m) => m.claimed === ev.tile);
     tiles = meld ? `<div class="fx-tiles">${meld.tiles.map((id, i) => `<span class="fx-t fx-t${i + 1}">${tileHTML(T(g.typeOf(id)), { size: 'm' })}</span>`).join('')}</div>` : '';
   }
   return `${back}<div class="fx-card">${who}<div class="fx-mid">${band}${word}</div>${tiles}</div>`;
@@ -371,15 +388,37 @@ function fxFire(kind, ev) {
   fxCommit(fxOffer({ current: S.fx.current, queue: S.fx.queue }, { kind, event: ev }, now), now);
 }
 
-// 演出キューの結果を反映する：表示（shown）なら表示を始め、終わる時刻にタイマーを掛け直す。
+// 演出キューの結果を反映する：表示（shown）なら表示を始め、退出・終了の時刻にタイマーを掛け直す。
 function fxCommit(r, now) {
   S.fx.queue = r.queue;
   S.fx.dropped += r.dropped.length;
   if (r.shown) fxShow(r.current.kind, r.current.event, now);
   else if (!r.current) { fxClear(); return; }
+  fxSchedule(now);
+}
+
+// 退出（後ろに演出が待つとき、最低表示時間の後に短く消える）と、終了（次の演出へ・消す）のタイマー。
+function fxSchedule(now) {
   clearTimeout(S.fx.timer);
-  const end = fxEndAt({ current: S.fx.current, queue: S.fx.queue });
-  S.fx.timer = end === null ? null : setTimeout(fxTick, Math.max(0, end - fxNow()) + 60);
+  clearTimeout(S.fx.leaveTimer);
+  S.fx.timer = null;
+  S.fx.leaveTimer = null;
+  const t = fxTimes({ current: S.fx.current, queue: S.fx.queue }, now);
+  if (!t) return;
+  if (t.leaveAt !== null) {
+    if (t.leaveAt <= now) fxLeave(now);
+    else S.fx.leaveTimer = setTimeout(() => { S.fx.leaveTimer = null; fxLeave(Math.max(fxNow(), t.leaveAt)); }, t.leaveAt - now); // タイマーが僅かに早く来ても最低表示時間を割らない
+  }
+  // 本来の長さで終えるときは、CSS の消え方が終わるまで少し待つ（+60ms）。退出のときは退出の終わりで次へ
+  S.fx.timer = setTimeout(fxTick, Math.max(0, t.endAt - now) + (t.leaveAt === null ? 60 : 0));
+}
+
+// 退出を始める（P3-A）。中央の表示（文字・宣言者・牌・帯）を短く消してから次の演出へ。始めた時刻を保存して、後から延びないようにする。
+function fxLeave(now) {
+  const c = S.fx.current;
+  if (!c || c.leaveAt !== undefined) return;
+  c.leaveAt = now;
+  fxLayer.classList.add('fx-leaving');
 }
 
 // 表示中の演出が終わった：待っている演出があれば次を表示し、なければ消す。
@@ -440,8 +479,10 @@ function fxApply() {
     if (rel) { rel.classList.add('fx-glow', 'fx-glow-riichi'); rel.style.animationDelay = delay; }
     return;
   }
-  const sel = c.seat === HUMAN ? '.self .melds .meld:last-child' : `.panel.seat-${c.seat} .melds .meld:last-child`;
-  const el = app.querySelector(sel);
+  // 演出の元の宣言の面子だけを光らせる（鳴いた牌の id で特定。Ver.0.5-E 監査 P2-C：最後の面子では、続けて鳴いたときに取り違える）。
+  // 見つからなければ何も光らせない。
+  const sel = `${c.seat === HUMAN ? '.self' : `.panel.seat-${c.seat}`} .melds .meld[data-claimed="${c.tile}"]`;
+  const el = c.tile === undefined || c.tile === null ? null : app.querySelector(sel);
   if (el) { el.classList.add('fx-glow', `fx-glow-${c.kind}`); el.style.animationDelay = delay; }
 }
 
@@ -468,7 +509,7 @@ function meldsHTML(seat, size) {
   const g = S.game;
   return g.melds[seat].map((m) => {
     const tiles = m.tiles.map((id) => tileHTML(T(g.typeOf(id)), { size, cls: id === m.claimed ? 'claimed' : '' })).join('');
-    return `<span class="meld ${m.call === 'pon' ? 'pon' : 'chi'}" title="${m.call === 'pon' ? 'ポン' : 'チー'}">${tiles}</span>`;
+    return `<span class="meld ${m.call === 'pon' ? 'pon' : 'chi'}" data-claimed="${m.claimed}" title="${m.call === 'pon' ? 'ポン' : 'チー'}">${tiles}</span>`;
   }).join('');
 }
 
@@ -699,7 +740,7 @@ function modalHTML() {
   if (S.modal === 'settings') body = settingsHTML();
   if (S.modal === 'final') body = finalHTML();
   const closable = S.modal !== 'result' && S.modal !== 'final';
-  return `<div class="overlay" role="dialog" aria-modal="true"><div class="modal">${body}
+  return `<div class="overlay${S.modal === 'result' ? ' overlay-result' : ''}" role="dialog" aria-modal="true"><div class="modal">${body}
     ${closable ? '<div class="modal-actions"><button data-action="close" class="primary">閉じる</button></div>' : ''}</div></div>`;
 }
 
@@ -1254,13 +1295,13 @@ app.addEventListener('change', (ev) => {
     // 値の保存だけ（ゲームは進めない）。オンにしたときはこの操作の中で再生を許可しておく。
     S.sound.on = parseSoundSetting(ev.target.value);
     store.set(SOUND_KEY, S.sound.on ? '1' : '0');
-    if (S.sound.on) sound.unlock();
+    audioUnlock();
   }
   if (ev.target.dataset.action === 'voice') {
     // 値の保存だけ（ゲームは進めない）。オンにしたときはこの操作の中で読み込みを始める。
     S.voice.on = parseVoiceSetting(ev.target.value);
     store.set(VOICE_KEY, S.voice.on ? '1' : '0');
-    if (S.voice.on && S.sound.on) { sound.unlock(); voice.load(); }
+    audioUnlock();
   }
   if (ev.target.dataset.action === 'speed') {
     S.speed = resolveSpeed(ev.target.value, null, false);

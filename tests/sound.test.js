@@ -245,7 +245,7 @@ test('構造：sound.js はエンジンを読み込まない。app.js は音の�
   assert.ok(show.includes('sound.play(kind,'), '宣言の音は演出が実際に始まったとき（fxShow）に鳴らす');
   assert.ok(!/g\.(discard|draw|chi|pon|ron|tsumo|riichi|pass)\s*\(/.test(scan), '音の判定はゲームを進めない');
   assert.ok(/for \(const t of \['touchend', 'pointerup', 'click', 'keydown'\]\)/.test(app) && app.includes("{ capture: true, passive: true }"));
-  assert.ok(app.includes('if (S.sound.on) { sound.unlock(); voice.load(); }'), 'オフのときは AudioContext を作らない');
+  assert.ok(app.includes('const audioWanted = () => S.sound.on || voiceWanted();') && app.includes('if (!audioWanted()) return;'), '効果音も声も要らないときは AudioContext を作らない（監査 P2-B）');
   assert.ok(app.includes("soundScan(); //"), 'step() の先頭で、演出と同じく1回だけ判定する');
   assert.ok(app.includes('sound.silence()'), '新しい局・タイトルで音を止める');
 });

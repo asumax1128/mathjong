@@ -23,6 +23,8 @@ export const isWinEffect = (kind) => kind === 'ron' || kind === 'tsumo';
 //   FX_QUEUE_STALE_MS：待っている間にこれより古くなった演出は出さない（場面とずれるため）。
 export const FX_QUEUE_MAX = 2;
 export const FX_QUEUE_STALE_MS = 2500;
+// 退出の時間（Ver.0.5-E 監査 P3-A）：後ろに演出が待っていて最低表示時間で切り替えるとき、急に消さずに短く退出させる。
+export const FX_EXIT_MS = 180;
 
 export const EFFECT_MODE_KEY = 'mj-effects';
 export const EFFECT_MODES = ['full', 'lite'];
@@ -41,17 +43,25 @@ export function effectKindOf(event) {
   return null;
 }
 
-// 新しく増えた記録（from 以降）から、出す演出を1つ選ぶ。優先度が最も高いもの（同じなら後のもの）。
-// 戻り値：{ kind, event, index, next }（next：次回の from。演出がなくても進める）。events が from より短ければ（別の局）先頭から数え直す。
-export function pickEffect(events, from) {
+// 新しく増えた記録（from 以降）の宣言を、すべて記録の順に集める（Ver.0.5-E 監査 P2-A）。
+// 以前は最も優先度の高い1件だけを選んでいたため、同じ回に増えた別の宣言（チー → ポン、ポン → リーチ）が演出キューに入る前に消えていた。
+// 戻り値：{ offers, dropped, next }
+//   offers：演出キューに渡す宣言（記録の順）。dropped：出さないと決めた宣言（明示的な破棄。音・声も鳴らさない）。
+//   next：次回の from（宣言がなくても進める）。events が from より短ければ（別の局）先頭から数え直す。
+//   同じ回にロン・ツモがあれば、和了だけをすぐ渡し、それより前の通常の宣言は破棄する（表示も音もなし）。
+export function scanEffects(events, from) {
   const start = from > events.length ? 0 : from;
-  let best = null;
+  const items = [];
   for (let i = start; i < events.length; i++) {
     const kind = effectKindOf(events[i]);
-    if (!kind) continue;
-    if (!best || EFFECTS[kind].prio >= EFFECTS[best.kind].prio) best = { kind, event: events[i], index: i };
+    if (kind) items.push({ kind, event: events[i], index: i });
   }
-  return { ...(best || { kind: null, event: null, index: -1 }), next: events.length };
+  const wins = items.filter((it) => isWinEffect(it.kind));
+  if (wins.length) {
+    const win = wins[wins.length - 1];
+    return { offers: [win], dropped: items.filter((it) => it !== win), next: events.length };
+  }
+  return { offers: items, dropped: [], next: events.length };
 }
 
 // ---- 演出キュー（純粋関数。状態 { current, queue } を受け取り、新しい状態を返す。元の状態は変更しない）----
@@ -89,11 +99,20 @@ export function fxOffer(st, item, now) {
   return { ...r, dropped: [...dropped, ...r.dropped] };
 }
 
-// 表示中の演出を終える時刻（なければ null）。後ろに演出が待っていれば minMs、待っていなければ ms。
-export function fxEndAt(st) {
+// 表示中の演出の時刻（now：いまの時刻）。{ leaveAt, endAt } または null（演出なし）。
+//   endAt：表示を終えて次へ進む（または消す）時刻。
+//   leaveAt：退出（P3-A）を始める時刻。後ろに演出が待っているときだけ。最低表示時間（minMs）を満たしてから退出し、FX_EXIT_MS 後に次へ。
+//            退出を始めた後は current.leaveAt の時刻で固定する（後から演出が届いても延びない）。
+//   待つ演出がない・ロン／ツモ・本来の終わりまでに退出が収まらないときは、本来の長さ（ms）で終える（CSS の終わりの消え方を使う）。
+export function fxTimes(st, now) {
   if (!st.current) return null;
   const e = EFFECTS[st.current.kind];
-  return st.current.startedAt + (st.queue.length ? e.minMs : e.ms);
+  const s0 = st.current.startedAt;
+  const natural = s0 + e.ms;
+  if (!st.queue.length || isWinEffect(st.current.kind)) return { leaveAt: null, endAt: natural };
+  const leaveAt = st.current.leaveAt ?? Math.max(now, s0 + e.minMs);
+  if (leaveAt + FX_EXIT_MS >= natural) return { leaveAt: null, endAt: natural };
+  return { leaveAt, endAt: leaveAt + FX_EXIT_MS };
 }
 
 // 演出の経過：再描画で作り直された要素のアニメーションを、続きから再生するための値。

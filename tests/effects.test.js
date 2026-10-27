@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  EFFECTS, EFFECT_MODE_KEY, parseEffectMode, effectKindOf, pickEffect, fxProgress, isLiteEffect,
-  fxOffer, fxAdvance, fxEndAt, isWinEffect, FX_QUEUE_MAX, FX_QUEUE_STALE_MS,
+  EFFECTS, EFFECT_MODE_KEY, parseEffectMode, effectKindOf, scanEffects, fxProgress, isLiteEffect,
+  fxOffer, fxAdvance, fxTimes, isWinEffect, FX_QUEUE_MAX, FX_QUEUE_STALE_MS, FX_EXIT_MS,
 } from '../src/ui/effects.js';
 import { Game } from '../src/engine/game.js';
 import { decide, applyAction } from '../src/engine/ai.js';
@@ -34,21 +34,31 @@ test('記録 → 演出の種類：ロン・ツモ和了・リーチ（成立の
   for (const e of [{ type: 'win', how: 'unknown' }, { type: 'discard' }, { type: 'draw' }, { type: 'exhaustive-draw' }, null, undefined]) assert.equal(effectKindOf(e), null);
 });
 
-test('pickEffect：新しい記録だけを見る。同じ記録で2回出さない。優先度が高いものを選ぶ。別の局（記録が短い）は数え直す', () => {
-  const ev = [{ type: 'draw' }, { type: 'discard' }, { type: 'chi' }];
-  let r = pickEffect(ev, 0);
-  assert.deepEqual([r.kind, r.index, r.next], ['chi', 2, 3]);
-  r = pickEffect(ev, r.next);
-  assert.deepEqual([r.kind, r.next], [null, 3], '同じ記録からは出ない');
-  ev.push({ type: 'discard' }, { type: 'pon' });
-  r = pickEffect(ev, 3);
-  assert.deepEqual([r.kind, r.index], ['pon', 4]);
-  // 同時に複数：ロンが最優先
-  assert.equal(pickEffect([{ type: 'chi' }, { type: 'pon' }, { type: 'win', how: 'ron' }], 0).kind, 'ron');
-  assert.equal(pickEffect([{ type: 'win', how: 'ron' }, { type: 'pon' }], 0).kind, 'ron');
+test('scanEffects（監査 P2-A）：新しい記録の宣言をすべて記録の順に集める。同じ記録で2回は集めない。別の局（記録が短い）は数え直す', () => {
+  const ev = [{ type: 'draw' }, { type: 'discard' }, { type: 'chi', seat: 3 }];
+  let r = scanEffects(ev, 0);
+  assert.deepEqual([r.offers.map((o) => [o.kind, o.index]), r.dropped, r.next], [[['chi', 2]], [], 3]);
+  r = scanEffects(ev, r.next);
+  assert.deepEqual([r.offers, r.dropped, r.next], [[], [], 3], '同じ記録からは出ない');
+  // 同じ回のチー → ポン、ポン → リーチ：両方とも記録の順に（以前はポン・リーチだけが残り、前の宣言が消えていた）
+  ev.push({ type: 'discard' }, { type: 'pon', seat: 2 }, { type: 'discard' }, { type: 'riichi', seat: 1 }, { type: 'discard' });
+  r = scanEffects(ev, 3);
+  assert.deepEqual(r.offers.map((o) => [o.kind, o.event.seat]), [['pon', 2], ['riichi', 1]]);
+  assert.deepEqual(scanEffects([{ type: 'chi', seat: 1 }, { type: 'discard' }, { type: 'pon', seat: 2 }], 0).offers.map((o) => o.kind), ['chi', 'pon']);
+  assert.deepEqual(scanEffects([{ type: 'pon', seat: 1 }, { type: 'riichi', seat: 1 }, { type: 'discard' }], 0).offers.map((o) => o.kind), ['pon', 'riichi']);
   // 別の局：記録が from より短い → 先頭から
-  assert.equal(pickEffect([{ type: 'draw' }, { type: 'pon' }], 99).kind, 'pon');
-  assert.equal(pickEffect([], 0).kind, null);
+  assert.deepEqual(scanEffects([{ type: 'draw' }, { type: 'pon' }], 99).offers.map((o) => o.kind), ['pon']);
+  assert.deepEqual(scanEffects([], 0), { offers: [], dropped: [], next: 0 });
+});
+
+test('scanEffects（監査 P2-A）：同じ回にロン・ツモがあれば、和了だけをすぐ渡し、それより前の通常の宣言は明示的に破棄する', () => {
+  for (const how of ['ron', 'tsumo']) {
+    const r = scanEffects([{ type: 'chi', seat: 1 }, { type: 'discard' }, { type: 'pon', seat: 2 }, { type: 'discard' }, { type: 'win', how, seat: 3 }], 0);
+    assert.deepEqual(r.offers.map((o) => [o.kind, o.event.seat]), [[how, 3]]);
+    assert.deepEqual(r.dropped.map((d) => d.kind), ['chi', 'pon'], '破棄（表示も音も出さない）として返す');
+    assert.equal(r.next, 5);
+  }
+  assert.deepEqual(scanEffects([{ type: 'win', how: 'ron', seat: 1 }], 0).dropped, []);
 });
 
 const ST = (current = null, queue = []) => ({ current, queue });
@@ -57,14 +67,15 @@ const item = (kind, seat = 1) => ({ kind, event: { type: kind === 'ron' || kind 
 test('演出キュー：表示中の演出があれば、後のチー・ポン・リーチは待たせて順番に見せる（後の演出で前の演出をすぐ消さない）', () => {
   let s = fxOffer(ST(), item('chi', 3), 0);
   assert.deepEqual([s.shown, s.current.kind, s.current.startedAt, s.queue.length], [true, 'chi', 0, 0]);
-  assert.equal(fxEndAt(s), EFFECTS.chi.ms, '待つ演出がなければ全長');
+  assert.deepEqual(fxTimes(s, 0), { leaveAt: null, endAt: EFFECTS.chi.ms }, '待つ演出がなければ全長');
   s = fxOffer(s, item('pon', 2), 200);
   assert.deepEqual([s.shown, s.current.kind, s.queue.map((q) => q.kind)], [false, 'chi', ['pon']], 'ポンは待つ（チーを消さない）');
-  assert.equal(fxEndAt(s), EFFECTS.chi.minMs, '後ろに待つ演出があれば、チーは最低表示時間で終える');
-  s = fxAdvance(s, fxEndAt(s));
-  assert.deepEqual([s.shown, s.current.kind, s.current.startedAt, s.current.event.seat, s.queue.length], [true, 'pon', EFFECTS.chi.minMs, 2, 0]);
-  assert.equal(fxEndAt(s), EFFECTS.chi.minMs + EFFECTS.pon.ms);
-  s = fxAdvance(s, fxEndAt(s));
+  const t = fxTimes(s, 200);
+  assert.deepEqual(t, { leaveAt: EFFECTS.chi.minMs, endAt: EFFECTS.chi.minMs + FX_EXIT_MS }, '最低表示時間の後に退出（P3-A）してから次へ');
+  s = fxAdvance(s, t.endAt);
+  assert.deepEqual([s.shown, s.current.kind, s.current.startedAt, s.current.event.seat, s.queue.length], [true, 'pon', t.endAt, 2, 0]);
+  assert.equal(fxTimes(s, t.endAt).endAt, t.endAt + EFFECTS.pon.ms);
+  s = fxAdvance(s, fxTimes(s, t.endAt).endAt);
   assert.deepEqual([s.shown, s.current, s.queue], [false, null, []], '待つ演出がなければ消える');
 });
 
@@ -77,7 +88,7 @@ test('演出キュー：ロン・ツモは最優先ですぐ表示し、待っ�
     s = fxOffer(s, item(win, 2), 300);
     assert.deepEqual([s.shown, s.current.kind, s.current.startedAt, s.queue.length], [true, win, 300, 0], `${win}：すぐ表示`);
     assert.deepEqual(s.dropped.map((d) => d.kind), ['pon', 'riichi'], '待っていた演出は捨てる');
-    assert.equal(fxEndAt(s), 300 + EFFECTS[win].ms, '短くしない');
+    assert.deepEqual(fxTimes(s, 300), { leaveAt: null, endAt: 300 + EFFECTS[win].ms }, '短くしない・退出しない');
     for (const k of ['chi', 'pon', 'riichi']) {
       const r = fxOffer(s, item(k), 500);
       assert.deepEqual([r.shown, r.current.kind, r.queue.length, r.dropped.length], [false, win, 0, 1], `${win} 表示中の ${k} は出さない`);
@@ -99,6 +110,24 @@ test('演出キュー：無制限に溜めない（上限 2・古いものから
   assert.deepEqual([inTime.shown, inTime.current.kind, inTime.dropped.length, inTime.queue.length], [true, 'riichi', 1, 0], '古い方は捨て、間に合う方を出す');
 });
 
+test('退出の時刻（監査 P3-A）：最低表示時間を満たしてから退出し、退出を始めたら後から延びない。本来の終わりの近くでは退出しない', () => {
+  const c = (kind, startedAt, extra = {}) => ({ kind, event: { seat: 1 }, startedAt, ...extra });
+  const q = [{ kind: 'pon', event: {}, at: 0 }];
+  assert.equal(FX_EXIT_MS, 180);
+  // 最低表示時間より前に待ちが来た：最低表示時間で退出
+  assert.deepEqual(fxTimes(ST(c('chi', 0), q), 100), { leaveAt: 700, endAt: 880 });
+  // 最低表示時間の後に待ちが来た：すぐ退出
+  assert.deepEqual(fxTimes(ST(c('pon', 0), q), 900), { leaveAt: 900, endAt: 1080 });
+  // 退出を始めた後：保存した時刻のまま（延びない）
+  assert.deepEqual(fxTimes(ST(c('pon', 0, { leaveAt: 900 }), [...q, ...q]), 1000), { leaveAt: 900, endAt: 1080 });
+  // 本来の終わりまでに退出が収まらない：本来の長さ（CSS の終わりの消え方）
+  assert.deepEqual(fxTimes(ST(c('riichi', 0), q), 800), { leaveAt: null, endAt: 900 });
+  // ロン・ツモ・待ちなし：退出しない
+  assert.deepEqual(fxTimes(ST(c('ron', 0), q), 100), { leaveAt: null, endAt: 2200 });
+  assert.deepEqual(fxTimes(ST(c('chi', 0), []), 100), { leaveAt: null, endAt: 1000 });
+  assert.equal(fxTimes(ST(), 0), null);
+});
+
 test('演出キュー：元の状態を変更しない（純粋関数）', () => {
   const s0 = fxOffer(ST(), item('chi'), 0);
   const snap = JSON.stringify(s0);
@@ -108,43 +137,68 @@ test('演出キュー：元の状態を変更しない（純粋関数）', () =>
   assert.equal(JSON.stringify(s0), snap);
 });
 
-test('演出キュー：実際の AI 対局の記録を速い進行で流しても、表示した演出は最低表示時間を守り（ロン・ツモで置き換えた場合を除く）、ロン・ツモは必ず表示し、キューは上限を超えない', () => {
-  let shown = 0; let wins = 0; let calls = 0;
+test('演出キュー：実際の AI 対局の記録を速い進行で流しても、宣言はすべて表示か明示的な破棄のどちらか。表示した演出は最低表示時間を守り（ロン・ツモで置き換えた場合を除く）、ロン・ツモは必ず表示し、キューは上限を超えない', () => {
+  let shown = 0; let wins = 0; let calls = 0; let dropped = 0; let batches = 0;
   for (const mode of ['math1', 'math2']) {
     const r = rulesFor(mode);
     for (let i = 0; i < 16; i++) {
       const lineup = ['speed', 'speed', 'speed', 'value'];
       const g = new Game({ rules: r, seed: 1300 + i, dealer: i % 4, players: lineup.map((p) => ({ kind: 'ai', personality: p })) });
       const rng = createRng(i);
-      let st = ST(); let from = 0; let t = 0;
-      const log = []; // 表示した演出 { kind, start, end, seat }
-      const show = (cur) => { if (log.length) log[log.length - 1].end = Math.min(log[log.length - 1].end, cur.startedAt); log.push({ kind: cur.kind, start: cur.startedAt, end: Infinity, seat: cur.event.seat }); };
-      const pump = (now) => { while (st.current && fxEndAt(st) <= now) { const end = fxEndAt(st); st = fxAdvance(st, end); log[log.length - 1].end = Math.min(log[log.length - 1].end, end); if (st.shown) show(st.current); } };
+      let st = ST(); let from = 0; let t = 0; let lastChange = 0;
+      const log = []; // 表示した演出 { kind, start, end, leave, seat }
+      const show = (cur) => { if (log.length) log[log.length - 1].end = Math.min(log[log.length - 1].end, cur.startedAt); log.push({ kind: cur.kind, start: cur.startedAt, end: Infinity, leave: null, seat: cur.event.seat }); };
+      // app.js の fxSchedule と同じ：退出の時刻を current に保存し、終わりで次へ
+      const pump = (now) => {
+        while (st.current) {
+          const tm = fxTimes(st, lastChange);
+          if (tm.leaveAt !== null && st.current.leaveAt === undefined && tm.leaveAt <= now) { st = { ...st, current: { ...st.current, leaveAt: tm.leaveAt } }; log[log.length - 1].leave = tm.leaveAt; }
+          if (tm.endAt > now) break;
+          const r2 = fxAdvance(st, tm.endAt);
+          dropped += r2.dropped.length;
+          st = r2; lastChange = tm.endAt;
+          log[log.length - 1].end = Math.min(log[log.length - 1].end, tm.endAt);
+          if (st.shown) show(st.current);
+        }
+      };
       while (g.pending()) {
         const p = g.pending();
         applyAction(g, p.seat, decide(g, p.seat, lineup[p.seat], rng));
-        t += 120; // 速い進行（AI の待ち時間 0.12 秒）
+        t += 60; // 速い進行（AI の待ち時間 0.06 秒）
+        if (g.pending() && (i % 3 === 0)) { const p2 = g.pending(); applyAction(g, p2.seat, decide(g, p2.seat, lineup[p2.seat], rng)); } // 1回の判定に複数の行動（同じ回に複数の宣言）
         pump(t);
-        const pk = pickEffect(g.events, from); from = pk.next;
-        if (!pk.kind) continue;
-        calls++;
-        assert.equal(pk.event.seat, g.events[pk.index].seat, '宣言者は記録の seat');
-        st = fxOffer(st, { kind: pk.kind, event: pk.event }, t);
-        assert.ok(st.queue.length <= FX_QUEUE_MAX);
-        if (st.shown) show(st.current);
-        if (isWinEffect(pk.kind)) { wins++; assert.equal(st.current.kind, pk.kind, 'ロン・ツモは必ずすぐ表示'); }
+        const fresh = g.events.slice(from).filter((e) => effectKindOf(e)).length; // 宣言の数は記録から直接数える（scanEffects に頼らない）
+        const sc = scanEffects(g.events, from); from = sc.next;
+        if (fresh > 1) batches++;
+        calls += fresh;
+        dropped += sc.dropped.length;
+        for (const o of sc.offers) {
+          assert.equal(o.event, g.events[o.index], '宣言者は記録そのもの（seat）');
+          const r2 = fxOffer(st, { kind: o.kind, event: o.event }, t);
+          dropped += r2.dropped.length;
+          if (r2.shown || r2.queue.length !== st.queue.length) lastChange = t;
+          st = r2;
+          assert.ok(st.queue.length <= FX_QUEUE_MAX);
+          if (st.shown) show(st.current);
+          if (isWinEffect(o.kind)) { wins++; assert.equal(st.current.kind, o.kind, 'ロン・ツモは必ずすぐ表示'); }
+        }
       }
       pump(t + 10000);
+      dropped += st.queue.length; // 局の終わりに残った待ち（app.js の fxClear と同じく破棄）
       for (let j = 0; j < log.length; j++) {
         const e = log[j];
         const next = log[j + 1];
         const replacedByWin = next && isWinEffect(next.kind) && next.start === e.end;
-        if (!replacedByWin) assert.ok(e.end - e.start >= EFFECTS[e.kind].minMs, `${mode} 局${i}：${e.kind} は最低 ${EFFECTS[e.kind].minMs}ms 表示（${e.end - e.start}ms）`);
+        if (replacedByWin) continue;
+        const visible = (e.leave ?? e.end) - e.start;
+        assert.ok(visible >= EFFECTS[e.kind].minMs, `${mode} 局${i}：${e.kind} は最低 ${EFFECTS[e.kind].minMs}ms 表示（${visible}ms）`);
+        if (e.leave !== null) assert.equal(e.end - e.leave, FX_EXIT_MS, '退出は 0.18 秒');
       }
       shown += log.length;
     }
   }
-  assert.ok(wins > 0 && calls > wins && shown > wins, JSON.stringify({ shown, wins, calls }));
+  assert.equal(shown + dropped, calls, `宣言はすべて表示か破棄のどちらか（取りこぼしなし）：表示 ${shown}・破棄 ${dropped}・宣言 ${calls}`);
+  assert.ok(wins > 0 && calls > wins && shown > wins && batches > 0, JSON.stringify({ shown, wins, calls, dropped, batches }));
 });
 
 test('経過：再描画で作り直した要素を続きから再生するための値（演出がない・終わった後は無効）', () => {
@@ -177,7 +231,7 @@ test('実際の対局：数学Ⅰ・Ⅱの AI 対局の記録からロン・ポ�
         while (g.pending()) {
           const p = g.pending();
           applyAction(g, p.seat, decide(g, p.seat, lineup[p.seat], rng));
-          if (scan) { const pk = pickEffect(g.events, from); from = pk.next; if (pk.kind) seen[pk.kind]++; }
+          if (scan) { const sc = scanEffects(g.events, from); from = sc.next; for (const o of sc.offers) seen[o.kind]++; }
         }
         return JSON.stringify({ events: g.events, result: g.result && { ...g.result, analysis: undefined } });
       };
