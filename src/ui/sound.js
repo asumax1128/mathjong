@@ -258,32 +258,54 @@ export function createSoundPlayer({ getCtor, isOn }) {
 
   P.state = () => (P.ctx ? P.ctx.state : 'none');
 
-  P.play = (kind) => {
+  // 音を1つ鳴らす準備：止まっていないことを確かめ、出力の連鎖（なければ作る）に、この音専用の出力（bus）をつなぐ。
+  // schedule(ctx, bus, when) が音を予約して終わりの時刻を返す。戻り値は状態（played／blocked／nocontext）。
+  // 効果音（レシピ）も宣言ボイス（音声ファイル）も、同じ bus の仕組みを通す。中断・画面が隠れた・次の局で、どちらも同じように切り離される。
+  const start = (gain, schedule) => {
+    if (!P.ctx) return 'nocontext'; // まだ操作がない・AudioContext を持たない環境：無音
+    const ctx = P.ctx;
+    if (ctx.state !== 'running') {
+      // 止まっている：古い音を切り離し、再開を試みるだけで待たない。この音は鳴らさない（遅れて鳴ると場面とずれる）
+      P.drop();
+      tryResume(ctx);
+      return 'blocked';
+    }
+    if (!P.master) {
+      P.master = createMasterChain(ctx);
+      const nb = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * 1.2)), ctx.sampleRate);
+      nb.getChannelData(0).set(makeNoiseData(nb.length));
+      P.noise = nb;
+    }
+    const bus = ctx.createGain();
+    if (gain !== 1) bus.gain.value = gain;
+    bus.connect(P.master);
+    const rec = { bus, timer: null };
+    P.buses.add(rec);
+    const end = schedule(ctx, bus, ctx.currentTime + 0.005);
+    rec.timer = setTimeout(() => retire(rec), Math.max(0, end - ctx.currentTime) * 1000 + 250);
+    if (rec.timer && typeof rec.timer.unref === 'function') rec.timer.unref(); // Node のテストで終了を妨げない
+    return 'played';
+  };
+
+  // 効果音（レシピ）を鳴らす。opts.gain：この音だけの音量（宣言ボイスと重なるとき、声を聞き取りやすくするため下げる。既定 1）
+  P.play = (kind, opts = {}) => {
     try {
       if (!isOn()) return note(kind, 'off');
-      if (!P.ctx) return note(kind, 'nocontext'); // まだ操作がない・AudioContext を持たない環境：無音
-      const ctx = P.ctx;
-      if (ctx.state !== 'running') {
-        // 止まっている：古い音を切り離し、再開を試みるだけで待たない。この音は鳴らさない（遅れて鳴ると場面とずれる）
-        P.drop();
-        tryResume(ctx);
-        return note(kind, 'blocked');
-      }
-      if (!P.master) {
-        P.master = createMasterChain(ctx);
-        const nb = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * 1.2)), ctx.sampleRate);
-        nb.getChannelData(0).set(makeNoiseData(nb.length));
-        P.noise = nb;
-      }
-      const bus = ctx.createGain();
-      bus.connect(P.master);
-      const rec = { bus, timer: null };
-      P.buses.add(rec);
-      const end = scheduleRecipe(ctx, bus, kind, ctx.currentTime + 0.005, P.noise);
-      rec.timer = setTimeout(() => retire(rec), Math.max(0, end - ctx.currentTime) * 1000 + 250);
-      if (rec.timer && typeof rec.timer.unref === 'function') rec.timer.unref(); // Node のテストで終了を妨げない
-      return note(kind, 'played');
+      return note(kind, start(opts.gain ?? 1, (ctx, bus, when) => scheduleRecipe(ctx, bus, kind, when, P.noise)));
     } catch { return note(kind, 'error'); }
+  };
+
+  // 読み込み済みの音声（AudioBuffer）を鳴らす（宣言ボイス）。tag は記録用の名前（例 'voice:ron'）。効果音のオン／オフとは別に、呼び出し側が判断する。
+  P.playBuffer = (tag, buffer, opts = {}) => {
+    try {
+      return note(tag, start(opts.gain ?? 1, (ctx, bus, when) => {
+        const src = ctx.createBufferSource();
+        src.buffer = buffer;
+        src.connect(bus);
+        src.start(when);
+        return when + (buffer.duration || 0);
+      }));
+    } catch { return note(tag, 'error'); }
   };
 
   // 鳴っている音を短く絞って止める（新しい局・タイトルへ戻るとき）。次の play は新しい出力の連鎖で鳴る。
