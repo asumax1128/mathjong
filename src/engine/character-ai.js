@@ -3,6 +3,7 @@
 // 係数は暫定。tools/simulate-characters-all.mjsで比較・調整する。
 import {
   decide, chooseCall, handValue, viewCounts, unseenCounts, riichiDecision,
+  valueAfterCall, minMissingAfterCall,
 } from './ai.js';
 import {
   advHandValue, dangerTable, WIN_COEF, WIN_COEF_V04B,
@@ -72,20 +73,11 @@ function viableCall(game, seat, rng, personality, loosen = 1) {
   p.chi.forEach((x, i) => opts.push({ action: { type: 'chi', option: i }, meld: x.meld }));
   let max = 0, cand = [];
   for (const x of opts) {
-    // 対応する面子を公開すると役が作れないなら値0。valueAfterCallは既存ロジックと同じ。
-    const remaining = counts.slice();
-    const used = rules.melds[x.meld].tiles.slice();
-    const ix = used.indexOf(tile);
-    if (ix < 0) continue;
-    used.splice(ix, 1);
-    let legal = true;
-    for (const t of used) if (--remaining[t] < 0) legal = false;
-    if (!legal) continue;
-    const exposed = [...exp, x.meld];
-    const free = unseen.slice();
-    free[tile]--;
-    // 一巡後までの候補。役なしの鳴き手が続かないよう、少なくとも一つの有効完成形を要求。
-    const val = handValue(rules, remaining, exposed, free, personality);
+    // 既存AIと同じ「鳴いた後に捨て牌を1枚選ぶ」評価を使う。
+    // 役のある完成形が遠すぎるとき、無理に鳴かない。
+    const missing = minMissingAfterCall(rules, counts, exp, unseen, tile, x.meld, personality);
+    if (missing > 3) continue;
+    const val = valueAfterCall(rules, counts, exp, unseen, tile, x.meld, personality);
     if (!(val > 0)) continue;
     if (val < before * loosen) continue;
     if (val > max * (1 + 1e-9)) { max = val; cand = [x.action]; }
