@@ -528,7 +528,7 @@ function panelHTML(seat) {
   const p = g.pending();
   const active = p && p.seat === seat && p.type === 'turn';
   const pl = PLAYERS[seat];
-  const pers = pl.personality ? `<span class="pers">${pl.styleLabel || PERSONALITIES[pl.personality].label}</span>` : '';
+  const pers = ''; // Ver.0.6：対局中はキャラ名だけを出し、牌の表示領域を優先
   return `<section class="panel seat-${seat} ${active ? 'active' : ''}">
     <header>
       <span class="pos">${POS[seat]}</span><span class="name">${pl.name}</span>${pers}
