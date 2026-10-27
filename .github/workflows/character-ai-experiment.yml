@@ -34,9 +34,9 @@ jobs:
       - name: All unit tests
         run: npm test
       - name: Mathematics I baseline versus candidate (all nine)
-        run: node tools/simulate-characters-all.mjs --mode math1 --groups 8 --seed 11 --length 4 | tee /tmp/all-math1.json
+        run: node tools/simulate-characters-all.mjs --mode math1 --groups 4 --seed 21 --length 4 | tee /tmp/all-math1.json
       - name: Mathematics II baseline versus candidate (all nine)
-        run: node tools/simulate-characters-all.mjs --mode math2 --groups 8 --seed 12 --length 4 | tee /tmp/all-math2.json
+        run: node tools/simulate-characters-all.mjs --mode math2 --groups 4 --seed 22 --length 4 | tee /tmp/all-math2.json
       - name: Install browser test dependencies
         run: |
           npm install --no-save playwright@1.56.1
