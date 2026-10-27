@@ -12,19 +12,19 @@ import { decideBeginnerCharacter } from './character-ai-prototype.js';
 
 export const CHARACTER_ROSTER = Object.freeze({
   beginner: Object.freeze([
-    { id: 'kanata', name: 'かなた', age: 10, personality: 'speed' },
-    { id: 'mitsuki', name: 'みつき', age: 8, personality: 'value' },
-    { id: 'aoto', name: 'あおと', age: 9, personality: 'closed' },
+    { id: 'kanata', name: 'かなた', age: 10, personality: 'speed', styleLabel: '冷静な観察型' },
+    { id: 'mitsuki', name: 'みつき', age: 8, personality: 'value', styleLabel: 'sin好きの役狙い' },
+    { id: 'aoto', name: 'あおと', age: 9, personality: 'closed', styleLabel: '自由奔放な鳴き型' },
   ]),
   intermediate: Object.freeze([
-    { id: 'ousuke', name: 'おうすけ', age: 17, personality: 'speed' },
-    { id: 'natsuki', name: 'なつき', age: 20, personality: 'value' },
-    { id: 'yuki', name: 'ゆき', age: 18, personality: 'closed' },
+    { id: 'ousuke', name: 'おうすけ', age: 17, personality: 'speed', styleLabel: '負けず嫌いの速攻型' },
+    { id: 'natsuki', name: 'なつき', age: 20, personality: 'value', styleLabel: '幸運の門前型' },
+    { id: 'yuki', name: 'ゆき', age: 18, personality: 'closed', styleLabel: '逆転の切替型' },
   ]),
   advanced: Object.freeze([
-    { id: 'fukuyama', name: 'ふくやま', age: 28, personality: 'speed' },
-    { id: 'kaoru', name: 'かおる', age: 27, personality: 'value' },
-    { id: 'asuma', name: 'アスマ', age: 28, personality: 'closed' },
+    { id: 'fukuyama', name: 'ふくやま', age: 28, personality: 'speed', styleLabel: '守備重視の理論派' },
+    { id: 'kaoru', name: 'かおる', age: 27, personality: 'value', styleLabel: 'お調子者の実力派' },
+    { id: 'asuma', name: 'アスマ', age: 28, personality: 'closed', styleLabel: '高得点の勝負師' },
   ]),
 });
 const LEVEL_FOR_ID = Object.fromEntries(
