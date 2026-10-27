@@ -8,6 +8,8 @@ on:
       - 'tools/simulate-characters-all.mjs'
       - 'tests/character-ai-prototype.test.js'
       - 'tests/character-ai.test.js'
+      - 'tests/e2e/play.mjs'
+      - 'src/ui/app.js'
       - '.github/workflows/character-ai-experiment.yml'
   workflow_dispatch:
 jobs:
@@ -35,6 +37,12 @@ jobs:
         run: node tools/simulate-characters-all.mjs --mode math1 --groups 2 --seed 1 --length 4 | tee /tmp/all-math1.json
       - name: Mathematics II baseline versus candidate (all nine)
         run: node tools/simulate-characters-all.mjs --mode math2 --groups 2 --seed 2 --length 4 | tee /tmp/all-math2.json
+      - name: Install browser test dependencies
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Character-specific browser regression
+        run: node tests/e2e/play.mjs --only v06Characters,v04bLevels,v05eCutin
       - uses: actions/upload-artifact@v4
         if: always()
         with:
