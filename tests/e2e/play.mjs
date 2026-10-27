@@ -5886,9 +5886,6 @@ async function v06Characters(browser) {
     intermediate: ['おうすけ','なつき','ゆき'],
     advanced: ['ふくやま','かおる','アスマ'],
   };
-  const labels = { beginner: ['冷静な観察型', 'sin好きの役狙い', '自由奔放な鳴き型'],
-    intermediate: ['負けず嫌いの速攻型', '幸運の門前型', '逆転の切替型'],
-    advanced: ['守備重視の理論派', 'お調子者の実力派', '高得点の勝負師'] };
   for (const mode of ['math1', 'math2']) {
     let tileWidth = null;
     for (const [level, names] of Object.entries(roster)) {
@@ -5909,7 +5906,7 @@ async function v06Characters(browser) {
       assert.equal(real.chosen, level);
       assert.deepEqual(real.roster, names, mode + '/' + level + ' player names');
       assert.deepEqual(real.panel, names, mode + '/' + level + ' panel names');
-      assert.deepEqual(real.styles, labels[level], mode + '/' + level + ' character style labels');
+      assert.deepEqual(real.styles, [undefined, undefined, undefined], '対局中は肩書きを省略して牌の領域を優先');
       assert.ok(real.width > 0, 'hand tile visible');
       if (tileWidth !== null) assert.ok(Math.abs(real.width - tileWidth) < 0.5, 'same tile size for all characters');
       tileWidth = real.width;
