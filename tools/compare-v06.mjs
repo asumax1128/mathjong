@@ -9,10 +9,10 @@ console.log('| 形式 | 挑戦者 | 基準 平均順位 | 変種 平均順位 | 
 let all = [];
 for (const cb of b.cases) {
   if (!cb.challenger) continue;
-  const ca = a.cases.find((c) => c.kind === cb.kind && c.challenger === cb.challenger);
+  const ca = a.cases.find((c) => c.kind === cb.kind && c.challenger === cb.challenger && c.level === cb.level);
   if (!ca) continue;
   const d = cb.challengerRanks.map((x, i) => x - ca.challengerRanks[i]);
   all = all.concat(d);
   const n = d.length, m = d.reduce((s, x) => s + x, 0) / n, sd = Math.sqrt(d.reduce((s, x) => s + (x - m) ** 2, 0) / (n - 1));
-  console.log(`| ${cb.kind} | ${cb.challenger} | ${ca.players[ca.challenger].rank.mean} | ${cb.players[cb.challenger].rank.mean} | ${m.toFixed(3)}±${(1.96 * sd / Math.sqrt(n)).toFixed(3)} | ${n} |`);
+  console.log(`| ${cb.kind}${cb.level ? `(vs ${cb.level})` : ''} | ${cb.challenger} | ${ca.players[ca.challenger].rank.mean} | ${cb.players[cb.challenger].rank.mean} | ${m.toFixed(3)}±${(1.96 * sd / Math.sqrt(n)).toFixed(3)} | ${n} |`);
 }

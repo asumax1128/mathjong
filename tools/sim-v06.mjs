@@ -8,6 +8,8 @@
 //   cross  : up + down
 //   same   : 同じ難易度の3人 + 対照（Ver.0.5-E の同難易度AI・速攻型）1人
 //   legacy : キャラ1人 vs Ver.0.5-E の同難易度AI 3人（速攻・役重視・門前）
+//   ref    : 基準の打ち手（Ver.0.5-E の中級AI 速攻・役重視・門前、上級AI 速攻）1人 vs 各難易度のキャラ3人
+//            （人間から見た難易度：基準の打ち手の平均順位が、初級 < 中級 < 上級 の順に悪くなるか）
 //   all    : cross + same + legacy
 // 1グループ＝4試合（全員が4つの席を1回ずつ回る。親の開始席も回る）。seed はグループ・席・局ごとに決まり、同じ引数なら同じ結果。
 // 判断に使う情報は既存と同じ（Game.viewFor の公開情報・試合の持ち点・seed 付き乱数）。このツールは判断を変えず、結果を数えるだけ。
@@ -44,6 +46,11 @@ export function buildCases(exp) {
   }
   if (exp === 'same' || exp === 'all') {
     for (const l of LEVELS) cases.push({ kind: 'same', challenger: null, level: l, lineup: [...IDS[l], `L:${l}:speed`] });
+  }
+  if (exp === 'ref') {
+    for (const l of LEVELS) for (const r of ['L:intermediate:speed', 'L:intermediate:value', 'L:intermediate:closed', 'L:advanced:speed']) {
+      cases.push({ kind: 'ref', challenger: r, level: l, lineup: [r, ...IDS[l]] });
+    }
   }
   if (exp === 'legacy' || exp === 'all') {
     for (const l of LEVELS) for (const id of IDS[l]) add('legacy', id, legacyIds(l));
@@ -248,6 +255,15 @@ function summarize({ exp, mode, length, groups, seed, tune, cases, results, seco
       if (rows.length) (levelAgg[kind] ||= {})[l] = { rank: meanCI(rows.map((r) => r.rank)), top1: meanCI(rows.map((r) => (r.rank <= 1.0001 ? 1 : r.rank < 2 ? 0.5 : 0))), n: rows.length };
     }
   }
+  // ref：基準の打ち手の順位を、相手の難易度ごとに集める
+  for (const l of LEVELS) {
+    const rows = [];
+    cases.forEach((c, ci) => {
+      if (c.kind !== 'ref' || c.level !== l) return;
+      for (const { seats, res } of byCase[ci]) { const s = seats.indexOf(c.challenger); rows.push({ rank: res.ranks[s] }); }
+    });
+    if (rows.length) (levelAgg.ref ||= {})[l] = { rank: meanCI(rows.map((r) => r.rank)), top1: meanCI(rows.map((r) => (r.rank <= 1.0001 ? 1 : r.rank < 2 ? 0.5 : 0))), n: rows.length };
+  }
   const brief = { exp, mode, length, groups, seed, matches: results.length, seconds: r3(seconds), levelAgg,
     cases: caseReports.map((c) => ({ kind: c.kind, who: c.challenger || c.level, rank: c.challenger ? c.players[c.challenger].rank : Object.fromEntries(Object.entries(c.players).map(([k, v]) => [k, v.rank.mean])) })) };
   return { brief, cases: caseReports, levelAgg, meta: { exp, mode, length, groups, seed, tune, matches: results.length, seconds: r3(seconds) } };
@@ -285,7 +301,7 @@ if (!isMainThread) {
   applyTune(tune); // 不正なキャラ名をここで検出
   const only = opt('--only', null); // 挑戦者を絞る（例：--only kaoru,asuma）
   if (!['math1', 'math2'].includes(mode) || ![4, 8].includes(length) || !Number.isInteger(groups) || groups < 1 || !Number.isInteger(seed)) throw new Error('bad options');
-  const cases = buildCases(exp).filter((c) => !only || only.split(',').includes(c.challenger || c.level));
+  const cases = buildCases(exp).filter((c) => !only || only.split(',').includes(c.kind === 'ref' ? c.level : c.challenger || c.level));
   const jobs = [];
   cases.forEach((c, ci) => {
     for (let g = 0; g < groups; g++) for (let rot = 0; rot < 4; rot++) {
