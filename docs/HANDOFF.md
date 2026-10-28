@@ -1,5 +1,11 @@
 # 数雀｜現行開発引き継ぎ（Single Source of Truth）
 
+> **2026-10-29 新3人の統合候補**：`feature/new-character-trio-integration` で、ゆうじん・たら・のっちを追加（画面0.6.1、既存ルールエンジン0.5.0-a）。既存9人・内部ID・保存形式は維持。単体376件・E2E全体（809秒）・250局のローカル検証が成功。現在のmainは `ce659038eadc7b7838dd6659808a088a49d29a76`、前回確認済みの公開版は9人版（今回の実URL再検査は通信制限で未実行）。新3人は未マージ・未公開。詳細は[統合記録](https://github.com/asumax1128/mathjong/blob/feature/new-character-trio-integration/docs/40-new-character-trio-integration.md)。PR #22/#23はDraft・未マージ、PR #19は対象外。包括承認は有効で、停止理由は追加承認待ちではなく、GitHub API/Pagesへの通信許可の未反映。
+
+
+> **後続テストもpush済み**：`test/public-beginner-trio-smoke`（`d5bc040670431b85439a77573e54e75d6ec6a738`）。単体379件と、本番相当ローカルURLの教材1〜6段階・卒業→12人選択→通常対局開始が成功。実際のPages・CI・新規PR作成・mainマージは通信許可未反映で未実行。本体統合のコード・全体E2E成功は `a45d0821e4b55df70363d50a70849a82bfdddc73` を基準に記録。PR #22/#23を変更HEADの再取得後に正規マージし、本体統合→後続テストの順で処理する。
+> **2026-10-28の包括承認（D16）**：既存仕様内は安全条件を満たせばCodexが追加承認なしで実装・Ready・正規mainマージ・既存Pages公開まで進める。重大なルール変更・破壊的データ変更・重大なセキュリティ変更は相談。CI・保護・通信制限を迂回しない。PR #19は自動マージ対象外。
+
 > 2026-10-28 JST時点のスナップショット。最新GitHubのmain・PRと必ず照合する。
 > このファイルはPR #11でmainへマージ済み。最新GitHubのPR状態を再確認する。
 
@@ -8,7 +14,7 @@
 - **現行の正式完成版：Ver.0.6.0-a**（画面版 `APP_VERSION='0.6.0-a'`、エンジン版 `ENGINE_VERSION='0.5.0-a'`。package.jsonの0.1.0とは別）。
 - **正式完成：2026-10-28**。オーナーの **iPhone Safari実機30/30項目合格**（7/7＋11/11＋12/12）。公開済み。
 - **本番URL：https://asumax1128.github.io/mathjong/**（既存GitHub Pages、mainルート）。新サイトを作らない。
-- **main基準：`296b3d6855ec0f190be6493d2cca79cc3d5b73fc`（この文書更新時点）**。必ずGitHubで最新を再取得。Ver.0.6本体のマージコミット`484150efc303f82e1255a5cc4feaf31cfee9c4b9`。
+- **main基準：`ce659038eadc7b7838dd6659808a088a49d29a76`（2026-10-28、PR #21マージ後の記録時点）**。必ずGitHubで最新を再取得。Ver.0.6本体のマージコミット`484150efc303f82e1255a5cc4feaf31cfee9c4b9`。初心者の部屋は全6段階を実装・Pagesデプロイ済み、第4〜6段階の実機受入は未実施。
 - **PR #17**：<https://github.com/asumax1128/mathjong/pull/17>。9人AI・自由選択、merged。
 - **PR #11**：<https://github.com/asumax1128/mathjong/pull/11>。引き継ぎ資料・2026-10-28 mainマージ済み（`310aeaeab19b5d3f5e364cf2abd3cc7c3fcf8c6f`）。
 - **PR #6**：研究Draft、保留。
@@ -48,22 +54,36 @@
 ## 4.1 初心者の部屋（第1〜3段階）の実装状況
 
 - [PR #20](https://github.com/asumax1128/mathjong/pull/20)：数学Ⅰで3枚の数式→9枚で3面子→ツモ/打牌を練習する独立モードを実装し、2026-10-28にmainへマージ（`b9cd0bee078fd823529d7b19e905aab07cb5006a`）。
-- 専用CIは成功：[run 40655422458](https://github.com/asumax1128/mathjong/actions/runs/40655422458)。**iPhone Safari実機テスト7/7項目合格（2026-10-28）**。第1〜3段階の受入完了。第4〜6段階はまだ未実装・設計検討中。
+- 専用CIは成功：[run 40655422458](https://github.com/asumax1128/mathjong/actions/runs/40655422458)。**iPhone Safari実機テスト7/7項目合格（2026-10-28）**。第1〜3段階の受入完了。第4〜6段階は後述のPR #21で実装・マージ済みだが、この7/7の受入対象には含まれない。
 - 基準ドキュメント：[docs/34](34-beginner-room-part1.md)と[設計案PR #19](https://github.com/asumax1128/mathjong/pull/19)。PR #19はDraft・未マージ。
 
 ## 4.2 初心者の部屋（第4〜6段階）の実装状況
 
-- 承認済み設計（docs/35・PR #19）に基づき、ブランチ `feature/beginner-room-lesson4to6` で実装。**Draft [PR #21](https://github.com/asumax1128/mathjong/pull/21)・未マージ・未公開**。記録：[docs/36](36-beginner-room-lessons4to6.md)。
+- 承認済み設計（docs/35・PR #19）に基づく[PR #21](https://github.com/asumax1128/mathjong/pull/21)は、オーナーがHEAD `ac137f1e477b261f50a1e59e1606b5b589f6ebe8`を明示承認し、2026-10-28 11:39:43 UTC（20:39:43 JST）にmainへマージ済み。マージSHAは `ce659038eadc7b7838dd6659808a088a49d29a76`。設計PR #19はDraft・未マージを維持。記録：[docs/36](36-beginner-room-lessons4to6.md)。
 - 第4段階（4-A チー／4-B 上家以外はチー不可／4-C ポン／4-D 鳴いた手は役が必要）、第5段階（5-A リーチとツモ切りだけ／5-B ロン／5-C ツモ）、第6段階（練習用CPU 3人との1局の卒業試験、修了→「実際の対局に挑戦する」）。すべて実際の `Game` の固定局面とエンジンの判定・精算。
 - 進み具合は localStorage `mj-beginner-room-v1`（版つき・保存できない端末でも動く）。段階の一覧・続きから・やり直し。
-- mainへのマージ・Pages公開・iPhone Safari実機確認はオーナーの承認・確認待ち。
+- P2-1（5-Cで教材が受け付けないリーチ・打牌を有効表示）は `ac137f1` で解消。第5-Cのツモ可能時は「ツモ」だけを表示。修正前HEADの広範囲独立監査と、Codex自身による限定修正・再検証を区別する。修正後は単体368件、関連E2E、全9牌・内部禁止操作・400点保存を確認した。修正後全コードを別担当者が全面再監査したという意味ではない。
+- [Pagesデプロイ 40681686192](https://github.com/asumax1128/mathjong/actions/runs/40681686192)は成功。[その後の公開smoke test 40681741442](https://github.com/asumax1128/mathjong/actions/runs/40681741442)は失敗。デプロイ成功と公開サイトのブラウザ検証成功を同一視しない。
+- **第4〜6段階のiPhone Safari実機受入は未実施**。第1〜3段階の7/7やVer.0.6の30/30を流用して正式完成としない。
+
+## 4.3 公開後の保守・未マージ作業
+
+- 公開smoke testの既知不整合：`tools/public-smoke.mjs:59` が旧名称「ふくやま」を期待する。正式表示は「シャカ」、内部IDは `fukuyama` のまま。mainのコードとローカル再現で不一致を確認。
+- テスト修正ブランチ：`fix/public-smoke-shaka-name`、HEAD `fdcfcd4b3acf57511f873cf59183a5747383d541`。main `ce65903` から作成し、期待文字列1か所だけを修正。ゲームコード・内部IDは無変更。ローカルHTTPでは旧テスト失敗→修正後smoke成功（対局開始まで、資源エラーなし）、対戦相手単体10件成功。
+- 文書更新ブランチ：`docs/beginner-room-pr21-release`（本更新）。テスト修正を含めず、同じmainから独立した文書専用変更。
+- **PR #22/#23はDraft・未マージ**（記録時点）。PR #22は `fix/public-smoke-shaka-name`、HEAD `fdcfcd4b3acf57511f873cf59183a5747383d541`。PR #23は文書更新。最新HEADとmainは毎回GitHubで再取得する。新方針で自律マージは承認されたが、正規APIへの接続・保護条件確認ができずReady化とマージは未実行。復旧後はPR #22を先に処理し、更新mainとの差分・CIを再確認してPR #23を処理する。
+- 通信設定案には `api.github.com` と `asumax1128.github.io` を追加済みだが、実行環境の許可には未反映。GitHubのHTML閲覧とGitは利用可能。API接続・実公開URLの検証とは区別する。
+- Codexからの直接接続はプロキシ拒否で未完了だが、GitHub Actionsの修正ブランチでの公開入口smokeは成功した。全6段階の実公開操作、配信JSとmainのハッシュ一致、iPhone Safari実機受入は別途必要。
+- **修正ブランチの公開smokeは3件Success**：[40689929481](https://github.com/asumax1128/mathjong/actions/runs/40689929481)、[40689890309](https://github.com/asumax1128/mathjong/actions/runs/40689890309)、[40689790935](https://github.com/asumax1128/mathjong/actions/runs/40689790935)。いずれも `fix/public-smoke-shaka-name`、完全HEAD `fdcfcd4b3acf57511f873cf59183a5747383d541`。2026-10-28 21:40〜21:41 JST。Actions画面のブランチ・SHAリンク・Successと実行HEADのテスト仕様を照合した。390px・数学Ⅰ・タイトル→選択→通常対局開始が中心で、全6段階・実機受入・配信JS同一性の検査ではない。旧mainのFailureは履歴として残す。
+
+- **公開教材テスト追加**：`test/public-beginner-room-smoke`。既存E2Eへ `--public-url` を追加し、サーバー起動・ローカル転送・テストフックに頼らず第1〜6段階を検査。4画面幅、5-C、卒業、保存再開、通常対局開始までを再利用し、専用read-only workflowを用意。新規PR作成・実際のPagesでの実行はAPI接続待ち。ローカルHTTPの成功を公開成功と混同しない。 実装時のローカル検証は単体371件成功、全体E2E約749秒成功、直接HTTPモード2回連続成功、旧5-Cへの故障注入で失敗検出。[検査範囲と実行方法](https://github.com/asumax1128/mathjong/blob/test/public-beginner-room-smoke/docs/37-public-beginner-room-smoke.md)。ゲーム本体には変更なし。
 
 ## 5. オーナー決定の開発優先順位
 
 1. **GitHub引き継ぎ基盤の最新化（最優先）**。PR #11標準5ファイルをVer.0.6へ更新してmainマージ済み。新チャットでの独立復元テストは未実施。
-2. **初心者の部屋**。第1〜3段階はPR #20でmainマージ・iPhone実機7/7合格済み。第4〜6段階は設計承認（PR #19・D14）→実装Draft PR #21（[docs/36](36-beginner-room-lessons4to6.md)・未マージ・未公開）。
+2. **初心者の部屋**。全6段階がPR #20/#21でmain反映・Pages成功。PR #22の公開入口smokeは3件成功。PR #22/#23の正規マージ、全段階公開テスト追加・実行、第4〜6段階のiPhone Safari受入を優先。新3キャラは安定化後、時間・資源に余裕があれば調査・3案設計・再現可能なシミュレーションへ進む。既存ルールは変えない。
 3. **戦績・対戦記録**。個人の通算・相手別などの記録、保存仕様は未確定。
-4. **新キャラクター3人追加**。9→12人、能力・関係性・バランスは後日設計。
+4. **新キャラクター3人追加**。ゆうじん・たら・のっちの評価2,608試合完了。採用係数で0.6.1候補を実装・ローカル検証完了（docs/40）。難易度の序列・正式画像・実機受入は未確定。
 5. **デフォルメイラスト追加**。一覧はデフォルメ、詳細は通常頭身の将来構想。今回は未制作。
 
 順位・優先度を固定しても、2〜5の仕様や実装/公開を勝手に承認したことにはならない。
@@ -77,10 +97,17 @@
 
 ## 7. 役割と運用
 
-オーナーが仕様・公開・main統合の最終決裁とiPhone実機テストを担当。ChatGPTはディレクター。Claude Codeが実装・テスト、Codexが独立監査。原則：**現在のmain → 専用ブランチ → Draft PR → 独立監査・修正 → オーナーのマージ許可 → 既存Pages上書き → iPhone Safari実機確認**。新サイトは作らない。
+オーナーが重大な仕様変更とiPhone実機受入を担当。Claude復帰までCodexは一時的な開発・品質・リリースを担当する。**最新main→専用ブランチ→テスト・差分再確認→安全条件確認→自律Ready/正規マージ→既存Pagesデプロイ・公開検査→iPhone実機受入**。実装者自身の検証を別担当者の独立監査と称さない。新サイトを作らず、CI・保護・通信制限を迂回しない。
 
 更新すべきたびにGitHub状態を読み直し、`HANDOFF/DECISIONS/ROADMAP/WORKFLOW/CHAT_START`と版別docs・READMEを整合させる。歴史資料は消さず、現行との区別を冒頭に記す。
 
 ## 8. 次チャット
 
 [CHAT_START.md](CHAT_START.md)から開始し、最新main・PR#11・コードを照合後、上記の5つの優先事項を順に進める。**チャットにしか残っていない仕様を推測で実装しない。**
+
+## 新3人の統合候補の引き継ぎ
+
+- 実装根拠：実験コミット `e8695b5ac260c80db3869775703f9a8734ac48e5` のdocs/38・39（合計2,608試合）。大きな実験ブランチ全体は取り込まない。
+- 新規AIはsrc/engine/character-ai-trio.js、窓口はcharacters.js。旧9人は元のcharacter-ai.jsを呼び、旧モジュール・係数・?ai=既定3人を変更しない。
+- のっちは完了局の公開行動の件数だけを持つ。新しい試合・再戦で0へ戻す。再現URLは従来どおり山・配牌・親・局状態を復元し、前の局の公開行動集計や持ち点は復元しない。
+- 実装者自身の再確認であり、独立した別担当者の監査ではない。公開・実機受入・GitHub CIの未確認を区別する。
