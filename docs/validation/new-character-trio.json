@@ -174,7 +174,14 @@
       ]
     ]
   },
-  "fullE2E": "running",
+  "fullE2E": {
+    "status": "passed",
+    "seconds": 809.076,
+    "deviceProgressRounds": 23,
+    "browser": "system Chromium 154.0.8037.57",
+    "separateBrowserModes": false,
+    "completionMarker": "E2E OK"
+  },
   "existingSimulation": {
     "engine": "0.5.0-a",
     "games": 250,
@@ -255,5 +262,6 @@
     "merge": "not performed"
   },
   "safari": "WebKit binary unavailable; iPhone Safari untested",
-  "validationType": "implementer verification and reference comparison; not a separate independent reviewer"
+  "validationType": "implementer verification and reference comparison; not a separate independent reviewer",
+  "implementationCodeCommit": "be4f0dd25842bf9a7bbce5a78b15efc011c204b7"
 }

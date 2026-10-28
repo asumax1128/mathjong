@@ -97,4 +97,4 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 
 ### 新3人の統合候補（未公開）
 
-ゆうじん・たら・のっちを12人の選択画面へ追加する実装は、`feature/new-character-trio-integration` で検証中です。現在のmain/公開サイトへ反映済みとはしていません。[実装とテスト状況](docs/40-new-character-trio-integration.md)。
+ゆうじん・たら・のっちを12人の選択画面へ追加する実装は、`feature/new-character-trio-integration` で実装・ローカル検証を完了しました。現在のmain/公開サイトへ反映済みとはしていません。[実装とテスト状況](docs/40-new-character-trio-integration.md)。
