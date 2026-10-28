@@ -1,5 +1,5 @@
 // 対戦相手の自由選択（Ver.0.6）：12人から重複なしで3人を選ぶ。画面から独立した純粋関数（tests/opponents.test.js で検査）。
-// 一覧の並び（OPPONENTS）は初級・中級・上級の順。人数が増えても同じ関数で動く（人数を前提にしない）。
+// 一覧の並び（OPPONENTS）は初級4人→中級4人→上級4人。旧9人の名簿・AI判断はそのまま。
 // 選択は画面の記憶の中だけで持ち、保存しない（再読み込みで0人に戻る）。
 import { CHARACTER_ROSTER } from '../engine/characters.js';
 
@@ -74,9 +74,9 @@ const PROFILES = {
   },
 };
 
-// 一覧（初級→中級→上級の順に連続）。id・name・age は AI の名簿（CHARACTER_ROSTER）から取る。
+// 旧9人は元の難易度グループを維持。新3人は明示されたlevelに従い各グループ末尾へ追加する。
 export const OPPONENTS = Object.freeze(
-  ['beginner', 'intermediate', 'advanced', 'additional'].flatMap((level) => CHARACTER_ROSTER[level].map((c) => Object.freeze({
+  ['beginner', 'intermediate', 'advanced'].flatMap((level) => [...CHARACTER_ROSTER[level], ...CHARACTER_ROSTER.additional.filter((c) => c.level === level)].map((c) => Object.freeze({
     id: c.id, name: c.name, age: c.age, level, levelLabel: LEVEL_LABELS[level], personalityKey: c.personality, styleLabel: c.styleLabel,
     ...PROFILES[c.id],
   }))),
