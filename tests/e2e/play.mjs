@@ -3044,7 +3044,7 @@ async function v04Fixes(browser) {
     assert.equal(before.next, pending, '予約中の次回用モード');
     assert.ok(before.scores.some((x) => x !== 100) && before.hist > 0);
     const finInfo = await page.locator('.final-info').innerText();
-    for (const id of chars) assert.match(finInfo, new RegExp({ fukuyama: 'ふくやま', kaoru: 'かおる', asuma: 'アスマ', kanata: 'かなた', mitsuki: 'みつき', aoto: 'あおと' }[id]));
+    for (const id of chars) assert.match(finInfo, new RegExp({ fukuyama: 'シャカ', kaoru: 'かおる', asuma: 'アスマ', kanata: 'かなた', mitsuki: 'みつき', aoto: 'あおと' }[id]));
     assert.equal(await page.locator('button[data-action="again"]').innerText(), '同じ3人と再戦');
     await page.locator('button[data-action="again"]').tap();
     await page.waitForSelector('.hand .tile');
@@ -5944,7 +5944,7 @@ async function v06Characters(browser) {
   const roster = {
     beginner: ['かなた','みつき','あおと'],
     intermediate: ['おうすけ','なつき','ゆき'],
-    advanced: ['ふくやま','かおる','アスマ'],
+    advanced: ['シャカ','かおる','アスマ'],
   };
   for (const mode of ['math1', 'math2']) {
     let tileWidth = null;
@@ -5997,7 +5997,7 @@ async function v06FreeSelect(browser) {
     await page.locator('button[data-action="choose-opponents"]').tap();
     await page.waitForSelector('.select-screen');
     assert.deepEqual(await page.locator('.opp-card').evaluateAll((es) => es.map((e) => e.dataset.id)), ORDER, '9人を初級→中級→上級の順に連続');
-    assert.deepEqual(await page.locator('.opp-card .opp-name').allInnerTexts(), ['かなた', 'みつき', 'あおと', 'おうすけ', 'なつき', 'ゆき', 'ふくやま', 'かおる', 'アスマ']);
+    assert.deepEqual(await page.locator('.opp-card .opp-name').allInnerTexts(), ['かなた', 'みつき', 'あおと', 'おうすけ', 'なつき', 'ゆき', 'シャカ', 'かおる', 'アスマ']);
     assert.deepEqual(await page.locator('.opp-card .opp-level').allInnerTexts(), ['初級', '初級', '初級', '中級', '中級', '中級', '上級', '上級', '上級']);
     for (const t of await page.locator('.opp-card .opp-trait').allInnerTexts()) assert.ok(t.length >= 4, `性格の一言 ${t}`);
     assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.opp-grid')).gridTemplateColumns.split(' ').length), 2, 'スマートフォンは2列');
@@ -6166,6 +6166,54 @@ async function v06FreeSelect(browser) {
   console.log('✓ Ver.0.6：対戦相手の自由選択（9人・2列/3列・チェックと詳細の分離・0〜2人不可・4人目不可・詳細（下から/中央）・おまかせ・1人入れ替え・保持/再読み込みで0人・座席6通り・途中固定・相手を変更・同じ3人と再戦・数学ⅠⅡ×4/8局）');
 }
 
+
+// 初心者の部屋：第1〜3段階を実際のタップで進め、エンジンの正誤・通常対局への復帰を検証。
+async function v07BeginnerRoom(browser) {
+  for (const width of [320, 390, 430]) {
+    const ctx = await newContext(browser, { viewport: { width, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(PUBLIC);
+    await page.locator('button[data-action="br-open"]').tap();
+    await page.waitForSelector('.beginner-room');
+    assert.match(await page.locator('.br-sub').innerText(), /数学Ⅰ/);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'チュートリアルに横スクロールなし');
+    const tile = async (i) => page.locator('.br-pick[data-idx="' + i + '"]').tap();
+    // Stage1: incorrect formula, then sin30=1/2.
+    for (const i of [0, 2, 5]) await tile(i);
+    await page.locator('button[data-action="br-check"]').tap();
+    assert.match(await page.locator('.br-feedback').innerText(), /面子にならない/);
+    for (const i of [3, 4, 1]) await tile(i);
+    await page.locator('button[data-action="br-check"]').tap();
+    assert.match(await page.locator('.br-feedback').innerText(), /正解/);
+    await page.locator('button[data-action="br-next"]').tap();
+    assert.match(await page.locator('.br-panel h2').innerText(), /3つの面子/);
+    // Stage2: three actual melds, including two distinct =1/2 tiles.
+    for (const group of [[3, 5, 2], [0, 8, 7], [6, 1, 4]]) {
+      for (const i of group) await tile(i);
+      await page.locator('button[data-action="br-check"]').tap();
+    }
+    assert.match(await page.locator('.br-feedback').innerText(), /和了形/);
+    await page.locator('button[data-action="br-next"]').tap();
+    // Stage3: wrong discard, then discard =-1 for tenpai.
+    await tile(1);
+    await page.locator('button[data-action="br-check"]').tap();
+    assert.match(await page.locator('.br-feedback').innerText(), /惜しい/);
+    await tile(5);
+    await page.locator('button[data-action="br-check"]').tap();
+    assert.match(await page.locator('.br-feedback').innerText(), /和了できる/);
+    await page.locator('button[data-action="br-next"]').tap();
+    await page.waitForSelector('.title-screen');
+    // The tutorial must not alter the normal selection screen.
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    assert.equal(await page.locator('.opp-card').count(), 9);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 初心者の部屋：3段階の誤答・正答・画面遷移、320/390/430px、通常対局の入口');
+}
+
 const server = await startServer(0, { base: BASE, host: '127.0.0.1' });
 PORT = server.address().port;
 LOCAL = `http://localhost:${PORT}${BASE}`;
@@ -6178,7 +6226,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect };
+    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v07BeginnerRoom };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
   } else {
@@ -6226,6 +6274,7 @@ try {
   await v05eAudioIndependent(browser);
   await v06Characters(browser);
   await v06FreeSelect(browser);
+  await v07BeginnerRoom(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));

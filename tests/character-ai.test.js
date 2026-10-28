@@ -13,7 +13,7 @@ test('character roster contains 9 unique names and correct ages', () => {
   const all = Object.values(CHARACTER_ROSTER).flat();
   assert.equal(all.length, 9);
   assert.equal(new Set(all.map((x) => x.id)).size, 9);
-  assert.deepEqual(all.map((x) => x.name), ['かなた','みつき','あおと','おうすけ','なつき','ゆき','ふくやま','かおる','アスマ']);
+  assert.deepEqual(all.map((x) => x.name), ['かなた','みつき','あおと','おうすけ','なつき','ゆき','シャカ','かおる','アスマ']);
   assert.deepEqual(all.map((x) => x.age), [10,8,9,17,20,18,28,27,28]);
   assert.equal(rosterForLevel('advanced')[2].name, 'アスマ');
 });
