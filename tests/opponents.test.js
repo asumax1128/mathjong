@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OPPONENTS, PICK_COUNT, opponentById, toggleOpponent, canStartWith, drawOpponents, assignSeats, parseChars } from '../src/ui/opponents.js';
 import { validateReplay, replayQuery } from '../src/ui/replay.js';
-import { CHARACTER_ROSTER, CHARACTER_PARAMS, decideCharacter } from '../src/engine/character-ai.js';
+import { CHARACTER_PARAMS, decideCharacter } from '../src/engine/character-ai.js';
 import { createRules } from '../src/engine/rules.js';
 import { makeConfig } from '../src/engine/config.js';
 import { Game } from '../src/engine/game.js';
@@ -11,17 +11,20 @@ import { applyAction } from '../src/engine/ai.js';
 import { createRng } from '../src/engine/rng.js';
 import { playMatch } from '../tools/sim-v06.mjs';
 
+import { CHARACTER_ROSTER } from '../src/engine/characters.js';
 const IDS = OPPONENTS.map((o) => o.id);
-const ORDER = ['kanata', 'mitsuki', 'aoto', 'ousuke', 'natsuki', 'yuki', 'fukuyama', 'kaoru', 'asuma'];
+const OLD_ORDER = ['kanata', 'mitsuki', 'aoto', 'ousuke', 'natsuki', 'yuki', 'fukuyama', 'kaoru', 'asuma'];
 
-test('一覧：9人を初級→中級→上級の順に連続。名前・年齢・難易度は AI の名簿と一致し、紹介文（性格・打ち筋・一言）がある', () => {
+const ORDER = [...OLD_ORDER, 'yujin', 'tara', 'nocchi'];
+
+test('一覧：12人を初級→中級→上級の順に連続。名前・年齢・難易度は AI の名簿と一致し、紹介文（性格・打ち筋・一言）がある', () => {
   assert.deepEqual(IDS, ORDER);
   const roster = Object.fromEntries(Object.entries(CHARACTER_ROSTER).flatMap(([lv, xs]) => xs.map((c) => [c.id, { ...c, lv }])));
   for (const o of OPPONENTS) {
     assert.equal(o.name, roster[o.id].name);
     assert.equal(o.age, roster[o.id].age);
     assert.equal(o.level, roster[o.id].lv);
-    assert.equal(o.levelLabel, { beginner: '初級', intermediate: '中級', advanced: '上級' }[o.level]);
+    assert.equal(o.levelLabel, { beginner: '初級', intermediate: '中級', advanced: '上級', additional: '個性型' }[o.level]);
     for (const k of ['trait', 'personality', 'style']) assert.ok(typeof o[k] === 'string' && o[k].length >= 4, `${o.id} の ${k}`);
   }
   assert.equal(PICK_COUNT, 3);
@@ -71,13 +74,13 @@ function enumerate(steps, fn) {
 }
 
 test('おまかせ：9人から異なる3人。84通りの組がすべて同じ確率（乱数の列 9×8×7 通りを列挙して各組ちょうど6回）', () => {
-  const draws = enumerate([9, 8, 7], (rand) => drawOpponents(rand));
+  const draws = enumerate([9, 8, 7], (rand) => drawOpponents(rand, 3, OLD_ORDER));
   assert.equal(draws.length, 504);
   const count = new Map();
   for (const d of draws) {
     assert.equal(d.length, 3);
     assert.equal(new Set(d).size, 3, '重複なし');
-    assert.deepEqual(d, ORDER.filter((id) => d.includes(id)), '一覧の順に並べる');
+    assert.deepEqual(d, OLD_ORDER.filter((id) => d.includes(id)), '一覧の順に並べる');
     const k = d.join(',');
     count.set(k, (count.get(k) || 0) + 1);
   }
@@ -86,12 +89,12 @@ test('おまかせ：9人から異なる3人。84通りの組がすべて同じ�
   // 実際の乱数でも何度でも引き直せ、毎回3人（統計的にも偏りがない：84通りすべてが出る）
   const rng = createRng(2026);
   const seen = new Set();
-  for (let i = 0; i < 5000; i++) { const d = drawOpponents(() => rng.next()); assert.ok(canStartWith(d)); seen.add(d.join(',')); }
+  for (let i = 0; i < 5000; i++) { const d = drawOpponents(() => rng.next(), 3, OLD_ORDER); assert.ok(canStartWith(d)); seen.add(d.join(',')); }
   assert.equal(seen.size, 84);
 });
 
-test('将来12人に増えても同じ関数で一様（12×11×10 通りを列挙して 220 通りの組が各6回）', () => {
-  const ids12 = [...ORDER, 'x1', 'x2', 'x3'];
+test('現在の12人も同じ関数で一様（12×11×10 通りを列挙して 220 通りの組が各6回）', () => {
+  const ids12 = ORDER;
   const draws = enumerate([12, 11, 10], (rand) => drawOpponents(rand, 3, ids12));
   const count = new Map();
   for (const d of draws) count.set(d.join(','), (count.get(d.join(',')) || 0) + 1);

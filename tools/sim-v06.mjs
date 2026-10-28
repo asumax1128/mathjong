@@ -33,7 +33,8 @@ import { createRules } from '../src/engine/rules.js';
 import { makeConfig } from '../src/engine/config.js';
 import { Game } from '../src/engine/game.js';
 import { decide, applyAction, viewCounts } from '../src/engine/ai.js';
-import { decideCharacter, CHARACTER_ROSTER, CHARACTER_PARAMS } from '../src/engine/character-ai.js';
+import { CHARACTER_ROSTER, CHARACTER_PARAMS } from '../src/engine/character-ai.js';
+import { decideCharacter, newPublicHistory, recordPublicRound } from '../src/engine/characters.js';
 import { createRng } from '../src/engine/rng.js';
 import { createMatch, applyRoundResult, dealerOf, START_POINTS } from '../src/engine/match.js';
 
@@ -145,6 +146,7 @@ export function playMatch({ mode, length, seats, seedBase, humanIds = [] }) {
   const rules = getRules(mode);
   const sinKey = 'f:sin';
   let m = createMatch({ length });
+  let publicHistory = newPublicHistory();
   const st = seats.map(() => blank());
   let round = 0;
   while (!m.over) {
@@ -154,7 +156,7 @@ export function playMatch({ mode, length, seats, seedBase, humanIds = [] }) {
     const players = seats.map((id) => ({ name: id, kind: humanIds.includes(id) ? 'human' : 'ai', personality: id.startsWith('L:') ? id.split(':')[2] : 'speed' }));
     const g = new Game({ rules, seed: gameSeed, dealer: dealerOf(m), players });
     const rng = createRng((gameSeed ^ 0x5bd1e995) >>> 0);
-    const info = { scores: m.scores.slice(), hand: m.hand, length: m.length, dealer: dealerOf(m), renchan: m.renchan };
+    const info = { scores: m.scores.slice(), hand: m.hand, length: m.length, dealer: dealerOf(m), renchan: m.renchan, publicHistory };
     let steps = 0;
     while (g.pending()) {
       const p = g.pending();
@@ -216,6 +218,7 @@ export function playMatch({ mode, length, seats, seedBase, humanIds = [] }) {
       }
     }
     m = applyRoundResult(m, r);
+    publicHistory = recordPublicRound(publicHistory, g.events, g.riichi);
     if (m.scores.reduce((a, b) => a + b, 0) !== 4 * START_POINTS) throw new Error('score conservation');
   }
   return { scores: m.scores, ranks: fracRanks(m.scores), shares: placeShares(m.scores), stats: st };

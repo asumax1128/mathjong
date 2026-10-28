@@ -40,10 +40,13 @@ test('全課題：数学Ⅰの実在する牌の固定の山・同じ局面を�
     assert.equal(a.game.players.filter((x) => x.kind === 'human').length, 1);
     assert.equal(lessonWall(l).length, 32 + l.draws.length);
     conserved(a);
-    // 9人のキャラクター名を使わない（練習用CPU）
+    // 人名は名前欄で検査する。説明文の「〜したら」をキャラ名「たら」と誤認しない。
     const html = practiceHTML(a);
     assert.match(html, /練習用CPU/);
-    for (const o of OPPONENTS) assert.ok(!html.includes(o.name), `${l.id}：${o.name} を表示しない`);
+    const names = [...html.matchAll(/<div class="bp-name">([\s\S]*?)<\/div>/g)].map(m => m[1].replace(/<[^>]*>/g, ''));
+    assert.equal(names.length, 4);
+    assert.deepEqual(a.game.players.slice(1).map(p => p.name), ['練習用CPU', '練習用CPU', '練習用CPU']);
+    for (const o of OPPONENTS) assert.ok(names.every(n => !n.includes(o.name)), `${l.id}：名前欄に ${o.name} を表示しない`);
   }
 });
 
