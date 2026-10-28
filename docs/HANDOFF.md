@@ -1,10 +1,10 @@
 # 数雀｜現行開発引き継ぎ（Single Source of Truth）
 
-> **現行確認（2026-10-29）**：Ver.0.6.1（新3名を含む12人版）はオーナーの**iPhone Safari実機8/8項目合格**で正式受入。PR #24は `6d254a56b92a3c041d1e1ffe5c2716a887179c57` にmerged、Pagesと公開通常対局smokeがSuccess。既存9名・保存形式・ルール不変。8項目の記録は[docs/41](41-ver0.6.1-release-acceptance.md)。
+> **最新公開（2026-10-29）**：数雀 Ver.0.6.2（12人選択、ゆうじん26歳初級／たら25歳中級／のっち28歳上級、初中上各4人の順に表示）。[PR #27](https://github.com/asumax1128/mathjong/pull/27) HEAD `b1ff774bfcdc3b8408a4d812d2ea7389c0249249`、必須CI2件Success、mainマージ `627081240c3b9c9907adbf96061a6fcd71b81f2d`。[Pages 40781902816](https://github.com/asumax1128/mathjong/actions/runs/40781902816)、[公開通常対局smoke 40782005883](https://github.com/asumax1128/mathjong/actions/runs/40782005883)、[公開初心者教材E2E 40782005997](https://github.com/asumax1128/mathjong/actions/runs/40782005997)すべてSuccess。**Ver.0.6.2のiPhone実機表示確認は未実施**。ゲームルール、AI判断・係数、旧9人の内部ID、保存形式は不変。[変更仕様docs/42](42-ver0.6.2-trio-profiles.md)。
 
-> **公開E2Eまで完了**：PR #25は必須CI2件Success後、`a686f69fd0c764737526833062b6f4da157894c9` にmerged。[Pages 40779025504](https://github.com/asumax1128/mathjong/actions/runs/40779025504)、[通常smoke 40779073757](https://github.com/asumax1128/mathjong/actions/runs/40779073757)、[初心者の部屋1〜6公開E2E 40779073906](https://github.com/asumax1128/mathjong/actions/runs/40779073906)がSuccess。実機受入とChromium自動検査は別。
+> **正式な実機受入の区別**：Ver.0.6.1（新3名の本体統合、12人選択）はオーナーが2026-10-29にiPhone Safariで**8/8項目合格**を報告。[受入記録docs/41](41-ver0.6.1-release-acceptance.md)。[PR #24](https://github.com/asumax1128/mathjong/pull/24) は `6d254a56b92a3c041d1e1ffe5c2716a887179c57` でmerged。本受入をVer.0.6.2の実機合格として流用しない。正式画像は引き続き頭文字の仮表示。
 
-> **次の変更**：オーナーは新3名の年齢・表示難易度を「ゆうじん26歳初級／たら25歳中級／のっち28歳上級」と決定し、選択画面を初級4→中級4→上級4人に並び替えるよう指示。Ver.0.6.2の[PR #27](https://github.com/asumax1128/mathjong/pull/27)で実装。**この記録の時点ではPR #27のCI/マージ・Pages公開/実機受入は未完了**。[仕様docs/42](42-ver0.6.2-trio-profiles.md)。AI動作・係数は変更しない。PR #19はDraft・変更しない。
+> **初心者教材の公開検査**：[PR #25](https://github.com/asumax1128/mathjong/pull/25) は必須CI2件Success後に `a686f69fd0c764737526833062b6f4da157894c9` にmerged。Pages・通常smoke・初心者の部屋1〜6公開E2EもSuccess。Ver.0.6.2でも公開E2E successを再確認。**PR #19は設計資料のDraftとして変更・マージしない**。最新状態が下記の記録時点のPR・SHAと異なる場合は必ず現在のGitHubを優先する。
 
 > **2026-10-28の包括承認（D16）**：既存仕様内は安全条件を満たせばCodexが追加承認なしで実装・Ready・正規mainマージ・既存Pages公開まで進める。重大なルール変更・破壊的データ変更・重大なセキュリティ変更は相談。CI・保護・通信制限を迂回しない。PR #19は自動マージ対象外。
 
@@ -13,7 +13,7 @@
 
 ## 0. 現在地
 
-- **現行の正式完成版：Ver.0.6.0-a**（画面版 `APP_VERSION='0.6.0-a'`、エンジン版 `ENGINE_VERSION='0.5.0-a'`。package.jsonの0.1.0とは別）。
+- **現行公開版：Ver.0.6.2**（画面 `0.6.2`、エンジン `0.5.0-a`）。最新main `627081240c3b9c9907adbf96061a6fcd71b81f2d`。Ver.0.6.1はiPhone Safari実機8/8受入済み。Ver.0.6.2はPages・公開smoke・公開教材E2E成功、iPhone追加表示テスト未実施。過去のVer.0.6正式完成の記録は履歴。
 - **正式完成：2026-10-28**。オーナーの **iPhone Safari実機30/30項目合格**（7/7＋11/11＋12/12）。公開済み。
 - **本番URL：https://asumax1128.github.io/mathjong/**（既存GitHub Pages、mainルート）。新サイトを作らない。
 - **main基準：`ce659038eadc7b7838dd6659808a088a49d29a76`（2026-10-28、PR #21マージ後の記録時点）**。必ずGitHubで最新を再取得。Ver.0.6本体のマージコミット`484150efc303f82e1255a5cc4feaf31cfee9c4b9`。初心者の部屋は全6段階を実装・Pagesデプロイ済み、第4〜6段階の実機受入は未実施。
