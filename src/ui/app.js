@@ -3,7 +3,8 @@ import { createRules } from '../engine/rules.js';
 import { makeConfig, MODES, DEFAULT_MODE, ENGINE_VERSION } from '../engine/config.js';
 import { Game } from '../engine/game.js';
 import { decide, applyAction, PERSONALITIES } from '../engine/ai.js';
-import { decideCharacter, rosterForLevel } from '../engine/character-ai.js';
+import { decideCharacter, rosterForLevel, CHARACTER_ROSTER } from '../engine/character-ai.js';
+import { OPPONENTS, PICK_COUNT, LEVEL_LABELS, opponentById, toggleOpponent, canStartWith, drawOpponents, assignSeats } from './opponents.js';
 import { matchInfo } from '../engine/ai-levels.js';
 import { createRng } from '../engine/rng.js';
 import { trigExact } from '../engine/exact.js';
@@ -56,11 +57,11 @@ const POS = ['自分', '下家', '対面', '上家'];
 let PLAYERS = [
   { name: 'あなた', kind: 'human' },
   ...rosterForLevel('intermediate').map((c) => ({ ...c, kind: 'ai' })),
-];
+]; // 試合の開始時に、選んだ3人と座席で作り直す（startMatch）
 
 
-// AI 難易度（Ver.0.4-B）。性格（速攻型・役重視型・門前重視型）とは別の軸で、AI 3人すべてに同じ難易度を使う。
-// 判断は src/engine/ai.js（中級）・src/engine/ai-levels.js（初級・上級）。AI の速さ（待ち時間）とは別の設定。
+// AI 難易度（Ver.0.4-B〜0.6-A）。Ver.0.6 からタイトルでは選ばず、対戦相手を9人から自由に選ぶ（src/ui/opponents.js）。
+// 難易度は、従来の再現 URL（?ai=）と、その既定の3人（rosterForLevel）のためだけに残す。
 const AI_LEVELS = [
   { id: 'beginner', label: '初級', desc: 'かなた・みつき・あおと。3人それぞれの打ち方' },
   { id: 'intermediate', label: '中級', desc: 'おうすけ・なつき・ゆき。点差で打ち方が変わります' },
@@ -68,7 +69,6 @@ const AI_LEVELS = [
 ];
 const parseLen = (v) => (v === 4 || v === 8 || v === '4' || v === '8' ? Number(v) : null);
 const parseAi = (v) => (AI_LEVELS.some((a) => a.id === v) ? v : null);
-const aiLabel = (id) => (AI_LEVELS.find((x) => x.id === id) || AI_LEVELS[1]).label;
 
 const S = {
   // 局の通し番号（連荘を含む、1から）。山は seed と この番号だけで決まる（従来の ?round=n と同じ）。
@@ -119,10 +119,18 @@ S.autoPass = { count: 0, failed: 0, noticePending: false, noticeKind: null, noti
 S.input = { accepted: 0, ignored: 0, failed: 0 };
 // AI の判断回数（難易度ごと）。表示・判断には使わない（E2E で採用された難易度の確認に使う）
 S.aiDecisions = {};
+S.aiDecisionsBySeat = [{}, {}, {}, {}];
 
 const app = document.getElementById('app');
 const T = (idx) => rules.types[idx];
 const nameOf = (s) => (s === HUMAN ? 'あなた' : `${PLAYERS[s].name}`);
+// キャラクターID → AI の名簿の項目（名前・年齢・性格・打ち方の名前）。対局の PLAYERS はこの項目に kind: 'ai' を付けたもの
+const ROSTER_BY_ID = Object.fromEntries(Object.values(CHARACTER_ROSTER).flat().map((c) => [c.id, c]));
+const LEVEL_BY_ID = Object.fromEntries(OPPONENTS.map((o) => [o.id, o.level]));
+const playersFor = (seatIds) => [{ name: 'あなた', kind: 'human' }, ...seatIds.map((id) => ({ ...ROSTER_BY_ID[id], kind: 'ai' }))];
+// 対戦相手の自由選択（Ver.0.6）。selected：選んだキャラクターID（最大3人、選んだ順）。detail：詳細を開いているID。
+// 画面の記憶の中だけで持ち、保存しない（ページの再読み込みで0人に戻る）。タイトルへ戻っても、モード・局数を変えても残す。
+S.opp = { selected: [], detail: null, notice: null };
 
 function startRound() {
   clearTimeout(S.timer);
@@ -225,7 +233,9 @@ function step(changed = false) {
     // AI 難易度は試合の開始時に確定した値（試合の途中で変えない）。試合の公開情報（持ち点・親番）は上級だけが使う。
     const action = decideCharacter(g, p.seat, PLAYERS[p.seat].id, S.aiRng,
       matchInfo(S.match), PLAYERS.map((x) => x.id || 'human'));
-    S.aiDecisions[S.matchSettings.ai] = (S.aiDecisions[S.matchSettings.ai] || 0) + 1; // 難易度ごとの判断回数（確認用）
+    const cid = PLAYERS[p.seat].id; // 判断したキャラクター（表示している名前と同じ席の項目）。難易度別・キャラ別に数える（確認用）
+    S.aiDecisions[LEVEL_BY_ID[cid]] = (S.aiDecisions[LEVEL_BY_ID[cid]] || 0) + 1;
+    S.aiDecisionsBySeat[p.seat][cid] = (S.aiDecisionsBySeat[p.seat][cid] || 0) + 1;
     applyAction(g, p.seat, action);
     // 描画は step() が行う（自分の宣言を自動で見送る場合は、宣言ボタンを一度も描画しない）
     step(true);
@@ -692,6 +702,7 @@ function headerHTML() {
 
 function render() {
   if (S.screen === 'title') { app.innerHTML = titleHTML(); return; }
+  if (S.screen === 'select') { app.innerHTML = selectHTML(); return; }
   if (S.screen === 'replay-error') { app.innerHTML = replayErrorHTML(); return; }
   if (!S.game) return;
   // 並び替え中に再描画が必要になったら、並び替えを中止してから描画する（DOM が作り直されるため）
@@ -830,11 +841,12 @@ function finalHTML() {
     <ul class="final-info">
       <li>実施した局数：<b>${m.played}局</b>（${m.length === 4 ? '4局戦・東1〜東4局' : '8局戦・東1〜南4局'}）</li>
       <li>連荘回数：<b>${m.renchanTotal}回</b></li>
-      <li>数学モード：${modeLabel(rules)} ／ AI難易度：${aiLabel(S.matchSettings ? S.matchSettings.ai : S.ai)}</li>
+      <li>数学モード：${modeLabel(rules)}</li>
+      <li class="final-opps">対戦相手：${opponentsText()}</li>
       ${m.endReason === 'round-limit' ? `<li class="note round-limit-note">${ROUND_LIMIT_NOTE}</li>` : ''}
       <li class="note">開始時の持ち点は各${START_POINTS}点（合計${START_POINTS * 4}点）。同点は同順位。点数配分は試作段階の暫定値です。</li>
     </ul>
-    <div class="modal-actions"><button data-action="again" class="primary">もう一度遊ぶ</button><button data-action="to-title">タイトルへ戻る</button></div>
+    <div class="modal-actions final-actions"><button data-action="again" class="primary">同じ3人と再戦</button><button data-action="change-opponents">相手を変更</button><button data-action="to-title">タイトルへ戻る</button></div>
   </div>`;
 }
 
@@ -868,14 +880,70 @@ function titleHTML() {
         ${radio('length', '4', '4局戦', S.length === 4, '<small>東1〜東4局</small>')}
         ${radio('length', '8', '8局戦', S.length === 8, '<small>東1〜南4局</small>')}
       </fieldset>
-      <fieldset class="title-set"><legend>AI難易度</legend>
-        ${AI_LEVELS.map((a) => radio('ai', a.id, a.label, S.ai === a.id, `<small>${a.desc}</small>`)).join('')}
-        <p class="note">AI 3人すべてに適用します。AIの速さ（設定）とは別です。</p>
-      </fieldset>
     </div>
-    <button data-action="start-match" class="primary start-btn">対局開始</button>
+    <button data-action="choose-opponents" class="primary start-btn">対戦相手を選ぶ</button>
     <p class="note title-ver">持ち点 各${START_POINTS}点 ／ 画面 v${APP_VERSION}・エンジン v${ENGINE_VERSION}</p>
   </main>`;
+}
+
+// ---------- 対戦相手の選択（Ver.0.6） ----------
+// 一覧（初級→中級→上級の順に連続）。カード本体のタップで詳細、右上のチェック欄のタップで選択・解除（詳細は開かない）。
+// スマートフォンは2列・PC は3列（styles.css）。3人そろったときだけ「対局開始」を押せる。
+function selectHTML() {
+  const sel = S.opp.selected;
+  const full = sel.length >= PICK_COUNT;
+  const cards = OPPONENTS.map((o) => {
+    const on = sel.includes(o.id);
+    const blocked = !on && full;
+    return `<div class="opp-card${on ? ' selected' : ''}" data-action="opp-detail" data-id="${o.id}" role="button" tabindex="0" aria-label="${o.name}の詳細">
+      <button class="opp-check" data-action="opp-toggle" data-id="${o.id}" aria-pressed="${on}" aria-label="${o.name}を${on ? '外す' : '選ぶ'}"${blocked ? ' aria-disabled="true"' : ''}><span class="opp-box" aria-hidden="true">${on ? '✓' : ''}</span></button>
+      <div class="opp-name">${o.name}</div>
+      <div class="opp-meta"><span class="opp-level lv-${o.level}">${o.levelLabel}</span></div>
+      <div class="opp-trait">${o.trait}</div>
+    </div>`;
+  }).join('');
+  const chips = sel.map((id) => { const o = opponentById(id); return `<span class="opp-chip">${o.name}<small>${o.levelLabel}</small></span>`; }).join('');
+  const empty = Array.from({ length: PICK_COUNT - sel.length }, () => '<span class="opp-chip empty">未選択</span>').join('');
+  const ready = canStartWith(sel);
+  return `<main class="select-screen">
+    <h1 class="select-title">対戦相手を選ぶ</h1>
+    <p class="select-lead">9人から3人を選んでください。カードをタップすると詳しい紹介を見られます。</p>
+    <div class="opp-status" aria-live="polite"><span class="opp-count">選択 <b>${sel.length}</b>/${PICK_COUNT}人</span>
+      <span class="opp-chips">${chips}${empty}</span></div>
+    ${S.opp.notice ? `<p class="note opp-notice">${S.opp.notice}</p>` : ''}
+    <div class="opp-grid">${cards}</div>
+    <div class="select-actions">
+      <button data-action="opp-random" class="opp-random">おまかせ</button>
+      <button data-action="start-match" class="primary start-btn"${ready ? '' : ' disabled'}>対局開始</button>
+      <button data-action="to-title" class="opp-back">タイトルへ戻る</button>
+    </div>
+    <p class="note select-setting">${MODES[S.nextMode] ? MODES[S.nextMode].label : ''} ／ ${S.length}局戦</p>
+    ${S.opp.detail ? oppDetailHTML(S.opp.detail) : ''}
+  </main>`;
+}
+
+// キャラクターの詳細：スマートフォンは下から開くパネル、PC は中央のポップアップ（styles.css）。×・パネルの外で閉じる
+function oppDetailHTML(id) {
+  const o = opponentById(id);
+  if (!o) return '';
+  const on = S.opp.selected.includes(id);
+  const blocked = !on && S.opp.selected.length >= PICK_COUNT;
+  return `<div class="opp-overlay" data-action="opp-backdrop"><div class="opp-sheet" role="dialog" aria-modal="true" aria-label="${o.name}の紹介">
+    <button class="opp-close" data-action="opp-detail-close" aria-label="閉じる">×</button>
+    <h2 class="opp-d-name">${o.name}</h2>
+    <dl class="opp-d-list">
+      <dt>年齢</dt><dd>${o.age}歳</dd>
+      <dt>難易度</dt><dd><span class="opp-level lv-${o.level}">${o.levelLabel}</span></dd>
+      <dt>性格</dt><dd>${o.personality}</dd>
+      <dt>打ち筋</dt><dd>${o.style}</dd>
+    </dl>
+    <div class="opp-d-actions"><button data-action="opp-toggle" data-id="${o.id}" class="${on ? '' : 'primary'}"${blocked ? ' disabled' : ''}>${on ? '選択を外す' : blocked ? '3人選択済み' : 'この相手を選ぶ'}</button></div>
+  </div></div>`;
+}
+
+// 対戦相手の名前（席の順）：最終結果・再現情報で使う
+function opponentsText() {
+  return [1, 2, 3].map((s) => `${POS[s]} ${PLAYERS[s].name}（${LEVEL_LABELS[LEVEL_BY_ID[PLAYERS[s].id]]}）`).join('・');
 }
 
 // 不具合報告用の再現情報。山は seed と局の通し番号（round）で決まり、親の席・親番・連荘回数・局数も URL で指定する。
@@ -884,8 +952,8 @@ function reportInfoHTML() {
   const m = S.match;
   const label = S.scored && S.lastRound ? S.lastRound : { label: handLabel(m), renchan: m.renchan };
   const hand = S.scored && S.lastRound ? m.log[m.log.length - 1].hand : m.hand;
-  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ ${label.label}・連荘${label.renchan}（通し第<b>${S.round}</b>局・親 ${POS[S.dealer]}）／ ${m.length}局戦 ／ ${modeLabel(rules)} ／ AI ${aiLabel(S.matchSettings.ai)} ／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
-    この局から再現：URL の末尾に <code>${replayQuery({ seed: S.seedBase, round: S.round, dealer: S.dealer, hand, renchan: label.renchan, len: m.length, mode: LEGACY ? null : rules.config.mode, ai: S.matchSettings.ai }).replace(/&/g, '&amp;')}</code><br>
+  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ ${label.label}・連荘${label.renchan}（通し第<b>${S.round}</b>局・親 ${POS[S.dealer]}）／ ${m.length}局戦 ／ ${modeLabel(rules)} ／ 対戦相手 ${opponentsText()}（ID ${S.matchSettings.seats.join(',')}）／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
+    この局から再現：URL の末尾に <code>${replayQuery({ seed: S.seedBase, round: S.round, dealer: S.dealer, hand, renchan: label.renchan, len: m.length, mode: LEGACY ? null : rules.config.mode, chars: S.matchSettings.seats }).replace(/&/g, '&amp;')}</code><br>
     <span class="report-caveat">このURLでは山・配牌・親・局状態を再現します。持ち点や過去の対局履歴は復元されず、全員100点から開始します。</span></p>`;
 }
 
@@ -1249,37 +1317,67 @@ app.addEventListener('click', (ev) => {
       startRound();
       break;
     case 'reset':
-      // 設定画面の「新しい対局」：予約したモード（S.nextMode）と、タイトルで選んだ局数・AI を使う
-      startMatch({ settings: { mode: S.nextMode, length: S.length, ai: S.ai } });
+      // 設定画面の「新しい対局」：予約したモード（S.nextMode）・タイトルで選んだ局数と、この試合の3人（座席は選び直す）
+      startMatch({ settings: { mode: S.nextMode, length: S.length, chars: S.matchSettings.chars } });
       break;
     case 'again':
-      // もう一度遊ぶ：終了した試合と同じ設定（モード・局数・AI 難易度）で、新しい山・全員100点から。
-      // 予約中の次回用モード（S.nextMode）やタイトルの選択（S.length・S.ai）は使わない。
+      // 同じ3人と再戦：終了した試合と同じ設定（モード・局数・3人）で、新しい山・全員100点から。座席は選び直す。
+      // 予約中の次回用モード（S.nextMode）やタイトルの選択（S.length）は使わない。
       S.seedBase = Math.floor(Math.random() * 1e9);
-      startMatch({ settings: { ...S.matchSettings } });
+      startMatch({ settings: { mode: S.matchSettings.mode, length: S.matchSettings.length, chars: S.matchSettings.chars } });
+      break;
+    case 'change-opponents':
+      // 相手を変更：直前の3人を選んだ状態で選択画面へ（1人だけ入れ替えることもできる）
+      S.opp.selected = S.matchSettings.chars.slice();
+      leaveGame('select');
+      break;
+    case 'choose-opponents':
+      // タイトルの「対戦相手を選ぶ」：選択画面へ（それまでの選択は残す）
+      S.opp.detail = null;
+      S.opp.notice = null;
+      S.screen = 'select';
+      render();
+      break;
+    case 'opp-toggle': {
+      const r = toggleOpponent(S.opp.selected, el.dataset.id);
+      S.opp.selected = r.selected;
+      S.opp.notice = r.reason === 'full' ? `選べるのは${PICK_COUNT}人までです。入れ替えるときは、先に1人の選択を外してください。` : null;
+      render();
+      break;
+    }
+    case 'opp-detail':
+      S.opp.detail = el.dataset.id;
+      render();
+      break;
+    case 'opp-backdrop':
+      if (ev.target !== el) break; // パネルの中のタップでは閉じない
+    // fallthrough
+    case 'opp-detail-close':
+      S.opp.detail = null;
+      render();
+      break;
+    case 'opp-random':
+      // おまかせ：9人から異なる3人を一様に抽選し、それまでの選択を置き換える（対局は始めない）
+      S.opp.selected = drawOpponents(Math.random);
+      S.opp.notice = null;
+      render();
       break;
     case 'ask-title': S.confirmTitle = true; render(); break;
     case 'cancel-title': S.confirmTitle = false; render(); break;
     case 'to-title':
       // 再現 URL のエラー画面から戻るときは、再読み込みで同じエラーに戻らないよう URL の検索部分を外す
       if (S.screen === 'replay-error') { try { history.replaceState(null, '', location.pathname); } catch { /* 無視 */ } }
-      // 対局を終了してタイトルへ（AI の進行・ドラッグ・ヒントを止める）
-      clearTimeout(S.timer);
-      S.timer = null;
-      if (drag && drag.isDragging()) drag.cancel('render');
-      closeHint();
-      fxClear();
-      sound.silence();
-      S.confirmTitle = false;
-      S.modal = null;
-      S.game = null;
-      S.screen = 'title';
-      render();
+      S.opp.detail = null;
+      S.opp.notice = null;
+      leaveGame('title'); // 選んだ3人は残す
       break;
     case 'start-match':
-      // タイトル画面の「対局開始」：タイトルで選んだ内容で確定する
+      // 選択画面の「対局開始」：3人そろったときだけ。タイトルで選んだモード・局数で確定し、座席をランダムに決める
+      if (S.screen !== 'select' || !canStartWith(S.opp.selected)) break;
       S.seedBase = Math.floor(Math.random() * 1e9);
-      startMatch({ settings: { mode: S.nextMode, length: S.length, ai: S.ai } });
+      S.opp.detail = null;
+      S.opp.notice = null;
+      startMatch({ settings: { mode: S.nextMode, length: S.length, chars: S.opp.selected } });
       break;
     default:
   }
@@ -1315,10 +1413,6 @@ app.addEventListener('change', (ev) => {
   if (ev.target.dataset.action === 'title-length') {
     const l = parseLen(ev.target.value);
     if (l) { S.length = l; store.set('mj-length', String(l)); }
-  }
-  if (ev.target.dataset.action === 'title-ai') {
-    const a = parseAi(ev.target.value);
-    if (a) { S.ai = a; store.set('mj-ai', a); }
   }
   if (ev.target.dataset.action === 'mode') {
     // 次の新しい対局のモードを選ぶだけ（いまの局は変えない）
@@ -1366,14 +1460,35 @@ function goRound(n, dealer = (n - 1) % 4) {
 }
 if (IS_LOCAL) window.__mathjong = { S, get rules() { return rules; }, decide, startRound, startMatch, goRound, render, step, drag, fx: { fire: fxFire, clear: fxClear, scan: fxScan, tick: fxTick }, sound, soundScan, voice };
 
+// 対局を終了して別の画面へ（AI の進行・ドラッグ・ヒント・演出・音を止める）
+function leaveGame(screen) {
+  clearTimeout(S.timer);
+  S.timer = null;
+  if (drag && drag.isDragging()) drag.cancel('render');
+  closeHint();
+  fxClear();
+  sound.silence();
+  S.confirmTitle = false;
+  S.modal = null;
+  S.game = null;
+  S.screen = screen;
+  render();
+}
+
 // 試合を始める。fromUrl：?seed= の再現・テスト用 URL（親番・連荘・親の席を URL から）
-// settings：{ mode, length, ai } 試合の設定（採用元は呼び出し側が決める：タイトル／もう一度遊ぶ／設定画面）
-// fromUrl：?seed= の再現・テスト用 URL（設定は URL・保存値から、親番・連荘・親の席を URL から）
+// settings：{ mode, length, chars, seats } 試合の設定（採用元は呼び出し側が決める：選択画面／同じ3人と再戦／設定画面／再現 URL）
+//   chars：選んだ3人のID。seats：席1〜3（下家・対面・上家）の順のID。seats がなければ chars を一様にランダムに並べる（6通り）。
+//   ai（従来の再現 URL・テスト用）：その難易度の既定の3人を、従来どおりの席の順で使う。
+// 座席は試合の開始時に確定し、試合の途中では変えない。人間は席0。
 function startMatch({ fromUrl = false, settings = null } = {}) {
   const cfg = settings || { mode: S.nextMode, length: S.length, ai: S.ai };
-  S.matchSettings = { mode: cfg.mode, length: cfg.length, ai: cfg.ai }; // この試合の設定（「もう一度遊ぶ」「最終結果」で使う）
-  PLAYERS = [{ name: 'あなた', kind: 'human' },
-    ...rosterForLevel(cfg.ai).map((c) => ({ ...c, kind: 'ai' }))]; // 試合開始時にキャラクター3人を確定
+  let chars = cfg.chars, seats = cfg.seats;
+  if (!chars) { chars = rosterForLevel(cfg.ai || 'intermediate').map((c) => c.id); seats = chars.slice(); }
+  if (!seats) seats = assignSeats(chars, Math.random);
+  // この試合の設定（「同じ3人と再戦」「相手を変更」「最終結果」「再現情報」で使う）
+  S.matchSettings = { mode: cfg.mode, length: cfg.length, chars: chars.slice(), seats: seats.slice() };
+  PLAYERS = playersFor(seats); // 試合開始時にキャラクター3人と座席を確定
+  S.aiDecisionsBySeat = [{}, {}, {}, {}];
   S.mode = cfg.mode;
   rules = rulesForMode(S.mode);
   S.screen = 'game';
@@ -1395,5 +1510,5 @@ function startMatch({ fromUrl = false, settings = null } = {}) {
   startRound();
 }
 
-if (REPLAY.kind !== 'none' && REPLAY.ok) startMatch({ fromUrl: true, settings: { mode: S.nextMode, length: S.length, ai: S.ai } });
+if (REPLAY.kind !== 'none' && REPLAY.ok) startMatch({ fromUrl: true, settings: RV.chars ? { mode: S.nextMode, length: S.length, chars: RV.chars, seats: RV.chars } : { mode: S.nextMode, length: S.length, ai: S.ai } });
 else render(); // タイトル画面、または再現 URL のエラー画面

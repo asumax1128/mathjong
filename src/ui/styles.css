@@ -267,6 +267,57 @@ button.danger { background: #b42318; color: #fff; border-color: #b42318; }
 .title-set .soon { border: 1px solid var(--felt-line); border-radius: 4px; padding: 0 4px; }
 .title-set .note { margin: 2px 0 0; font-size: 12px; color: var(--ink-dim); }
 .start-btn { min-height: 52px; font-size: 18px; }
+
+/* ---- 対戦相手の選択（Ver.0.6）：スマートフォンは2列、PC（細かいポインター・幅 720px 以上）は3列 ---- */
+.select-screen { max-width: 760px; margin: 0 auto; padding: 14px 16px calc(28px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; }
+.select-title { margin: 4px 0 0; font-size: 21px; color: var(--gold); text-align: center; }
+.select-lead { margin: 0; font-size: 13px; color: var(--ink-dim); text-align: center; }
+.opp-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 10px; border: 1px solid var(--felt-line); border-radius: 10px; background: var(--panel); }
+.opp-count { font-size: 14px; white-space: nowrap; }
+.opp-count b { color: var(--accent); font-size: 18px; }
+.opp-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.opp-chip { display: inline-flex; align-items: baseline; gap: 4px; padding: 3px 9px; border-radius: 999px; background: var(--gold); color: #2a2208; font-weight: 700; font-size: 14px; }
+.opp-chip small { font-weight: 400; font-size: 11px; }
+.opp-chip.empty { background: transparent; color: var(--ink-dim); border: 1px dashed var(--felt-line); font-weight: 400; }
+.opp-notice { margin: 0; font-size: 13px; color: #ffd27a; }
+.opp-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (min-width: 720px) and (hover: hover) and (pointer: fine) { .opp-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.opp-card { position: relative; min-width: 0; padding: 10px 52px 10px 12px; border: 2px solid var(--felt-line); border-radius: 12px; background: var(--felt-2);
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.opp-card.selected { border-color: var(--gold); background: #2a503d; box-shadow: 0 0 0 2px rgba(214, 178, 94, 0.35); }
+.opp-name { font-size: 18px; font-weight: 700; overflow-wrap: anywhere; }
+.opp-meta { margin-top: 2px; }
+.opp-level { display: inline-block; padding: 0 7px; border-radius: 6px; font-size: 12px; font-weight: 700; line-height: 20px; }
+.opp-level.lv-beginner { background: #3f7f5a; color: #fff; }
+.opp-level.lv-intermediate { background: #2f5f9a; color: #fff; }
+.opp-level.lv-advanced { background: #9a3a2f; color: #fff; }
+.opp-trait { margin-top: 4px; font-size: 13px; color: var(--ink-dim); overflow-wrap: anywhere; }
+/* チェック欄：独立した 44px 以上のボタン（タップしても詳細は開かない） */
+.opp-check { position: absolute; top: 4px; right: 4px; width: 44px; min-height: 44px; padding: 0; display: flex; align-items: center; justify-content: center;
+  background: transparent; border: none; }
+.opp-box { width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--ink-dim); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 18px; color: #2a2208; }
+.opp-check[aria-pressed="true"] .opp-box { background: var(--gold); border-color: var(--gold); }
+.opp-check[aria-disabled="true"] .opp-box { opacity: 0.35; }
+.select-actions { display: flex; flex-direction: column; gap: 8px; }
+.select-actions .opp-random { min-height: 48px; font-weight: 700; }
+.select-setting { margin: 0; text-align: center; font-size: 12px; color: var(--ink-dim); }
+/* 詳細：スマートフォンは下から開くパネル、PC は中央のポップアップ */
+.opp-overlay { position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.55); display: flex; align-items: flex-end; justify-content: center; }
+.opp-sheet { position: relative; width: 100%; max-height: 85dvh; overflow: auto; overscroll-behavior: contain; background: #f8f5ec; color: #1c2a23;
+  border-radius: 16px 16px 0 0; padding: 18px 18px calc(18px + env(safe-area-inset-bottom)); box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.4); }
+@media (min-width: 720px) and (hover: hover) and (pointer: fine) {
+  .opp-overlay { align-items: center; padding: 16px; }
+  .opp-sheet { width: min(480px, 100%); border-radius: 14px; padding-bottom: 18px; }
+}
+.opp-close { position: absolute; top: 8px; right: 8px; width: 44px; padding: 0; font-size: 22px; background: transparent; border: none; color: #1c2a23; }
+.opp-d-name { margin: 0 44px 8px 0; font-size: 22px; }
+.opp-d-list { display: grid; grid-template-columns: 4.5em minmax(0, 1fr); gap: 6px 10px; margin: 0; font-size: 15px; }
+.opp-d-list dt { font-weight: 700; color: #5a6b62; }
+.opp-d-list dd { margin: 0; overflow-wrap: anywhere; }
+.opp-d-actions { margin-top: 14px; display: flex; }
+.opp-d-actions button { flex: 1; }
+.opp-d-actions button:not(.primary) { background: #e6e0cf; color: #1c2a23; border-color: #cfc6ad; }
+.final-actions { flex-wrap: wrap; }
 .title-ver { text-align: center; font-size: 11px; color: var(--ink-dim); margin: 0; }
 
 /* ---- 試合終了 ---- */
