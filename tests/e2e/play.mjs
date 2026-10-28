@@ -2775,7 +2775,8 @@ async function v03bHints(browser) {
 async function chooseAndStart(page, ids = ['ousuke', 'natsuki', 'yuki']) {
   await page.locator('button[data-action="choose-opponents"]').click();
   await page.waitForSelector('.select-screen');
-  const cur = await page.evaluate(() => window.__mathjong.S.opp.selected.slice());
+  // 公開サイト相当（テスト用のフックなし）でも動くよう、選択は画面（選択済みのカード）から読む
+  const cur = await page.locator('.opp-card.selected').evaluateAll((es) => es.map((e) => e.dataset.id));
   for (const id of cur) if (!ids.includes(id)) await page.locator(`.opp-check[data-id="${id}"]`).click();
   for (const id of ids) if (!cur.includes(id)) await page.locator(`.opp-check[data-id="${id}"]`).click();
   await page.locator('.select-screen button[data-action="start-match"]').click();
