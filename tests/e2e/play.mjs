@@ -385,8 +385,7 @@ async function publicMode(browser) {
   // 不正な値は無視される（エラーにならない）。seed が不正なら再現 URL ではないのでタイトル画面から（Ver.0.4-A）
   await page.goto(`${PUBLIC}?seed=abc&round=-1&speed=%3Cscript%3E&len=9&hand=-2&dealer=7`);
   await page.waitForSelector('.title-screen');
-  await page.locator('button[data-action="start-match"]').tap();
-  await page.waitForSelector('.hand .tile');
+  await chooseAndStart(page);
   assert.match(await page.locator('.top .info').innerText(), /東1局/);
   // seed が正しくても、ほかの値が不正なら別の局面として黙って始めない（エラー画面）。Ver.0.4-A の最終修正
   await page.goto(`${PUBLIC}?seed=77&round=-1&len=9&hand=-2&dealer=7&renchan=abc`);
@@ -2772,6 +2771,16 @@ async function v03bHints(browser) {
 }
 
 // ---- Ver.0.4-A：タイトル画面・4局戦／8局戦・親の連荘・親子の精算・試合終了 ----
+// Ver.0.6：タイトル →「対戦相手を選ぶ」→ 3人のチェック欄 →「対局開始」（選択画面での既存の選択は ids に合わせて入れ替える）
+async function chooseAndStart(page, ids = ['ousuke', 'natsuki', 'yuki']) {
+  await page.locator('button[data-action="choose-opponents"]').click();
+  await page.waitForSelector('.select-screen');
+  const cur = await page.evaluate(() => window.__mathjong.S.opp.selected.slice());
+  for (const id of cur) if (!ids.includes(id)) await page.locator(`.opp-check[data-id="${id}"]`).click();
+  for (const id of ids) if (!cur.includes(id)) await page.locator(`.opp-check[data-id="${id}"]`).click();
+  await page.locator('.select-screen button[data-action="start-match"]').click();
+  await page.waitForSelector('.hand .tile');
+}
 const matchState = (page) => page.evaluate(() => {
   const { S } = window.__mathjong;
   const m = S.match;
@@ -2779,6 +2788,7 @@ const matchState = (page) => page.evaluate(() => {
     screen: S.screen, modal: S.modal, label: m && document.querySelector('.top .hand-label') ? document.querySelector('.top .hand-label').textContent : null,
     hand: m && m.hand, renchan: m && m.renchan, played: m && m.played, over: m && m.over, length: m && m.length, scores: m && m.scores.slice(),
     sum: m ? m.scores.reduce((a, b) => a + b, 0) : null, dealer: S.dealer, round: S.round, ai: S.ai, mode: window.__mathjong.rules.config.mode,
+    chars: S.matchSettings ? S.matchSettings.chars.slice() : null, seats: S.matchSettings ? S.matchSettings.seats.slice() : null,
     info: (document.querySelector('.top .info') || {}).textContent || '',
   };
 });
@@ -2797,7 +2807,8 @@ const forceDraw = (page) => page.evaluate(() => {
 const TSUMO_HAND = ['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'];
 
 async function v04Match(browser) {
-  // (1) タイトル画面：数学モード・局数・AI難易度を選んで開始。選択は保存され、再読み込み後も残る
+  // (1) タイトル画面：数学モード・局数を選び、対戦相手を選んで開始。モード・局数は保存され、再読み込み後も残る
+  //     （Ver.0.6：AI 難易度の3択はタイトルから撤去。対戦相手の選択は保存しない）
   {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
@@ -2808,18 +2819,17 @@ async function v04Match(browser) {
     assert.equal(await page.locator('.title-logo img').getAttribute('alt'), '数雀（MATHJONG）');
     assert.equal(await page.locator('input[data-action="title-mode"][value="math2"]').isChecked(), true, '既定は数学Ⅱ');
     assert.equal(await page.locator('input[data-action="title-length"][value="4"]').isChecked(), true, '既定は4局戦');
-    assert.equal(await page.locator('input[data-action="title-ai"][value="intermediate"]').isChecked(), true, '既定は中級');
-    // Ver.0.4-B：初級・上級を有効化（「準備中」の表示はなく、各難易度の説明を表示）
-    assert.equal(await page.locator('.title-set .soon').count(), 0, '準備中の表示はない');
+    assert.equal(await page.locator('input[data-action="title-ai"]').count(), 0, 'AI 難易度の3択はない');
+    assert.equal(await page.locator('text=AI難易度').count(), 0);
+    assert.equal(await page.locator('button[data-action="start-match"]').count(), 0, 'タイトルに対局開始はない');
+    assert.equal(await page.locator('button[data-action="choose-opponents"]').innerText(), '対戦相手を選ぶ');
     assert.equal(await page.locator('text=準備中').count(), 0);
-    for (const lv of ['beginner', 'intermediate', 'advanced']) assert.ok((await page.locator(`label.setting.radio:has(input[value="${lv}"]) small`).innerText()).length > 5, `${lv} の説明`);
     await page.locator('label.setting.radio', { hasText: '数学Ⅰ' }).tap();
     await page.locator('label.setting.radio', { hasText: '8局戦' }).tap();
-    await page.locator('label.setting.radio', { hasText: '上級' }).tap();
-    await page.locator('button[data-action="start-match"]').tap();
-    await page.waitForSelector('.hand .tile');
+    await chooseAndStart(page, ['fukuyama', 'kaoru', 'asuma']);
     let st = await matchState(page);
-    assert.deepEqual([st.screen, st.mode, st.length, st.ai, st.label, st.scores], ['game', 'math1', 8, 'advanced', '東1局', [100, 100, 100, 100]]);
+    assert.deepEqual([st.screen, st.mode, st.length, st.label, st.scores], ['game', 'math1', 8, '東1局', [100, 100, 100, 100]]);
+    assert.deepEqual([st.chars, st.seats.slice().sort()], [['fukuyama', 'kaoru', 'asuma'], ['asuma', 'fukuyama', 'kaoru']]);
     // 対局中に設定からタイトルへ（確認あり）
     await page.locator('button[data-action="settings"]').tap();
     await page.locator('button[data-action="ask-title"]').tap();
@@ -2837,7 +2847,8 @@ async function v04Match(browser) {
     await page.waitForSelector('.title-screen');
     assert.equal(await page.locator('input[data-action="title-mode"][value="math1"]').isChecked(), true, '保存');
     assert.equal(await page.locator('input[data-action="title-length"][value="8"]').isChecked(), true);
-    assert.equal(await page.locator('input[data-action="title-ai"][value="advanced"]').isChecked(), true);
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    assert.deepEqual(await page.evaluate(() => window.__mathjong.S.opp.selected), [], '対戦相手の選択は保存しない（再読み込みで0人）');
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -2919,7 +2930,8 @@ async function v04Match(browser) {
     assert.match(fin, /実施した局数：2局/);
     assert.match(fin, /連荘回数：1回/);
     assert.match(fin, /数学Ⅰ/);
-    assert.match(fin, /AI難易度：中級/);
+    assert.match(fin, /対戦相手：下家 おうすけ（中級）・対面 なつき（中級）・上家 ゆき（中級）/);
+    assert.equal(await page.locator('text=AI難易度').count(), 0);
     const ranksShown = await page.locator('.final-table td.rank').allInnerTexts();
     assert.deepEqual(ranksShown, ['1位', '2位', '2位', '2位'], '同点は同順位');
     assert.match(fin, /\+12/);
@@ -2968,9 +2980,15 @@ async function v04Match(browser) {
     await page.waitForSelector('.title-screen');
     const over = () => page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
     assert.ok(await over() <= 0, `${w}px タイトル`);
-    const sb = await page.locator('button[data-action="start-match"]').boundingBox();
+    const sb = await page.locator('button[data-action="choose-opponents"]').boundingBox();
     assert.ok(sb.x >= 0 && sb.x + sb.width <= w && sb.height >= 44);
-    await page.locator('button[data-action="start-match"]').tap();
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    await page.waitForSelector('.select-screen');
+    assert.ok(await over() <= 0, `${w}px 対戦相手の選択`);
+    await page.locator('button[data-action="opp-random"]').tap();
+    const stb = await page.locator('.select-screen button[data-action="start-match"]').boundingBox();
+    assert.ok(stb.x >= 0 && stb.x + stb.width <= w && stb.height >= 44);
+    await page.locator('.select-screen button[data-action="start-match"]').tap();
     await page.waitForSelector('.hand .tile');
     assert.ok(await over() <= 0, `${w}px 対局`);
     await forceDraw(page);
@@ -2984,7 +3002,7 @@ async function v04Match(browser) {
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  console.log('✓ Ver.0.4-A：タイトル（モード・局数・AI難易度の保存）・ヒントボタンの移動・親の連荘／親交代・精算（合計400）・最終の親の延長・試合終了（同点同順位）・もう一度／タイトルへ・再現URL・320〜430px');
+  console.log('✓ Ver.0.4-A：タイトル（モード・局数の保存、Ver.0.6 で対戦相手の選択へ）・ヒントボタンの移動・親の連荘／親交代・精算（合計400）・最終の親の延長・試合終了（同点同順位）・もう一度／タイトルへ・再現URL・320〜430px');
 }
 
 // ---- Ver.0.4-A 監査対応（PR #9）：もう一度遊ぶ・長い連荘の再現 URL・再現情報の注意書き ----
@@ -2997,8 +3015,8 @@ const reproQuery = async (page) => {
 };
 
 async function v04Fixes(browser) {
-  // (1) P2-1：もう一度遊ぶは、終了した試合と同じ設定（数学モード・局数・AI難易度）。予約中の次回用モードは使わない。逆方向も。
-  for (const [startMode, pending, length, ai, otherLength] of [['math1', 'math2', 4, 'advanced', 8], ['math2', 'math1', 8, 'beginner', 4]]) {
+  // (1) P2-1：もう一度遊ぶ（Ver.0.6：同じ3人と再戦）は、終了した試合と同じ設定（数学モード・局数・3人）。予約中の次回用モードは使わない。逆方向も。
+  for (const [startMode, pending, length, chars, otherLength] of [['math1', 'math2', 4, ['fukuyama', 'kaoru', 'asuma'], 8], ['math2', 'math1', 8, ['kanata', 'mitsuki', 'aoto'], 4]]) {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
@@ -3007,9 +3025,7 @@ async function v04Fixes(browser) {
     const lab = { math1: '数学Ⅰ', math2: '数学Ⅱ' };
     await page.locator('label.setting.radio', { hasText: lab[startMode] }).tap();
     await page.locator('label.setting.radio', { hasText: `${length}局戦` }).tap();
-    await page.locator(`input[data-action="title-ai"][value="${ai}"]`).evaluate((e) => e.click());
-    await page.locator('button[data-action="start-match"]').tap();
-    await page.waitForSelector('.hand .tile');
+    await chooseAndStart(page, chars);
     const seed1 = await page.evaluate(() => window.__mathjong.S.seedBase);
     // 試合中に、次回用の別の数学モードを予約する（設定画面）。S.length もタイトルの別の値にしておく（採用元を取り違えないこと）
     await page.locator('button[data-action="settings"]').tap();
@@ -3026,17 +3042,19 @@ async function v04Fixes(browser) {
     assert.equal(before.mode, startMode);
     assert.equal(before.next, pending, '予約中の次回用モード');
     assert.ok(before.scores.some((x) => x !== 100) && before.hist > 0);
-    assert.match(await page.locator('.final-info').innerText(), new RegExp(`AI難易度：${{ beginner: '初級', advanced: '上級' }[ai]}`));
+    const finInfo = await page.locator('.final-info').innerText();
+    for (const id of chars) assert.match(finInfo, new RegExp({ fukuyama: 'ふくやま', kaoru: 'かおる', asuma: 'アスマ', kanata: 'かなた', mitsuki: 'みつき', aoto: 'あおと' }[id]));
+    assert.equal(await page.locator('button[data-action="again"]').innerText(), '同じ3人と再戦');
     await page.locator('button[data-action="again"]').tap();
     await page.waitForSelector('.hand .tile');
     const after = await page.evaluate(() => {
       const { S, rules } = window.__mathjong;
-      return { mode: rules.config.mode, deck: S.game.tileType.length, len: S.match.length, ai: S.matchSettings.ai, scores: S.match.scores.slice(), hist: S.history.length, played: S.match.played, renchan: S.match.renchan, wins: S.match.wins.slice(), seed: S.seedBase, next: S.nextMode, round: S.round, hintOpen: S.hintOpen, hints: S.hintsUsed, label: document.querySelector('.hand-label').textContent };
+      return { mode: rules.config.mode, deck: S.game.tileType.length, len: S.match.length, chars: S.matchSettings.chars.slice(), scores: S.match.scores.slice(), hist: S.history.length, played: S.match.played, renchan: S.match.renchan, wins: S.match.wins.slice(), seed: S.seedBase, next: S.nextMode, round: S.round, hintOpen: S.hintOpen, hints: S.hintsUsed, label: document.querySelector('.hand-label').textContent };
     });
     assert.equal(after.mode, startMode, `もう一度遊ぶは ${startMode} のまま（予約中の ${pending} にならない）`);
     assert.equal(after.deck, startMode === 'math1' ? 124 : 168);
     assert.equal(after.len, length, '局数も同じ');
-    assert.equal(after.ai, ai, 'AI 難易度も同じ');
+    assert.deepEqual(after.chars, chars, '同じ3人');
     assert.deepEqual([after.scores, after.hist, after.played, after.renchan, after.wins, after.round, after.label, after.hintOpen, after.hints], [[100, 100, 100, 100], 0, 0, 0, [0, 0, 0, 0], 1, '東1局', false, 0], '得点・履歴・局数・連荘・和了回数・ヒントは初期化');
     assert.notEqual(after.seed, before.seed, '新しい山（seed）');
     assert.equal(after.next, pending, '予約中の次回用モードは保持（再試合には影響しない）');
@@ -3110,8 +3128,7 @@ async function v04Fixes(browser) {
     await page.locator('button[data-action="to-title"]').tap();
     await page.waitForSelector('.title-screen');
     assert.ok(!new URL(page.url()).search, `${bad}: 戻ると URL の検索部分を外す（再読み込みで同じエラーに戻らない）`);
-    await page.locator('button[data-action="start-match"]').tap();
-    await page.waitForSelector('.hand .tile');
+    await chooseAndStart(page);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -3199,8 +3216,9 @@ async function paClaim(page, hand, { hint = false } = {}) {
 const paStored = (page) => page.evaluate(() => { try { return [localStorage.getItem('mj-chi-autopass'), localStorage.getItem('mj-pon-autopass')]; } catch { return 'ERR'; } });
 
 async function v04bLevels(browser) {
-  // (1) タイトルで選んだ難易度が試合の AI 全員に使われる。もう一度遊ぶでも同じ。最終結果に実際の難易度を表示
-  for (const [lv, label] of [['beginner', '初級'], ['advanced', '上級']]) {
+  // (1) Ver.0.6：選んだ3人（混合難易度）が試合の AI。各席の判断は、その席に表示した名前のキャラクターの AI だけが行う。
+  //     同じ3人と再戦でも同じ3人（座席は選び直す）。最終結果・再現情報に3人の名前と ID（席の順）を出す
+  for (const chars of [['kanata', 'natsuki', 'asuma'], ['aoto', 'yuki', 'kaoru']]) {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     // 試合の山の seed は Math.random 由来。AI が数手で和了すると後続の検査が成り立たないので、乱数を固定した列にして再現可能にする（本番のコードには影響しない）
     await ctx.addInitScript(() => { let x = 20261027; Math.random = () => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 4294967296; }; });
@@ -3209,9 +3227,7 @@ async function v04bLevels(browser) {
     await page.goto(`${LOCAL}?speed=test`);
     await page.waitForSelector('.title-screen');
     await page.locator('label.setting.radio', { hasText: '数学Ⅰ' }).tap();
-    await page.locator(`label.setting.radio:has(input[value="${lv}"])`).tap();
-    await page.locator('button[data-action="start-match"]').tap();
-    await page.waitForSelector('.hand .tile');
+    await chooseAndStart(page, chars);
     // AI の手番を何回か進める（自分はツモ牌を捨てる）
     for (let i = 0; i < 3; i++) {
       await v3WaitHuman(page);
@@ -3220,10 +3236,21 @@ async function v04bLevels(browser) {
       if (p.type === 'turn') await apDiscardDrawn(page);
       else await page.locator('button[data-action="pass"]').tap();
     }
-    const d = await page.evaluate(() => ({ ...window.__mathjong.S.aiDecisions, ms: window.__mathjong.S.matchSettings.ai }));
-    assert.equal(d.ms, lv);
-    assert.ok(d[lv] > 0, `${lv} の AI が判断 ${JSON.stringify(d)}`);
-    for (const other of ['beginner', 'intermediate', 'advanced']) if (other !== lv) assert.equal(d[other] || 0, 0, `${other} は使わない`);
+    const seatCheck = () => page.evaluate(() => {
+      const { S } = window.__mathjong;
+      return [1, 2, 3].map((s) => ({ id: S.matchSettings.seats[s - 1], shown: document.querySelector(`.panel.seat-${s} .name`).textContent, deciders: Object.keys(S.aiDecisionsBySeat[s]) }));
+    });
+    const NAMES = { kanata: 'かなた', natsuki: 'なつき', asuma: 'アスマ', aoto: 'あおと', yuki: 'ゆき', kaoru: 'かおる' };
+    let sc = await seatCheck();
+    assert.deepEqual(sc.map((x) => x.id).sort(), chars.slice().sort());
+    for (const x of sc) {
+      assert.equal(x.shown, NAMES[x.id], '席に表示した名前');
+      assert.ok(x.deciders.every((d) => d === x.id), `席の判断はその名前の AI だけ ${JSON.stringify(x)}`);
+    }
+    assert.ok(sc.some((x) => x.deciders.length > 0), 'AI が判断した');
+    const d = await page.evaluate(() => ({ ...window.__mathjong.S.aiDecisions }));
+    const levelOf = { kanata: 'beginner', aoto: 'beginner', natsuki: 'intermediate', yuki: 'intermediate', asuma: 'advanced', kaoru: 'advanced' };
+    for (const lv of Object.keys(d)) assert.ok(chars.some((c) => levelOf[c] === lv), `選んだ3人の難易度だけ ${JSON.stringify(d)}`);
     // 試合を終わらせて最終結果（東4局で親が流局 → 終了）
     await page.evaluate(() => { const { S } = window.__mathjong; S.match.hand = 3; S.match.startDealer = 1; });
     await forceDraw(page);
@@ -3231,10 +3258,11 @@ async function v04bLevels(browser) {
     await page.locator('button[data-action="next"]').tap();
     await page.waitForSelector('.final');
     const info = await page.locator('.final-info').innerText();
-    assert.match(info, new RegExp(`AI難易度：${label}`));
-    assert.doesNotMatch(info, /準備中/);
-    // もう一度遊ぶ：同じ難易度（タイトルの選択を変えても試合の設定を使う）
-    await page.evaluate(() => { window.__mathjong.S.ai = 'intermediate'; window.__mathjong.S.aiDecisions = {}; });
+    const seats1 = sc.map((x) => x.id);
+    assert.match(info, new RegExp(`対戦相手：下家 ${NAMES[seats1[0]]}（.級）・対面 ${NAMES[seats1[1]]}（.級）・上家 ${NAMES[seats1[2]]}（.級）`));
+    for (const [id, nm] of Object.entries(NAMES)) if (chars.includes(id)) assert.match(await page.locator('.final-table').innerText(), new RegExp(nm));
+    assert.deepEqual(await page.locator('.final .modal-actions button').allInnerTexts(), ['同じ3人と再戦', '相手を変更', 'タイトルへ戻る']);
+    // 同じ3人と再戦：同じ3人（座席は選び直す）。判断は新しい席の名前どおり
     await page.locator('button[data-action="again"]').tap();
     await page.waitForSelector('.hand .tile');
     for (let i = 0; i < 2; i++) {
@@ -3243,17 +3271,18 @@ async function v04bLevels(browser) {
       if (!p) break;
       if (p === 'turn') await apDiscardDrawn(page); else await page.locator('button[data-action="pass"]').tap();
     }
-    const d2 = await page.evaluate(() => ({ ...window.__mathjong.S.aiDecisions, ms: window.__mathjong.S.matchSettings.ai }));
-    assert.equal(d2.ms, lv, 'もう一度遊ぶは同じ難易度');
-    assert.ok(d2[lv] > 0 && !d2.intermediate, JSON.stringify(d2));
-    // 再現 URL に難易度が入る
+    assert.deepEqual(await page.evaluate(() => window.__mathjong.S.matchSettings.chars), chars, '同じ3人');
+    sc = await seatCheck();
+    for (const x of sc) { assert.equal(x.shown, NAMES[x.id]); assert.ok(x.deciders.every((dd) => dd === x.id)); }
+    // 再現情報に ID（席の順）が入る
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info code').innerText(), new RegExp(`&ai=${lv}$`));
-    assert.match(await page.locator('.report-info').innerText(), new RegExp(`AI ${label}`));
+    const seats2 = sc.map((x) => x.id);
+    assert.match(await page.locator('.report-info code').innerText(), new RegExp(`&chars=${seats2.join(',')}$`));
+    assert.match(await page.locator('.report-info').innerText(), new RegExp(`ID ${seats2.join(',')}`));
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  // (2) 再現 URL の ai：指定どおりの難易度で始まる。不正な値はエラー画面
+  // (2) 再現 URL：従来の ai（難易度の既定の3人・従来の席の順）と、新しい chars（席1〜3の順）。不正な値はエラー画面
   {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
@@ -3261,14 +3290,22 @@ async function v04bLevels(browser) {
     await page.goto(`${LOCAL}?seed=12&round=1&dealer=1&hand=0&renchan=0&len=4&mode=math1&ai=beginner&speed=test`);
     await page.waitForSelector('.hand .tile');
     await page.waitForFunction(() => (window.__mathjong.S.aiDecisions.beginner || 0) > 0);
-    assert.equal(await page.evaluate(() => window.__mathjong.S.matchSettings.ai), 'beginner');
+    assert.deepEqual(await page.evaluate(() => window.__mathjong.S.matchSettings.seats), ['kanata', 'mitsuki', 'aoto']);
+    await page.goto(`${LOCAL}?seed=12&round=1&dealer=1&hand=0&renchan=0&len=4&mode=math1&chars=asuma,kanata,yuki&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    assert.deepEqual(await page.evaluate(() => window.__mathjong.S.matchSettings.seats), ['asuma', 'kanata', 'yuki'], '席1〜3は URL のとおり（抽選しない）');
+    assert.deepEqual(await page.locator('.panel .name').allInnerTexts().then((xs) => xs.sort()), ['アスマ', 'かなた', 'ゆき'].sort());
+    assert.equal(await page.locator('.panel.seat-1 .name').innerText(), 'アスマ');
     await page.goto(`${LOCAL}?seed=12&round=1&ai=expert`);
     await page.waitForSelector('.replay-error');
     assert.match(await page.locator('.re-list').innerText(), /ai/);
+    await page.goto(`${LOCAL}?seed=12&round=1&chars=kanata,kanata,yuki`);
+    await page.waitForSelector('.replay-error');
+    assert.match(await page.locator('.re-list').innerText(), /chars/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  console.log('✓ Ver.0.4-B：AI難易度（タイトル → 試合の AI 全員・もう一度遊ぶで維持・最終結果・再現 URL）');
+  console.log('✓ Ver.0.4-B→0.6：選んだ3人（混合難易度）が試合の AI・各席の判断は表示した名前の AI だけ・同じ3人と再戦・最終結果と再現情報（ai／chars の再現 URL）');
 }
 
 async function v04bPonAutoPass(browser) {
@@ -4206,7 +4243,7 @@ async function v05cTitleLogo(browser) {
     await page.waitForFunction(() => document.querySelector('.title-logo img').complete && document.querySelector('.title-logo img').naturalWidth > 0);
     const m = await page.evaluate(() => {
       const i = document.querySelector('.title-logo img'); const r = i.getBoundingClientRect();
-      return { alt: i.alt, w: r.width, h: r.height, l: r.left, r: r.right, t: r.top, b: r.bottom, src: i.currentSrc.split('/').pop(), nat: i.naturalWidth > 0, over: document.documentElement.scrollWidth - innerWidth, start: !!document.querySelector('[data-action="start-match"]'), vh: innerHeight };
+      return { alt: i.alt, w: r.width, h: r.height, l: r.left, r: r.right, t: r.top, b: r.bottom, src: i.currentSrc.split('/').pop(), nat: i.naturalWidth > 0, over: document.documentElement.scrollWidth - innerWidth, start: !!document.querySelector('[data-action="choose-opponents"]'), vh: innerHeight };
     });
     const where = `${w}×${h}`;
     assert.equal(m.alt, '数雀（MATHJONG）', where);
@@ -4217,7 +4254,7 @@ async function v05cTitleLogo(browser) {
     assert.ok(m.w >= 150, `${where}：極端に小さくならない ${m.w}`);
     assert.ok(m.over <= 0, `${where}：横スクロールなし`);
     assert.ok(new RegExp(`^title-logo-(${TITLE_LADDER.join('|')})\\.png$`).test(m.src), `${where}：用意した大きさのどれか ${m.src}`);
-    assert.equal(m.start, true, '対局開始のボタンがある（画面は従来どおり使える）');
+    assert.equal(m.start, true, '「対戦相手を選ぶ」のボタンがある（画面は従来どおり使える）');
     assert.deepEqual(errors, [], `${where}：画像の取得に失敗がない`);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/v05c-title-${w}x${h}.png` });
     await ctx.close();
@@ -5919,13 +5956,13 @@ async function v06Characters(browser) {
       await page.goto(LOCAL + '?seed=2026&round=1&dealer=0&hand=0&renchan=0&len=4&mode=' + mode + '&ai=' + level + '&speed=test');
       await page.waitForSelector('.hand .tile');
       const real = await page.evaluate(() => ({
-        chosen: window.__mathjong.S.matchSettings.ai,
+        chosen: window.__mathjong.S.matchSettings.seats.join(','),
         roster: window.__mathjong.S.game.players.slice(1).map((p) => p.name),
         panel: [1,2,3].map((seat) => document.querySelector('.panel.seat-' + seat + ' .name')?.textContent?.trim()),
         styles: [1,2,3].map((seat) => document.querySelector('.panel.seat-' + seat + ' .pers')?.textContent?.trim()),
         width: document.querySelector('.hand .tile')?.getBoundingClientRect().width,
       }));
-      assert.equal(real.chosen, level);
+      assert.equal(real.chosen, { beginner: 'kanata,mitsuki,aoto', intermediate: 'ousuke,natsuki,yuki', advanced: 'fukuyama,kaoru,asuma' }[level], '従来の ai の再現 URL は難易度の既定の3人・従来の席の順');
       assert.deepEqual(real.roster, names, mode + '/' + level + ' player names');
       assert.deepEqual(real.panel, names, mode + '/' + level + ' panel names');
       assert.deepEqual(real.styles, [undefined, undefined, undefined], '対局中は肩書きを省略して牌の領域を優先');
@@ -5937,6 +5974,195 @@ async function v06Characters(browser) {
     }
   }
   console.log('✓ Ver.0.6：9キャラの難易度別名前・数学ⅠⅡ・牌サイズ不変');
+}
+
+// ---- Ver.0.6：対戦相手の自由選択（9人から3人） ----
+const oppState = (page) => page.evaluate(() => {
+  const { S } = window.__mathjong;
+  const sb = document.querySelector('.select-screen button[data-action="start-match"]');
+  return { screen: S.screen, selected: S.opp.selected.slice(), detail: S.opp.detail, startDisabled: sb ? sb.disabled : null,
+    checked: [...document.querySelectorAll('.opp-card.selected')].map((e) => e.dataset.id), count: (document.querySelector('.opp-count b') || {}).textContent,
+    chips: [...document.querySelectorAll('.opp-chip:not(.empty)')].map((e) => e.firstChild.textContent), sheet: !!document.querySelector('.opp-sheet') };
+});
+async function v06FreeSelect(browser) {
+  const ORDER = ['kanata', 'mitsuki', 'aoto', 'ousuke', 'natsuki', 'yuki', 'fukuyama', 'kaoru', 'asuma'];
+  // (1) スマートフォン（390×844・タッチ）：一覧・2列・チェックと詳細の分離・0〜2人では開始できない・4人目は不可・詳細（下から）
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?speed=test`);
+    await page.waitForSelector('.title-screen');
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    await page.waitForSelector('.select-screen');
+    assert.deepEqual(await page.locator('.opp-card').evaluateAll((es) => es.map((e) => e.dataset.id)), ORDER, '9人を初級→中級→上級の順に連続');
+    assert.deepEqual(await page.locator('.opp-card .opp-name').allInnerTexts(), ['かなた', 'みつき', 'あおと', 'おうすけ', 'なつき', 'ゆき', 'ふくやま', 'かおる', 'アスマ']);
+    assert.deepEqual(await page.locator('.opp-card .opp-level').allInnerTexts(), ['初級', '初級', '初級', '中級', '中級', '中級', '上級', '上級', '上級']);
+    for (const t of await page.locator('.opp-card .opp-trait').allInnerTexts()) assert.ok(t.length >= 4, `性格の一言 ${t}`);
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.opp-grid')).gridTemplateColumns.split(' ').length), 2, 'スマートフォンは2列');
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 0, '横スクロールなし');
+    let st = await oppState(page);
+    assert.deepEqual([st.selected, st.count, st.startDisabled], [[], '0', true], '初期は0人・開始できない');
+    // チェック欄のタップは選択だけ（詳細は開かない）。チェック欄は 44px 以上
+    const cb = await page.locator('.opp-check[data-id="aoto"]').boundingBox();
+    assert.ok(cb.width >= 44 && cb.height >= 44, `チェック欄の大きさ ${cb.width}×${cb.height}`);
+    for (const [id, n] of [['aoto', 1], ['kaoru', 2]]) {
+      await page.locator(`.opp-check[data-id="${id}"]`).tap();
+      st = await oppState(page);
+      assert.deepEqual([st.selected.length, st.detail, st.sheet, st.startDisabled], [n, null, false, true], `${n}人：詳細は開かず、まだ開始できない`);
+      // 0〜2人で「対局開始」を押しても始まらない
+      await page.locator('.select-screen button[data-action="start-match"]').evaluate((e) => { e.disabled = false; e.click(); });
+      assert.equal((await oppState(page)).screen, 'select', `${n}人では対局を始めない（無効化を外して押しても）`);
+    }
+    await page.locator('.opp-check[data-id="ousuke"]').tap();
+    st = await oppState(page);
+    assert.deepEqual([st.selected, st.startDisabled, st.checked.sort(), st.count, st.chips], [['aoto', 'kaoru', 'ousuke'], false, ['aoto', 'kaoru', 'ousuke'], '3', ['あおと', 'かおる', 'おうすけ']], '3人そろうと開始できる・選択済みは枠で区別・3人を確認できる');
+    // 4人目は追加できない（お知らせを出す）
+    await page.locator('.opp-check[data-id="yuki"]').tap({ force: true }); // aria-disabled でも実機ではタップできる
+    st = await oppState(page);
+    assert.deepEqual(st.selected, ['aoto', 'kaoru', 'ousuke'], '4人目は追加しない');
+    assert.match(await page.locator('.opp-notice').innerText(), /3人まで/);
+    assert.equal(await page.locator('.opp-check[data-id="yuki"]').getAttribute('aria-disabled'), 'true');
+    // カード本体のタップで詳細（下から開くパネル）。年齢・難易度・性格・打ち筋。×で閉じる。選択は維持
+    await page.locator('.opp-card[data-id="natsuki"] .opp-trait').tap();
+    await page.waitForSelector('.opp-sheet');
+    const det = await page.locator('.opp-sheet').innerText();
+    for (const re of [/なつき/, /20歳/, /中級/, /性格/, /打ち筋/, /門前/]) assert.match(det, re);
+    const sh = await page.locator('.opp-sheet').boundingBox();
+    assert.ok(Math.abs(sh.y + sh.height - 844) <= 1 && sh.width >= 389, `スマートフォンは下から開く ${JSON.stringify(sh)}`);
+    assert.equal(await page.locator('.opp-sheet button[data-action="opp-toggle"]').isDisabled(), true, '3人選択中は詳細からも追加できない');
+    await page.locator('.opp-close').tap();
+    st = await oppState(page);
+    assert.deepEqual([st.sheet, st.selected], [false, ['aoto', 'kaoru', 'ousuke']], '×で閉じる・選択は維持');
+    // パネルの中のタップでは閉じない。パネルの外のタップで閉じる
+    await page.locator('.opp-card[data-id="kanata"] .opp-name').tap();
+    await page.locator('.opp-d-list').tap();
+    assert.equal((await oppState(page)).sheet, true, 'パネルの中では閉じない');
+    await page.mouse.click(195, 30);
+    assert.equal((await oppState(page)).sheet, false, 'パネルの外で閉じる');
+    // おまかせ：3人を抽選して置き換え（対局は始めない）。何度でも引き直せる。1人だけ入れ替えられる
+    const draws = new Set();
+    for (let i = 0; i < 12; i++) {
+      await page.locator('button[data-action="opp-random"]').tap();
+      st = await oppState(page);
+      assert.equal(st.screen, 'select', 'おまかせでは対局を始めない');
+      assert.equal(new Set(st.selected).size, 3);
+      assert.deepEqual(st.selected, ORDER.filter((id) => st.selected.includes(id)));
+      draws.add(st.selected.join(','));
+    }
+    assert.ok(draws.size >= 3, `引き直すと変わる ${[...draws].join(' / ')}`);
+    const drawn = st.selected.slice();
+    const out = drawn[1], inn = ORDER.find((id) => !drawn.includes(id));
+    await page.locator(`.opp-check[data-id="${out}"]`).tap();
+    await page.locator(`.opp-check[data-id="${inn}"]`).tap();
+    st = await oppState(page);
+    assert.deepEqual(st.selected.slice().sort(), [drawn[0], drawn[2], inn].sort(), '1人だけ入れ替え');
+    // タイトルへ戻っても、モード・局数を変えても選択は残る。再読み込みで0人に戻る
+    await page.locator('.select-screen button[data-action="to-title"]').tap();
+    await page.waitForSelector('.title-screen');
+    await page.locator('label.setting.radio', { hasText: '数学Ⅰ' }).tap();
+    await page.locator('label.setting.radio', { hasText: '8局戦' }).tap();
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    assert.deepEqual((await oppState(page)).selected.slice().sort(), [drawn[0], drawn[2], inn].sort(), 'タイトル・モード・局数を変えても保持');
+    assert.match(await page.locator('.select-setting').innerText(), /数学Ⅰ ／ 8局戦/);
+    assert.equal(await page.evaluate(() => Object.keys(localStorage).filter((k) => /opp|char|select/i.test(k)).length), 0, '選択は保存しない');
+    await page.reload();
+    await page.waitForSelector('.title-screen');
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    assert.deepEqual((await oppState(page)).selected, [], '再読み込みで0人');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (2) PC（1280×860・マウス）：3列・詳細は中央のポップアップ
+  {
+    const ctx = await newContext(browser, { viewport: { width: 1280, height: 860 } });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?speed=test`);
+    await page.locator('button[data-action="choose-opponents"]').click();
+    await page.waitForSelector('.select-screen');
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.opp-grid')).gridTemplateColumns.split(' ').length), 3, 'PC は3列');
+    await page.locator('.opp-card[data-id="fukuyama"] .opp-name').click();
+    await page.waitForSelector('.opp-sheet');
+    const sh = await page.locator('.opp-sheet').boundingBox();
+    assert.ok(Math.abs(sh.x + sh.width / 2 - 640) <= 1 && Math.abs(sh.y + sh.height / 2 - 430) <= 2 && sh.width <= 480, `PC は中央のポップアップ ${JSON.stringify(sh)}`);
+    assert.match(await page.locator('.opp-sheet').innerText(), /28歳/);
+    await page.locator('.opp-sheet button[data-action="opp-toggle"]').click();
+    assert.deepEqual((await oppState(page)).selected, ['fukuyama'], '詳細から選べる');
+    await page.mouse.click(20, 20);
+    assert.equal((await oppState(page)).sheet, false);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (3) 座席：人間は席0。3人を席1〜3へランダムに（6通りがすべて出る）。試合中は固定。対局の名前は席どおり
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?speed=slow`);
+    await chooseAndStart(page, ['mitsuki', 'natsuki', 'fukuyama']);
+    const perms = await page.evaluate(() => {
+      const { S, startMatch } = window.__mathjong;
+      const seen = {};
+      for (let i = 0; i < 120; i++) { startMatch({ settings: { mode: S.matchSettings.mode, length: S.matchSettings.length, chars: S.matchSettings.chars } }); const k = S.matchSettings.seats.join(','); seen[k] = (seen[k] || 0) + 1; }
+      clearTimeout(S.timer);
+      return seen;
+    });
+    assert.equal(Object.keys(perms).length, 6, `座席の6通りがすべて出る ${JSON.stringify(perms)}`);
+    for (const k of Object.keys(perms)) assert.deepEqual(k.split(',').sort(), ['fukuyama', 'mitsuki', 'natsuki']);
+    const names = await page.evaluate(() => ({ seats: window.__mathjong.S.matchSettings.seats, players: window.__mathjong.S.game.players.map((p) => p.name), kinds: window.__mathjong.S.game.players.map((p) => p.kind) }));
+    assert.deepEqual(names.kinds, ['human', 'ai', 'ai', 'ai']);
+    assert.equal(names.players[0], 'あなた');
+    // 次の局へ進んでも座席は変わらない
+    const before = names.seats.join(',');
+    await forceDraw(page);
+    await page.waitForSelector('button[data-action="next"]');
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.hand .tile');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.matchSettings.seats.join(',')), before, '試合の途中では座席を変えない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (4) 一連の操作：数学Ⅰ・Ⅱ × 4局・8局で開始 → 最終結果 →「相手を変更」（直前の3人が選択済み）→ 1人入れ替えて開始 →「同じ3人と再戦」→ タイトル
+  for (const [mode, len, chars] of [['math1', 4, ['kanata', 'yuki', 'asuma']], ['math2', 8, ['aoto', 'ousuke', 'kaoru']], ['math1', 8, ['mitsuki', 'natsuki', 'fukuyama']], ['math2', 4, ['kanata', 'aoto', 'asuma']]]) {
+    const ctx = await newContext(browser, { viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?speed=slow`);
+    await page.locator('label.setting.radio', { hasText: mode === 'math1' ? '数学Ⅰ' : '数学Ⅱ' }).tap();
+    await page.locator('label.setting.radio', { hasText: `${len}局戦` }).tap();
+    await chooseAndStart(page, chars);
+    let st = await matchState(page);
+    assert.deepEqual([st.mode, st.length, st.chars, st.label], [mode, len, chars, '東1局'], `${mode}・${len}局戦`);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game.tileType.length), mode === 'math1' ? 124 : 168);
+    await page.evaluate(() => { const { S, render } = window.__mathjong; S.match.over = true; S.modal = 'final'; render(); });
+    await page.locator('.final button[data-action="change-opponents"]').tap();
+    await page.waitForSelector('.select-screen');
+    assert.deepEqual((await oppState(page)).selected, chars, '直前の3人が選択済み');
+    const inn = ORDER.find((id) => !chars.includes(id));
+    await page.locator(`.opp-check[data-id="${chars[0]}"]`).tap();
+    await page.locator(`.opp-check[data-id="${inn}"]`).tap();
+    await page.locator('.select-screen button[data-action="start-match"]').tap();
+    await page.waitForSelector('.hand .tile');
+    st = await matchState(page);
+    assert.deepEqual([st.chars, st.scores, st.label], [[chars[1], chars[2], inn], [100, 100, 100, 100], '東1局'], '1人だけ入れ替えて新しい試合');
+    const seed1 = await page.evaluate(() => window.__mathjong.S.seedBase);
+    await page.evaluate(() => { const { S, render } = window.__mathjong; S.match.over = true; S.modal = 'final'; render(); });
+    await page.locator('.final button[data-action="again"]').tap();
+    await page.waitForSelector('.hand .tile');
+    st = await matchState(page);
+    assert.deepEqual([st.chars, st.mode, st.length, st.scores, st.played], [[chars[1], chars[2], inn], mode, len, [100, 100, 100, 100], 0], '同じ3人・同じモードと局数・得点を初期化');
+    assert.notEqual(await page.evaluate(() => window.__mathjong.S.seedBase), seed1, '山を初期化（新しい seed）');
+    await page.evaluate(() => { const { S, render } = window.__mathjong; S.match.over = true; S.modal = 'final'; render(); });
+    await page.locator('.final button[data-action="to-title"]').tap();
+    await page.waitForSelector('.title-screen');
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    assert.deepEqual((await oppState(page)).selected, [chars[1], chars[2], inn], 'タイトルへ戻っても3人を保持');
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.6：対戦相手の自由選択（9人・2列/3列・チェックと詳細の分離・0〜2人不可・4人目不可・詳細（下から/中央）・おまかせ・1人入れ替え・保持/再読み込みで0人・座席6通り・途中固定・相手を変更・同じ3人と再戦・数学ⅠⅡ×4/8局）');
 }
 
 const server = await startServer(0, { base: BASE, host: '127.0.0.1' });
@@ -5951,7 +6177,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters };
+    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
   } else {
@@ -5998,6 +6224,7 @@ try {
   await v05eAuditFix(browser);
   await v05eAudioIndependent(browser);
   await v06Characters(browser);
+  await v06FreeSelect(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
