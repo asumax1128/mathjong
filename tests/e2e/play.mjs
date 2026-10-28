@@ -11,6 +11,7 @@ import { request as httpRequest } from 'node:http';
 import assert from 'node:assert/strict';
 import { startServer } from '../../tools/serve.mjs';
 import { RECIPES } from '../../src/ui/sound.js';
+import { RON_LATE_LIMIT_MS, judgeRonLate } from './ron-late.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -5298,18 +5299,21 @@ async function v05eCutin(browser) {
     await hold(page, 'ron');
     // 後半：中央の表示は消え、最上部の小さな帯だけが残る。CSS（2.2秒）では中央は 1.10〜1.28 秒で消え、帯は 1.28〜2.02 秒に不透明。
     // 決まった時刻に1回だけ見るのではなく、演出の開始から上限 2.0 秒（帯が消え始める前）までに、その状態になったことを確かめる。
-    // 上限を過ぎても条件を満たさなければ、その時点の表示（経過時間・中央・帯の不透明度と位置・演出の種類）を出して失敗にする。
-    const LATE_LIMIT_MS = 2000;
-    const lateRes = await (await page.waitForFunction(([s, limit]) => {
-      const look = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return { t: Math.round(b.top), b: Math.round(b.bottom), op: Number(getComputedStyle(e).opacity) }; };
-      const card = look('#fx-layer .fx-card'), banner = look('#fx-layer .fx-banner');
-      const elapsed = Math.round(performance.now() - s);
-      const ok = !!card && !!banner && card.op < 0.05 && banner.op > 0.95 && banner.t >= 0 && banner.b <= 70;
-      if (ok) return { ok, elapsed, card, banner };
-      if (elapsed > limit) return { ok, elapsed, card, banner, kind: window.__mathjong.S.fx.current && window.__mathjong.S.fx.current.kind, cls: document.getElementById('fx-layer').className };
-      return false;
-    }, [t0, LATE_LIMIT_MS], { timeout: 6000 })).jsonValue();
-    assert.ok(lateRes.ok, `${LATE_LIMIT_MS}ms 以内に中央の表示が消えて最上部の小さな帯に替わる（実際の表示：${JSON.stringify(lateRes)}）`);
+    // 上限を過ぎた観測は、条件を満たしていても失敗（判定は tests/e2e/ron-late.mjs の judgeRonLate、境界は単体テストで検査）。
+    // 失敗時は、その観測の表示（経過時間・中央・帯の不透明度と位置・演出の種類・fx-layer のクラス）を出す。
+    const LATE_LIMIT_MS = RON_LATE_LIMIT_MS;
+    let lateRes, verdict;
+    for (const until = Date.now() + 8000; ;) {
+      lateRes = await page.evaluate((s) => {
+        const look = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return { t: Math.round(b.top), b: Math.round(b.bottom), op: Number(getComputedStyle(e).opacity) }; };
+        const cur = window.__mathjong.S.fx.current;
+        return { elapsed: performance.now() - s, card: look('#fx-layer .fx-card'), banner: look('#fx-layer .fx-banner'), kind: cur && cur.kind, cls: document.getElementById('fx-layer').className };
+      }, t0);
+      verdict = judgeRonLate(lateRes, LATE_LIMIT_MS);
+      if (verdict !== 'wait' || Date.now() > until) break;
+    }
+    lateRes.elapsed = Math.round(lateRes.elapsed * 10) / 10;
+    assert.equal(verdict, 'ok', `${LATE_LIMIT_MS}ms 以内に中央の表示が消えて最上部の小さな帯に替わる（判定 ${verdict}、実際の表示：${JSON.stringify(lateRes)}）`);
     assert.ok(lateRes.elapsed >= 1000, `中央の表示は静止の後に消える（${lateRes.elapsed}ms）`);
     ronLateMs = lateRes.elapsed;
     assert.equal(await page.locator('#fx-layer .fx-banner .fx-name').textContent(), 'おうすけ');
@@ -5321,7 +5325,7 @@ async function v05eCutin(browser) {
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  console.log(`✓ Ver.0.5-E：ロンは閃光1回→静止→最上部の小さな帯（結果画面を長く隠さない。帯に替わった時刻 ${ronLateMs}ms／上限 2000ms）。結果画面はすぐ開き、演出中も次の局へ進める`);
+  console.log(`✓ Ver.0.5-E：ロンは閃光1回→静止→最上部の小さな帯（結果画面を長く隠さない。帯に替わった時刻 ${ronLateMs}ms／上限 ${RON_LATE_LIMIT_MS}ms）。結果画面はすぐ開き、演出中も次の局へ進める`);
 
   // (4) 実際の速い対局（AI 待ち時間 0）：AI 同士のチー・ポンを含め、表示した演出の宣言者・席・発光が記録の seat と一致。
   //     チー・ポン・リーチは最低表示時間を守り（ロン・ツモで置き換えた場合と局の切替を除く）、キューは2以下。宣言の音は表示と同じ順・同じ数

@@ -17,6 +17,8 @@ on:
       - 'tools/summarize-v06.mjs'
       - 'tools/personality-v06.mjs'
       - 'tests/e2e/play.mjs'
+      - 'tests/e2e/ron-late.mjs'
+      - 'tests/e2e-ron-late.test.js'
       - 'src/ui/app.js'
       - '.github/workflows/character-ai-experiment.yml'
   workflow_dispatch:
