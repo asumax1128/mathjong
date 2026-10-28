@@ -17,6 +17,7 @@ import { reconcileOrder, defaultOrder } from './handorder.js';
 import { createHandDrag } from './handdrag.js';
 import { CHI_AUTOPASS_KEY, PON_AUTOPASS_KEY, parseChiAutoPass, parsePonAutoPass, visibleClaimActions, claimPendingForHint, claimPolicy, autoPassDue, policySettings, autoPassedKind, mergeKind, autoPassNotice } from './autopass.js';
 import { YAKU_GUIDE, GUIDE_NOTES, guideCondition } from './guide.js';
+import { createRoomState, pickRoomTile, checkRoom, nextRoom, roomHint, roomHTML } from './beginner-room.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, MAX_ROUND } from './params.js';
 import { validateReplay, replayQuery } from './replay.js';
 import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, scanEffects, fxOffer, fxAdvance, fxTimes, fxProgress, isLiteEffect } from './effects.js';
@@ -131,6 +132,7 @@ const playersFor = (seatIds) => [{ name: 'あなた', kind: 'human' }, ...seatId
 // 対戦相手の自由選択（Ver.0.6）。selected：選んだキャラクターID（最大3人、選んだ順）。detail：詳細を開いているID。
 // 画面の記憶の中だけで持ち、保存しない（ページの再読み込みで0人に戻る）。タイトルへ戻っても、モード・局数を変えても残す。
 S.opp = { selected: [], detail: null, notice: null };
+S.beginnerRoom = createRoomState(); // 通常の対戦相手選択・対局とは独立した練習
 
 function startRound() {
   clearTimeout(S.timer);
@@ -703,6 +705,7 @@ function headerHTML() {
 function render() {
   if (S.screen === 'title') { app.innerHTML = titleHTML(); return; }
   if (S.screen === 'select') { app.innerHTML = selectHTML(); return; }
+  if (S.screen === 'beginner-room') { app.innerHTML = roomHTML(S.beginnerRoom, rulesForMode('math1')); return; }
   if (S.screen === 'replay-error') { app.innerHTML = replayErrorHTML(); return; }
   if (!S.game) return;
   // 並び替え中に再描画が必要になったら、並び替えを中止してから描画する（DOM が作り直されるため）
@@ -882,6 +885,7 @@ function titleHTML() {
       </fieldset>
     </div>
     <button data-action="choose-opponents" class="primary start-btn">対戦相手を選ぶ</button>
+    <button data-action="br-open" class="br-open">初心者の部屋（練習）</button>
     <p class="note title-ver">持ち点 各${START_POINTS}点 ／ 画面 v${APP_VERSION}・エンジン v${ENGINE_VERSION}</p>
   </main>`;
 }
@@ -1331,6 +1335,28 @@ app.addEventListener('click', (ev) => {
       S.opp.selected = S.matchSettings.chars.slice();
       leaveGame('select');
       break;
+    case 'br-open':
+      S.beginnerRoom = createRoomState();
+      S.screen = 'beginner-room'; render(); break;
+    case 'br-pick':
+      if (S.screen !== 'beginner-room') break;
+      pickRoomTile(S.beginnerRoom, rulesForMode('math1'), Number(el.dataset.idx)); render(); break;
+    case 'br-check':
+      if (S.screen !== 'beginner-room') break;
+      checkRoom(S.beginnerRoom, rulesForMode('math1')); render(); break;
+    case 'br-hint':
+      if (S.screen !== 'beginner-room') break;
+      roomHint(S.beginnerRoom); render(); break;
+    case 'br-reset':
+      if (S.screen !== 'beginner-room') break;
+      S.beginnerRoom = createRoomState(); render(); break;
+    case 'br-next':
+      if (S.screen !== 'beginner-room' || !S.beginnerRoom.done) break;
+      if (!nextRoom(S.beginnerRoom)) S.screen = 'title';
+      render(); break;
+    case 'br-title':
+      if (S.screen !== 'beginner-room') break;
+      S.screen = 'title'; render(); break;
     case 'choose-opponents':
       // タイトルの「対戦相手を選ぶ」：選択画面へ（それまでの選択は残す）
       S.opp.detail = null;
