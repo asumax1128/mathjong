@@ -56,7 +56,7 @@ try {
   await page.locator('button[data-action="choose-opponents"]').tap();
   await page.waitForSelector('.select-screen');
   const names = await page.locator('.opp-card .opp-name').allInnerTexts();
-  assert.deepEqual(names, ['かなた', 'みつき', 'あおと', 'おうすけ', 'なつき', 'ゆき', 'ふくやま', 'かおる', 'アスマ']);
+  assert.deepEqual(names, ['かなた', 'みつき', 'あおと', 'おうすけ', 'なつき', 'ゆき', 'シャカ', 'かおる', 'アスマ']);
   assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.opp-grid')).gridTemplateColumns.split(' ').length), 2, '2列');
   assert.equal(await page.locator('.select-screen button[data-action="start-match"]').isDisabled(), true, '0人では開始できない');
   for (const id of ['kanata', 'yuki', 'asuma']) await page.locator(`.opp-check[data-id="${id}"]`).tap();
