@@ -8,7 +8,7 @@
 - **現行の正式完成版：Ver.0.6.0-a**（画面版 `APP_VERSION='0.6.0-a'`、エンジン版 `ENGINE_VERSION='0.5.0-a'`。package.jsonの0.1.0とは別）。
 - **正式完成：2026-10-28**。オーナーの **iPhone Safari実機30/30項目合格**（7/7＋11/11＋12/12）。公開済み。
 - **本番URL：https://asumax1128.github.io/mathjong/**（既存GitHub Pages、mainルート）。新サイトを作らない。
-- **main基準：`296b3d6855ec0f190be6493d2cca79cc3d5b73fc`（この文書更新時点）**。必ずGitHubで最新を再取得。Ver.0.6本体のマージコミット`484150efc303f82e1255a5cc4feaf31cfee9c4b9`。
+- **main基準：`ce659038eadc7b7838dd6659808a088a49d29a76`（2026-10-28、PR #21マージ後の記録時点）**。必ずGitHubで最新を再取得。Ver.0.6本体のマージコミット`484150efc303f82e1255a5cc4feaf31cfee9c4b9`。初心者の部屋は全6段階を実装・Pagesデプロイ済み、第4〜6段階の実機受入は未実施。
 - **PR #17**：<https://github.com/asumax1128/mathjong/pull/17>。9人AI・自由選択、merged。
 - **PR #11**：<https://github.com/asumax1128/mathjong/pull/11>。引き継ぎ資料・2026-10-28 mainマージ済み（`310aeaeab19b5d3f5e364cf2abd3cc7c3fcf8c6f`）。
 - **PR #6**：研究Draft、保留。
@@ -48,20 +48,32 @@
 ## 4.1 初心者の部屋（第1〜3段階）の実装状況
 
 - [PR #20](https://github.com/asumax1128/mathjong/pull/20)：数学Ⅰで3枚の数式→9枚で3面子→ツモ/打牌を練習する独立モードを実装し、2026-10-28にmainへマージ（`b9cd0bee078fd823529d7b19e905aab07cb5006a`）。
-- 専用CIは成功：[run 40655422458](https://github.com/asumax1128/mathjong/actions/runs/40655422458)。**iPhone Safari実機テスト7/7項目合格（2026-10-28）**。第1〜3段階の受入完了。第4〜6段階はまだ未実装・設計検討中。
+- 専用CIは成功：[run 40655422458](https://github.com/asumax1128/mathjong/actions/runs/40655422458)。**iPhone Safari実機テスト7/7項目合格（2026-10-28）**。第1〜3段階の受入完了。第4〜6段階は後述のPR #21で実装・マージ済みだが、この7/7の受入対象には含まれない。
 - 基準ドキュメント：[docs/34](34-beginner-room-part1.md)と[設計案PR #19](https://github.com/asumax1128/mathjong/pull/19)。PR #19はDraft・未マージ。
 
 ## 4.2 初心者の部屋（第4〜6段階）の実装状況
 
-- 承認済み設計（docs/35・PR #19）に基づき、ブランチ `feature/beginner-room-lesson4to6` で実装。**Draft [PR #21](https://github.com/asumax1128/mathjong/pull/21)・未マージ・未公開**。記録：[docs/36](36-beginner-room-lessons4to6.md)。
+- 承認済み設計（docs/35・PR #19）に基づく[PR #21](https://github.com/asumax1128/mathjong/pull/21)は、オーナーがHEAD `ac137f1e477b261f50a1e59e1606b5b589f6ebe8`を明示承認し、2026-10-28 11:39:43 UTC（20:39:43 JST）にmainへマージ済み。マージSHAは `ce659038eadc7b7838dd6659808a088a49d29a76`。設計PR #19はDraft・未マージを維持。記録：[docs/36](36-beginner-room-lessons4to6.md)。
 - 第4段階（4-A チー／4-B 上家以外はチー不可／4-C ポン／4-D 鳴いた手は役が必要）、第5段階（5-A リーチとツモ切りだけ／5-B ロン／5-C ツモ）、第6段階（練習用CPU 3人との1局の卒業試験、修了→「実際の対局に挑戦する」）。すべて実際の `Game` の固定局面とエンジンの判定・精算。
 - 進み具合は localStorage `mj-beginner-room-v1`（版つき・保存できない端末でも動く）。段階の一覧・続きから・やり直し。
-- mainへのマージ・Pages公開・iPhone Safari実機確認はオーナーの承認・確認待ち。
+- P2-1（5-Cで教材が受け付けないリーチ・打牌を有効表示）は `ac137f1` で解消。第5-Cのツモ可能時は「ツモ」だけを表示。修正前HEADの広範囲独立監査と、Codex自身による限定修正・再検証を区別する。修正後は単体368件、関連E2E、全9牌・内部禁止操作・400点保存を確認した。修正後全コードを別担当者が全面再監査したという意味ではない。
+- [Pagesデプロイ 40681686192](https://github.com/asumax1128/mathjong/actions/runs/40681686192)は成功。[その後の公開smoke test 40681741442](https://github.com/asumax1128/mathjong/actions/runs/40681741442)は失敗。デプロイ成功と公開サイトのブラウザ検証成功を同一視しない。
+- **第4〜6段階のiPhone Safari実機受入は未実施**。第1〜3段階の7/7やVer.0.6の30/30を流用して正式完成としない。
+
+## 4.3 公開後の保守・未マージ作業
+
+- 公開smoke testの既知不整合：`tools/public-smoke.mjs:59` が旧名称「ふくやま」を期待する。正式表示は「シャカ」、内部IDは `fukuyama` のまま。mainのコードとローカル再現で不一致を確認。
+- テスト修正ブランチ：`fix/public-smoke-shaka-name`、HEAD `fdcfcd4b3acf57511f873cf59183a5747383d541`。main `ce65903` から作成し、期待文字列1か所だけを修正。ゲームコード・内部IDは無変更。ローカルHTTPでは旧テスト失敗→修正後smoke成功（対局開始まで、資源エラーなし）、対戦相手単体10件成功。
+- 文書更新ブランチ：`docs/beginner-room-pr21-release`（本更新）。テスト修正を含めず、同じmainから独立した文書専用変更。
+- 記録時点で両ブランチのDraft PR作成は未完了。GitHub APIとPagesへの接続が現在のCodex環境で拒否されるため。通信反映後、それぞれ別のDraft PRを作成し、番号・HEAD・CIを再確認する。オーナー承認前にmainへ統合しない。
+- 通信設定案には `api.github.com` と `asumax1128.github.io` を追加済みだが、実行環境の許可には未反映。GitHubのHTML閲覧とGitは利用可能。API接続・実公開URLの検証とは区別する。
+- 公開URLでの修正版smokeはプロキシの接続拒否で未完了。初心者の部屋の公開ブラウザ操作・配信JSのmainとの一致も、この環境からは未確認。公開障害や配信版不一致と断定しない。
+- 通信復旧後の公開smokeは `gh workflow run public-site-smoke.yml --repo asumax1128/mathjong --ref fix/public-smoke-shaka-name` で修正ブランチを指定する。既存の失敗runを再実行するだけでは、旧mainの期待値を使って再び失敗する可能性がある。新規runのHEADと結果を確認し、公開URL成功・ローカル成功・Pagesデプロイ成功を別々に記録する。
 
 ## 5. オーナー決定の開発優先順位
 
 1. **GitHub引き継ぎ基盤の最新化（最優先）**。PR #11標準5ファイルをVer.0.6へ更新してmainマージ済み。新チャットでの独立復元テストは未実施。
-2. **初心者の部屋**。第1〜3段階はPR #20でmainマージ・iPhone実機7/7合格済み。第4〜6段階は設計承認（PR #19・D14）→実装Draft PR #21（[docs/36](36-beginner-room-lessons4to6.md)・未マージ・未公開）。
+2. **初心者の部屋**。全6段階がPR #20/#21でmainに反映されPagesデプロイ成功。次は公開smokeの期待値修正を別Draft PRで確認し、公開ブラウザ検証と第4〜6段階のiPhone Safari実機受入を行う（[docs/36](36-beginner-room-lessons4to6.md)）。
 3. **戦績・対戦記録**。個人の通算・相手別などの記録、保存仕様は未確定。
 4. **新キャラクター3人追加**。9→12人、能力・関係性・バランスは後日設計。
 5. **デフォルメイラスト追加**。一覧はデフォルメ、詳細は通常頭身の将来構想。今回は未制作。
