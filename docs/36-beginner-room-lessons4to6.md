@@ -1,6 +1,6 @@
 # 数雀「初心者の部屋」実装第2弾：第4〜6段階（チー・ポン／リーチ・ロン・ツモ／卒業試験）
 
-> 状態：**Draft PR（未マージ・未公開）**。ブランチ `feature/beginner-room-lesson4to6`（main `39f2145` から作成）。
+> 状態：**Draft PR [#21](https://github.com/asumax1128/mathjong/pull/21)（未マージ・未公開）**。ブランチ `feature/beginner-room-lesson4to6`（main `39f2145` から作成）。
 > 承認済み設計：[PR #19](https://github.com/asumax1128/mathjong/pull/19) の docs/35（設計のみ・Draft。この実装で PR #19 のブランチは変更していない）。
 > 第1〜3段階：[docs/34](34-beginner-room-part1.md)（PR #20・mainマージ済み・iPhone実機7/7合格）。
 > mainへのマージ・GitHub Pagesへの公開はオーナーの明示承認の後に行う。別の公開サイト・プレビューサイトは作らない。
@@ -52,7 +52,12 @@
 ## 7. テスト
 - `tests/beginner-practice.test.js`（16件）：全課題の山の固定・同じ局面の再現・牌の保存（`checkInvariants` と124枚）・9人の名前を出さない、4-A〜4-D（上家だけチー、待ち行列にいないこと、ポン、鳴いた後ツモなし、役なしロン不可・役ありロン、2回まで）、5-A〜5-C（リーチの可否、ツモ切りだけ（画面とエンジン）、ロン・ツモの精算）、卒業試験（リーチ→ロン、合計400点、誤りのヒント、4回の和了チャンス、和了しないと流局でやり直し案内、CPUは和了しない）、保存（キー・版・壊れた値・例外・ほかのキー不変）、部屋の流れ（第1段階から卒業試験まで、クリアと続き、一覧の制限、再開）。
 - E2E `v07BeginnerRoom2`：320/375/390/430px でタップだけで第1〜6段階を通し、各課題の誤操作の案内・ボタンの有無・結果・合計400点・修了・「実際の対局に挑戦する」→9人の選択画面、途中で再読み込み→一覧→続きから、クリアした段階の再挑戦、横スクロールなし、localStorage が例外の端末。`v07BeginnerRoom`（第1〜3段階）は第3段階の後の遷移を更新。
-- 実行結果は PR 本文と最終報告に記録する（実行していないものは合格と書かない）。
+- 実行結果（コミット `372f22a`、この環境）：
+  - `npm test`：**366/366 合格**。
+  - E2E 全体 `node tests/e2e/play.mjs`（headless shell 153）：**E2E OK**（11分25秒）。`--channel chromium`：**E2E OK**（12分38秒）。Ver.0.6 の自由選択・キャラクター・通常対局の完走（数学Ⅰ・Ⅱ・旧規則・オートパス）を含む。
+  - `node tools/simulate.mjs --games 250 --check --mode math1` / `math2`：どちらも成功（不変条件の検査あり）。
+  - CI：Beginner room 1-6 checks [run 40662940064](https://github.com/asumax1128/mathjong/actions/runs/40662940064) 成功。
+- iPhone Safari 実機：未実施（オーナーの確認事項）。
 
 ## 8. 既存ルールについて
 - 実装中に既存ルール・エンジンの不具合は見つからなかった（仕様の変更はしていない）。
