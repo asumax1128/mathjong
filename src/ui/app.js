@@ -27,7 +27,7 @@ import { VOICE_KEY, parseVoiceSetting, createVoicePlayer } from './voice.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
-const APP_VERSION = '0.6.2';
+const APP_VERSION = '0.6.3';
 document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`;
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -908,6 +908,7 @@ function titleHTML() {
 // ---------- 対戦相手の選択（Ver.0.6） ----------
 // 一覧（初級→中級→上級の順に連続）。カード本体のタップで詳細、右上のチェック欄のタップで選択・解除（詳細は開かない）。
 // スマートフォンは2列・PC は3列（styles.css）。3人そろったときだけ「対局開始」を押せる。
+// 一覧カードは全端末でテキストのみ：将来正式イラストを追加しても詳細を開くまで画像をDOMに作らない。
 function selectHTML() {
   const sel = S.opp.selected;
   const full = sel.length >= PICK_COUNT;
@@ -917,7 +918,6 @@ function selectHTML() {
     return `<div class="opp-card${on ? ' selected' : ''}" data-action="opp-detail" data-id="${o.id}" role="button" tabindex="0" aria-label="${o.name}の詳細">
       <button class="opp-check" data-action="opp-toggle" data-id="${o.id}" aria-pressed="${on}" aria-label="${o.name}を${on ? '外す' : '選ぶ'}"${blocked ? ' aria-disabled="true"' : ''}><span class="opp-box" aria-hidden="true">${on ? '✓' : ''}</span></button>
       <div class="opp-name">${o.name}</div>
-      ${o.placeholder ? `<div class="opp-placeholder" aria-label="${o.name}の仮表示"><span aria-hidden="true">${o.placeholder}</span><small>仮表示</small></div>` : ''}
       <div class="opp-meta"><span class="opp-level lv-${o.level}">${o.levelLabel}</span></div>
       <div class="opp-trait">${o.trait}</div>
     </div>`;
@@ -951,7 +951,7 @@ function oppDetailHTML(id) {
   return `<div class="opp-overlay" data-action="opp-backdrop"><div class="opp-sheet" role="dialog" aria-modal="true" aria-label="${o.name}の紹介">
     <button class="opp-close" data-action="opp-detail-close" aria-label="閉じる">×</button>
     <h2 class="opp-d-name">${o.name}</h2>
-    ${o.placeholder ? `<p class="opp-art-note">仮表示・正式なキャラクター画像は準備中です。</p>` : ''}
+    ${o.artSrc ? `<figure class="opp-d-art"><img src="${o.artSrc}" alt="${o.name}のキャラクターイラスト" loading="lazy" decoding="async"></figure>` : ''}
     <dl class="opp-d-list">
       ${o.age === null ? '' : `<dt>年齢</dt><dd>${o.age}歳</dd>`}
       <dt>${o.level === 'additional' ? '分類' : '難易度'}</dt><dd><span class="opp-level lv-${o.level}">${o.levelLabel}</span>${o.level === 'additional' ? '（難易度は未設定）' : ''}</dd>
