@@ -1,9 +1,11 @@
 # 数雀｜開発・監査・公開・引き継ぎの標準運用
 
-> **2026-10-29 新3人の統合候補**：`feature/new-character-trio-integration` で、ゆうじん・たら・のっちを追加（画面0.6.1、既存ルールエンジン0.5.0-a）。既存9人・内部ID・保存形式は維持。単体376件・E2E全体（809秒）・250局のローカル検証が成功。現在のmainは `ce659038eadc7b7838dd6659808a088a49d29a76`、前回確認済みの公開版は9人版（今回の実URL再検査は通信制限で未実行）。新3人は未マージ・未公開。詳細は[統合記録](https://github.com/asumax1128/mathjong/blob/feature/new-character-trio-integration/docs/40-new-character-trio-integration.md)。PR #22/#23はDraft・未マージ、PR #19は対象外。包括承認は有効で、停止理由は追加承認待ちではなく、GitHub API/Pagesへの通信許可の未反映。
+> **最新公開（2026-10-29）**：数雀 Ver.0.6.2（12人選択、ゆうじん26歳初級／たら25歳中級／のっち28歳上級、初中上各4人の順に表示）。[PR #27](https://github.com/asumax1128/mathjong/pull/27) HEAD `b1ff774bfcdc3b8408a4d812d2ea7389c0249249`、必須CI2件Success、mainマージ `627081240c3b9c9907adbf96061a6fcd71b81f2d`。[Pages 40781902816](https://github.com/asumax1128/mathjong/actions/runs/40781902816)、[公開通常対局smoke 40782005883](https://github.com/asumax1128/mathjong/actions/runs/40782005883)、[公開初心者教材E2E 40782005997](https://github.com/asumax1128/mathjong/actions/runs/40782005997)すべてSuccess。**Ver.0.6.2のiPhone実機表示確認は未実施**。ゲームルール、AI判断・係数、旧9人の内部ID、保存形式は不変。[変更仕様docs/42](42-ver0.6.2-trio-profiles.md)。
 
+> **正式な実機受入の区別**：Ver.0.6.1（新3名の本体統合、12人選択）はオーナーが2026-10-29にiPhone Safariで**8/8項目合格**を報告。[受入記録docs/41](41-ver0.6.1-release-acceptance.md)。[PR #24](https://github.com/asumax1128/mathjong/pull/24) は `6d254a56b92a3c041d1e1ffe5c2716a887179c57` でmerged。本受入をVer.0.6.2の実機合格として流用しない。正式画像は引き続き頭文字の仮表示。
 
-> **後続テストもpush済み**：`test/public-beginner-trio-smoke`（`d5bc040670431b85439a77573e54e75d6ec6a738`）。単体379件と、本番相当ローカルURLの教材1〜6段階・卒業→12人選択→通常対局開始が成功。実際のPages・CI・新規PR作成・mainマージは通信許可未反映で未実行。本体統合のコード・全体E2E成功は `a45d0821e4b55df70363d50a70849a82bfdddc73` を基準に記録。PR #22/#23を変更HEADの再取得後に正規マージし、本体統合→後続テストの順で処理する。
+> **初心者教材の公開検査**：[PR #25](https://github.com/asumax1128/mathjong/pull/25) は必須CI2件Success後に `a686f69fd0c764737526833062b6f4da157894c9` にmerged。Pages・通常smoke・初心者の部屋1〜6公開E2EもSuccess。Ver.0.6.2でも公開E2E successを再確認。**PR #19は設計資料のDraftとして変更・マージしない**。最新状態が下記の記録時点のPR・SHAと異なる場合は必ず現在のGitHubを優先する。
+
 ## 0. 2026-10-28の包括承認（以前の逐次承認より優先）
 
 Claude Code復帰までCodexは一時的な開発・品質管理・リリースを担当する。既存仕様内の小変更は毎回の承認待ちをせず、実装・テスト・差分再点検・正規マージ・既存Pages公開・公開検査・記録を小さく繰り返す。

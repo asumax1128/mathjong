@@ -1,9 +1,11 @@
 # 数雀｜新チャットでのGitHubからの復元入口
 
-> **2026-10-29 新3人の統合候補**：`feature/new-character-trio-integration` で、ゆうじん・たら・のっちを追加（画面0.6.1、既存ルールエンジン0.5.0-a）。既存9人・内部ID・保存形式は維持。単体376件・E2E全体（809秒）・250局のローカル検証が成功。現在のmainは `ce659038eadc7b7838dd6659808a088a49d29a76`、前回確認済みの公開版は9人版（今回の実URL再検査は通信制限で未実行）。新3人は未マージ・未公開。詳細は[統合記録](https://github.com/asumax1128/mathjong/blob/feature/new-character-trio-integration/docs/40-new-character-trio-integration.md)。PR #22/#23はDraft・未マージ、PR #19は対象外。包括承認は有効で、停止理由は追加承認待ちではなく、GitHub API/Pagesへの通信許可の未反映。
+> **最新公開（2026-10-29）**：数雀 Ver.0.6.2（12人選択、ゆうじん26歳初級／たら25歳中級／のっち28歳上級、初中上各4人の順に表示）。[PR #27](https://github.com/asumax1128/mathjong/pull/27) HEAD `b1ff774bfcdc3b8408a4d812d2ea7389c0249249`、必須CI2件Success、mainマージ `627081240c3b9c9907adbf96061a6fcd71b81f2d`。[Pages 40781902816](https://github.com/asumax1128/mathjong/actions/runs/40781902816)、[公開通常対局smoke 40782005883](https://github.com/asumax1128/mathjong/actions/runs/40782005883)、[公開初心者教材E2E 40782005997](https://github.com/asumax1128/mathjong/actions/runs/40782005997)すべてSuccess。**Ver.0.6.2のiPhone実機表示確認は未実施**。ゲームルール、AI判断・係数、旧9人の内部ID、保存形式は不変。[変更仕様docs/42](42-ver0.6.2-trio-profiles.md)。
 
+> **正式な実機受入の区別**：Ver.0.6.1（新3名の本体統合、12人選択）はオーナーが2026-10-29にiPhone Safariで**8/8項目合格**を報告。[受入記録docs/41](41-ver0.6.1-release-acceptance.md)。[PR #24](https://github.com/asumax1128/mathjong/pull/24) は `6d254a56b92a3c041d1e1ffe5c2716a887179c57` でmerged。本受入をVer.0.6.2の実機合格として流用しない。正式画像は引き続き頭文字の仮表示。
 
-> **後続テストもpush済み**：`test/public-beginner-trio-smoke`（`d5bc040670431b85439a77573e54e75d6ec6a738`）。単体379件と、本番相当ローカルURLの教材1〜6段階・卒業→12人選択→通常対局開始が成功。実際のPages・CI・新規PR作成・mainマージは通信許可未反映で未実行。本体統合のコード・全体E2E成功は `a45d0821e4b55df70363d50a70849a82bfdddc73` を基準に記録。PR #22/#23を変更HEADの再取得後に正規マージし、本体統合→後続テストの順で処理する。
+> **初心者教材の公開検査**：[PR #25](https://github.com/asumax1128/mathjong/pull/25) は必須CI2件Success後に `a686f69fd0c764737526833062b6f4da157894c9` にmerged。Pages・通常smoke・初心者の部屋1〜6公開E2EもSuccess。Ver.0.6.2でも公開E2E successを再確認。**PR #19は設計資料のDraftとして変更・マージしない**。最新状態が下記の記録時点のPR・SHAと異なる場合は必ず現在のGitHubを優先する。
+
 > **2026-10-28の包括承認（D16）**：既存仕様内は安全条件を満たせばCodexが追加承認なしで実装・Ready・正規mainマージ・既存Pages公開まで進める。重大なルール変更・破壊的データ変更・重大なセキュリティ変更は相談。CI・保護・通信制限を迂回しない。PR #19は自動マージ対象外。
 
 > 2026-10-28 更新。リポジトリ：<https://github.com/asumax1128/mathjong>。
@@ -22,7 +24,7 @@ GitHubリポジトリ https://github.com/asumax1128/mathjong を一次資料と�
 3. docs/32-ver0.6-free-select-release.md（Ver.0.6正式完成・iPhone Safari 30/30合格）、docs/25〜31（9人AI設計・監査・検証）、READMEを参照し、現行の実装と古いdocsの履歴を分ける。
 4. Ver.0.6：9人から3人選択（おまかせ、一様な座席、詳細、同じ3人と再戦）、数学Ⅰ・Ⅱ、4/8局戦が正式完成。PR #17は2026-10-28にmainマージ。既存の公開URL https://asumax1128.github.io/mathjong/ のみを使う。
 5. PR #18でmainに反映済みの表記：かなたの一覧紹介「冷静に待ちを見る」、かおるの一覧紹介「ヨイショの達人」、旧表示名ふくやまは「シャカ」。fukuyama内部IDとAIロジックは維持。公開サイトの表示確認とコード上の実装確認を区別する。
-6. 優先順位：①GitHub引き継ぎ基盤最新化 ②初心者の部屋 ③戦績・対戦記録 ④新キャラ3人追加（計12人） ⑤デフォルメイラスト追加。
+6. 最新の実態：12人の自由選択と新3名のAIはVer.0.6.1で公開・iPhone Safari実機8/8合格。Ver.0.6.2は3名の年齢・難易度を設定し、初中上各4人へ並び替えてmainマージ・Pages公開・公開smoke・公開教材E2Eが成功。Ver.0.6.2自体のiPhone実機表示受入は未実施。docs/41・42および本ファイル冒頭を優先する。
 7. PR #11/#18/#20/#21はmainマージ済み。PR #21後の記録時点mainは ce659038eadc7b7838dd6659808a088a49d29a76。PR #22の修正HEAD fdcfcd4 の公開入口smokeは3件Success。PR #22/#23は記録時点でDraft・未マージ。API接続がCodex環境で403のためReady化・正規マージは未実行。公開全段階テスト追加ブランチ test/public-beginner-room-smoke は別途検証中。第4〜6段階の実機受入は未実施。新3キャラは2,608試合を経て統合候補ブランチで実装・ローカル検証済み。docs/40を参照し、通信反映後に正規CI・マージ・公開確認へ進む。詳細はHANDOFF 4.3。PR #19/#6や残存P3は別管理。
 8. 旧資料docs/01・05・09・12・18の古い試作記述を、現在の実装と誤認しない。
 9. 未承認の仕様や実施していないテストを完了済みと報告しない。
