@@ -1,0 +1,90 @@
+name: Character AI experiment (no deploy)
+on:
+  pull_request:
+    paths:
+      - 'src/engine/character-ai-prototype.js'
+      - 'src/engine/character-ai.js'
+      - 'tools/simulate-characters.mjs'
+      - 'tools/simulate-characters-all.mjs'
+      - 'tests/character-ai-prototype.test.js'
+      - 'tests/character-ai.test.js'
+      - 'tests/character-ai-v06.test.js'
+      - 'tests/character-ai-v06-human-pass.test.js'
+      - 'tests/sim-v06-tools.test.js'
+      - 'tools/sim-v06.mjs'
+      - 'tools/compare-v06.mjs'
+      - 'tools/calibrate-v06.mjs'
+      - 'tools/summarize-v06.mjs'
+      - 'tools/personality-v06.mjs'
+      - 'tests/e2e/play.mjs'
+      - 'tests/e2e/ron-late.mjs'
+      - 'tests/e2e-ron-late.test.js'
+      - 'src/ui/app.js'
+      - 'src/ui/opponents.js'
+      - 'src/ui/replay.js'
+      - 'src/ui/styles.css'
+      - 'tests/opponents.test.js'
+      - '.github/workflows/character-ai-experiment.yml'
+  workflow_dispatch:
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Node and syntax checks
+        run: |
+          node --check src/engine/character-ai-prototype.js
+          node --check src/engine/character-ai.js
+          node --check tools/simulate-characters.mjs
+          node --check tools/simulate-characters-all.mjs
+          node --check tests/character-ai-prototype.test.js
+          node --check tests/character-ai.test.js
+          node --check tests/character-ai-v06.test.js
+          node --check tools/sim-v06.mjs
+          node --check tools/compare-v06.mjs
+          node --check tools/calibrate-v06.mjs
+          node --check tests/character-ai-v06-human-pass.test.js
+          node --check tests/sim-v06-tools.test.js
+          node --check src/ui/opponents.js
+          node --check tests/opponents.test.js
+      - name: All unit tests
+        run: npm test
+      - name: Mathematics I baseline versus candidate (all nine)
+        run: node tools/simulate-characters-all.mjs --mode math1 --groups 4 --seed 21 --length 4 | tee /tmp/all-math1.json
+      - name: Mathematics II baseline versus candidate (all nine)
+        run: node tools/simulate-characters-all.mjs --mode math2 --groups 4 --seed 22 --length 4 | tee /tmp/all-math2.json
+      - name: Ver.0.6 difficulty ladder (reference player vs 3 AIs of each level), Mathematics I
+        run: node tools/sim-v06.mjs --exp ref --mode math1 --groups 8 --seed 900101 --workers 4 --out /tmp/v06-ref-math1.json | tee /tmp/v06-ref-math1.txt
+      - name: Ver.0.6 cross-level and personality, Mathematics I
+        run: |
+          node tools/sim-v06.mjs --exp all --mode math1 --groups 4 --seed 900102 --workers 4 --out /tmp/v06-all-math1.json > /dev/null
+          node tools/summarize-v06.mjs /tmp/v06-all-math1.json | tee /tmp/v06-all-math1.md
+          node tools/personality-v06.mjs /tmp/v06-all-math1.json | tee /tmp/v06-personality-math1.md
+      - name: Seed stability (--only does not change a case's games; strict pairing)
+        run: |
+          node tools/sim-v06.mjs --exp down --mode math1 --groups 1 --seed 900104 --workers 4 --out /tmp/v06-down-full.json > /dev/null
+          node tools/sim-v06.mjs --exp down --only kaoru --mode math1 --groups 1 --seed 900104 --workers 4 --out /tmp/v06-down-kaoru.json > /dev/null
+          node tools/compare-v06.mjs /tmp/v06-down-full.json /tmp/v06-down-kaoru.json | tee /tmp/v06-down-cmp.txt
+          grep -q '| down | kaoru | .* | 0.000±0.000 | 4 |' /tmp/v06-down-cmp.txt
+      - name: Ver.0.6 difficulty ladder, Mathematics II
+        run: node tools/sim-v06.mjs --exp ref --mode math2 --groups 3 --seed 900103 --workers 4 --out /tmp/v06-ref-math2.json | tee /tmp/v06-ref-math2.txt
+      - name: Install browser test dependencies
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Character-specific browser regression
+        run: node tests/e2e/play.mjs --only v06Characters,v06FreeSelect,v04bLevels,v04Match,v05eCutin,chiAutoPass
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nine-character-ai-benchmark
+          path: |
+            /tmp/all-math*.json
+            /tmp/v06-*
+          if-no-files-found: ignore
