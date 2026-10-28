@@ -1,6 +1,6 @@
 // 公開サイトの動作確認（Ver.0.6）：既存の GitHub Pages の URL を実際に開き、新しい版が配信されていることと、
 // タイトル → 対戦相手の選択（3人）→ 対局開始 まで操作できることを確かめる。サイトの内容は変更しない（読むだけ）。
-//   node tools/public-smoke.mjs --url https://asumax1128.github.io/mathjong/ --version 0.6.3 [--wait 600] [--shots dir]
+//   node tools/public-smoke.mjs --url https://asumax1128.github.io/mathjong/ --version 0.6.4 [--wait 600] [--shots dir]
 // 公開サイトではテスト用の機能（window.__mathjong・speed=test）は無効なので、画面の表示（DOM）だけで確認する。
 // 反映待ち：指定の版が配信されるまで、最大 --wait 秒まで繰り返し読み込む（キャッシュを避けるため毎回クエリを変える）。
 import { createRequire } from 'node:module';
@@ -11,7 +11,7 @@ const { chromium } = require('playwright');
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
 const URL0 = opt('--url', 'https://asumax1128.github.io/mathjong/');
-const VERSION = opt('--version', '0.6.3');
+const VERSION = opt('--version', '0.6.4');
 const WAIT = Number(opt('--wait', 600));
 const SHOTS = opt('--shots', null);
 
@@ -59,6 +59,7 @@ try {
   const names = await page.locator('.opp-card .opp-name').allInnerTexts();
   assert.deepEqual(names, ['かなた', 'みつき', 'あおと', 'ゆうじん', 'おうすけ', 'なつき', 'ゆき', 'たら', 'シャカ', 'かおる', 'アスマ', 'のっち']);
   assert.equal(await page.locator('.opp-placeholder').count(), 0, '仮表示を一覧から除去');
+  assert.equal(await page.locator('.opp-card[data-id="yujin"] .opp-trait').innerText(), '刻子大好き', 'ゆうじんの一覧紹介が新しい文言');
   assert.equal(await page.locator('.opp-grid img, .opp-grid picture').count(), 0, '画像は一覧では読み込まない');
   assert.doesNotMatch(await page.locator('.opp-grid').innerText(), /仮表示/, '一覧に仮表示の文字を出さない');
   assert.deepEqual(await page.locator('.opp-card .opp-level').allInnerTexts(), [...Array(4).fill('初級'), ...Array(4).fill('中級'), ...Array(4).fill('上級')], '難易度ごとに4人');
