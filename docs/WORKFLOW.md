@@ -1,9 +1,11 @@
 # 数雀｜開発・監査・公開・引き継ぎの標準運用
 
-> **2026-10-29 新3人の統合候補**：`feature/new-character-trio-integration` で、ゆうじん・たら・のっちを追加（画面0.6.1、既存ルールエンジン0.5.0-a）。既存9人・内部ID・保存形式は維持。単体376件・E2E全体（809秒）・250局のローカル検証が成功。現在のmainは `ce659038eadc7b7838dd6659808a088a49d29a76`、前回確認済みの公開版は9人版（今回の実URL再検査は通信制限で未実行）。新3人は未マージ・未公開。詳細は[統合記録](https://github.com/asumax1128/mathjong/blob/feature/new-character-trio-integration/docs/40-new-character-trio-integration.md)。PR #22/#23はDraft・未マージ、PR #19は対象外。包括承認は有効で、停止理由は追加承認待ちではなく、GitHub API/Pagesへの通信許可の未反映。
+> **最新確認：2026-10-29 / 数雀 Ver.0.6.1 公開済み**。GitHub main `6d254a56b92a3c041d1e1ffe5c2716a887179c57`。PR #24（ゆうじん・たら・のっち／12人選択）は HEAD `67f282a8d84a21647f901b834fd5414b32ddf256` でCI3件Success後に正式merged。既存Pagesの[デプロイ 40772371683](https://github.com/asumax1128/mathjong/actions/runs/40772371683)と[公開smoke 40772469585](https://github.com/asumax1128/mathjong/actions/runs/40772469585)もSuccess。公開URLは https://asumax1128.github.io/mathjong/ のまま。既存9名、ゲームルール、保存形式、エンジン版0.5.0-aは不変。
 
+> **直近の未完了作業**：PR #25（公開初心者教材E2E）はbaseを `main` に変更済み、HEAD `59d4cec098659ce19484d2b9467cf63a39215fc9`、差分は公開E2E関連5ファイルのみ。初心者教材CIはSuccessだがAI benchmarkはこの文書更新の確認時点で実行中。必須CIのSuccessを確認後、競合・HEADを再点検し、条件が整えば包括承認D16に従ってmainへマージする。新ワークフローの実サイトE2E成功は未確認。PR #19はDraftのまま変更しない。
 
-> **後続テストもpush済み**：`test/public-beginner-trio-smoke`（`d5bc040670431b85439a77573e54e75d6ec6a738`）。単体379件と、本番相当ローカルURLの教材1〜6段階・卒業→12人選択→通常対局開始が成功。実際のPages・CI・新規PR作成・mainマージは通信許可未反映で未実行。本体統合のコード・全体E2E成功は `a45d0821e4b55df70363d50a70849a82bfdddc73` を基準に記録。PR #22/#23を変更HEADの再取得後に正規マージし、本体統合→後続テストの順で処理する。
+> **iPhone Safari受入は別**：Ver.0.6の30/30、初心者の部屋1〜3の7/7は既存の成功記録。Ver.0.6.1の新3名・12人版および初心者の部屋4〜6のiPhone Safari実機検証は未実施。公開自動テストの成功を実機合格と記録しない。以下の古いスナップショット/PR状態に関する記述より、本欄と現在のGitHubを優先する。
+
 ## 0. 2026-10-28の包括承認（以前の逐次承認より優先）
 
 Claude Code復帰までCodexは一時的な開発・品質管理・リリースを担当する。既存仕様内の小変更は毎回の承認待ちをせず、実装・テスト・差分再点検・正規マージ・既存Pages公開・公開検査・記録を小さく繰り返す。
