@@ -60,6 +60,7 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 | [Ver.0.6-A キャラクターAI 実装報告](docs/26-ver0.6-a-character-ai-report.md) | 9人のAI・対局中の名前表示の実装と新旧比較 |
 | [Ver.0.6-A 難易度間の強さ（192試合）](docs/27-ver0.6-a-cross-level-strength-report.md) | 初級1 vs 中級3・中級1 vs 上級3 の小規模シミュレーションと課題 |
 | [Ver.0.6 最終調整・品質検証](docs/28-ver0.6-b-final-tuning.md) | 並列シミュレーター、上級3人の公開情報での改善、調整用／最終評価用 seed、95%CI、個性の指標、未解決の課題 |
+| [Ver.0.6 監査指摘の修正](docs/29-ver0.6-c-audit-fixes.md) | Codex 監査 FAIL への対応：人間のロン見送りを安全牌にしない（P2-1）、ケースID基準の seed と厳密な対比較、同点の順位の持分、AUC の同点処理と独立評価、E2E の打牌待ち |
 | [iPhone 実機テスト手順](docs/12-iphone-test-guide.md) | テストURL、Pages 設定、固定seed、報告方法 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |
