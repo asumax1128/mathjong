@@ -1,9 +1,9 @@
 # 数雀「初心者の部屋」実装第2弾：第4〜6段階（チー・ポン／リーチ・ロン・ツモ／卒業試験）
 
-> 状態：**Draft PR [#21](https://github.com/asumax1128/mathjong/pull/21)（未マージ・未公開）**。ブランチ `feature/beginner-room-lesson4to6`（main `39f2145` から作成）。
+> 状態：**PR #21は2026-10-28にmainマージ済み**（`ce659038eadc7b7838dd6659808a088a49d29a76`）。Pages成功、旧期待値のsmoke失敗後にPR #22修正ブランチの公開入口smokeが3件成功。**第4〜6段階のiPhone実機受入は未実施**。末尾11節の更新と実装時点の記録を区別する。
 > 承認済み設計：[PR #19](https://github.com/asumax1128/mathjong/pull/19) の docs/35（設計のみ・Draft。この実装で PR #19 のブランチは変更していない）。
 > 第1〜3段階：[docs/34](34-beginner-room-part1.md)（PR #20・mainマージ済み・iPhone実機7/7合格）。
-> mainへのマージ・GitHub Pagesへの公開はオーナーの明示承認の後に行う。別の公開サイト・プレビューサイトは作らない。
+> オーナーがHEAD `ac137f1e477b261f50a1e59e1606b5b589f6ebe8`のmainマージ・既存GitHub Pages公開を明示承認。別の公開サイト・プレビューサイトは作らない。
 
 ## 1. 方針（設計 docs/35 からの実装）
 - 第4〜6段階は**実際の対局エンジン（`Game`）の4人の局面**で練習する。山は `presetWall`（seed 1）で固定し、毎回同じ局面になる。
@@ -78,3 +78,16 @@
 - 修正前の一時コピーに追加テストを適用し、単体検査と関連 E2E が5-Cの旧表示を検出して失敗することを確認した。検証用コピーはPRへ反映せず、設計PR #19は変更しない。
 - 限定修正後の結果：`npm test` は **368/368 合格**（失敗・スキップ0）。`node --test tests/beginner-practice.test.js tests/riichi.test.js` は **39/39 合格**。関連 E2E `--only v07BeginnerRoom,v07BeginnerRoom2,v05Riichi` は成功（第1〜6段階、5-A のリーチ、通常対局のリーチとAI表示、数学Ⅰ・Ⅱ）。
 - ブラウザは付属バイナリ未配置のためシステム Chromium **154.0.8037.57** を使用し、外部の起動用プリロードで実行ファイルだけを指定した。別方式の headless shell を検証済みとは扱わない。iPhone Safari 実機は未実施。
+
+## 11. PR #21のマージ・公開後の記録（2026-10-28）
+
+- オーナー承認の対象はHEAD `ac137f1e477b261f50a1e59e1606b5b589f6ebe8`。GitHubのPR #21は**2026-10-28 11:39:43 UTC（20:39:43 JST）にMerged**、mainは `ce659038eadc7b7838dd6659808a088a49d29a76`。マージ後のtreeは承認HEADと同一。設計PR #19はDraft・未マージのまま。
+- [Pages build and deployment 40681686192](https://github.com/asumax1128/mathjong/actions/runs/40681686192)は**Success**。公開先は既存の <https://asumax1128.github.io/mathjong/> のまま。
+- [Public site smoke test 40681741442](https://github.com/asumax1128/mathjong/actions/runs/40681741442)は**Failure**。提示された失敗原因は `tools/public-smoke.mjs:59` の旧名称「ふくやま」の期待値。mainの正式表示は「シャカ」、内部IDは `fukuyama`。旧テストの不一致をローカルHTTPでも再現した。
+- テストだけの修正は、main `ce65903`から別ブランチ `fix/public-smoke-shaka-name`、HEAD `fdcfcd4b3acf57511f873cf59183a5747383d541` に分離。期待値1か所だけを変更し、ゲーム本体・キャラクター・ID・AI・エンジンには変更なし。ローカルHTTPで旧テスト失敗→修正版smoke成功（対局開始・資源JS28/CSS1/PNG1・通信エラーなし）。`tests/opponents.test.js` は10件成功。
+- この文書更新は[PR #23](https://github.com/asumax1128/mathjong/pull/23)、期待値1行の修正は[PR #22](https://github.com/asumax1128/mathjong/pull/22)としてDraft作成済み。記録時点では未マージ。PR #22の `fix/public-smoke-shaka-name`、HEAD `fdcfcd4b3acf57511f873cf59183a5747383d541` で [40689929481](https://github.com/asumax1128/mathjong/actions/runs/40689929481)、[40689890309](https://github.com/asumax1128/mathjong/actions/runs/40689890309)、[40689790935](https://github.com/asumax1128/mathjong/actions/runs/40689790935) はすべてSuccess（2026-10-28 21:40〜21:41 JST）。完全HEAD・ブランチ・Actions結果とテスト仕様を照合した。通常対局の入口・390px・数学Ⅰが中心で、全6段階や実機受入の代替ではない。
+- **接続と検証範囲の区別**：Codexからの直接接続は拒否されるが、外部のGitHub Actionsでは上記3件が成功。公開サイトの全6段階、配信JSとmainの一致、iPhone実機は未確認。全段階の直接URL検査を追加する `test/public-beginner-room-smoke` は別途検証・公開する。
+- **P2-1は修正済み**：第5-Cはツモ専用表示。修正前HEADの広範囲独立監査後、Codexが限定修正し、自身で再検証した。単体368件・関連E2E成功、320/375/390/430pxで全9牌の選択後も禁止操作なし、内部からの禁止操作も拒否、ツモ後合計400点。別担当者による修正後全コードの独立監査ではない。
+- 第1〜3段階の実機7/7とVer.0.6の実機30/30は既存範囲の記録。**第4〜6段階のiPhone Safari実機テストは未実施**。公開URLでP2-1、チー・ポン、リーチ、卒業試験、保存と再開、通常対局への帰還を確認してから正式受入とする。
+
+- **運用変更**：オーナーは2026-10-28に既存仕様内の小変更を安全条件付きで自律マージ・公開する包括承認を与えた（D16、WORKFLOW 0節）。追加承認待ちは不要だがAPI・CI・保護・HEAD確認を迂回しない。PR #19は対象外。PR #22/#23のReady化・マージはAPI接続制限で未実行。

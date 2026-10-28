@@ -251,7 +251,9 @@
     },
     "pr23": {
       "head": "7bf00cfdc80c9da0d707ed4aa136bf621f28696f",
-      "state": "Draft/open"
+      "state": "Draft/open",
+      "latestHead": "d75da43aafbbb4702610ff9f95a91e6be3f4c4af",
+      "headNote": "head is start-of-work snapshot; latestHead is pushed handoff update"
     },
     "pr19": {
       "head": "de8fc02d092b4c5884a4615fdba695bf21013b89",
@@ -259,9 +261,18 @@
     },
     "featurePR": null,
     "remoteCI": "unconfirmed",
-    "merge": "not performed"
+    "merge": "not performed",
+    "dependencyIntegration": "pending PR22/23 history included in feature branch; not merged on GitHub"
   },
   "safari": "WebKit binary unavailable; iPhone Safari untested",
   "validationType": "implementer verification and reference comparison; not a separate independent reviewer",
-  "implementationCodeCommit": "be4f0dd25842bf9a7bbce5a78b15efc011c204b7"
+  "implementationCodeCommit": "be4f0dd25842bf9a7bbce5a78b15efc011c204b7",
+  "followupPublicBeginner": {
+    "branch": "test/public-beginner-trio-smoke",
+    "testedCommit": "d5bc040670431b85439a77573e54e75d6ec6a738",
+    "unitPassed": 379,
+    "directLocalMode": "passed; stages1-6, four widths, graduation to normal game",
+    "actualPages": "not executed",
+    "PR": null
+  }
 }
