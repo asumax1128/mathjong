@@ -6,7 +6,7 @@
 
 ## 現行開発引き継ぎ（Ver.0.6正式完成）
 
-最新の状態をGitHubから復元するには、[新チャット入口](docs/CHAT_START.md) → [HANDOFF](docs/HANDOFF.md) → [DECISIONS](docs/DECISIONS.md) → [ROADMAP](docs/ROADMAP.md) → [WORKFLOW](docs/WORKFLOW.md) を参照。これらはPR #11で整備する文書のため、**マージ前はPR #11のブランチを参照**。正式完成・実機合格の一次記録は[docs/32](docs/32-ver0.6-free-select-release.md)。
+最新の状態をGitHubから復元するには、[新チャット入口](docs/CHAT_START.md) → [HANDOFF](docs/HANDOFF.md) → [DECISIONS](docs/DECISIONS.md) → [ROADMAP](docs/ROADMAP.md) → [WORKFLOW](docs/WORKFLOW.md) を参照。これらは**PR #11でmainへマージ済み**（2026-10-28）。正式完成・実機合格の一次記録は[docs/32](docs/32-ver0.6-free-select-release.md)。
 
 ## 遊ぶ（Ver.0.1 試作版）
 
