@@ -58,23 +58,22 @@ const PROFILES = {
     trait: '鳴かずに刻子を育てる',
     personality: 'こつこつ同じ牌を集める、粘り強いタイプ。',
     style: 'チー・ポンをせず、刻子がそろう形を目指す。数式が完成したときも、ロン・ツモを見逃さない。',
-    placeholder: 'ゆ',
   },
   tara: {
     trait: '待ちを育てて勝負',
     personality: 'すぐには決めず、好機を待つ慎重なタイプ。',
     style: '待ちの残り枚数を重視する。弱い待ちは最大2巡までリーチを保留するが、他家のリーチや山の残りが少ないときは保留しない。',
-    placeholder: 'た',
   },
   nocchi: {
     trait: '相手の動きに適応',
     personality: '相手の癖を観察し、柔軟に守り方を変えるタイプ。',
     style: '公開された鳴きやリーチの傾向を、この試合の過去局から見て攻守を調整する。他家の手牌や山の順番は見ない。',
-    placeholder: 'の',
   },
 };
 
 // 旧9人は元の難易度グループを維持。新3人は明示されたlevelに従い各グループ末尾へ追加する。
+// 今後の正式イラストは PROFILES[id].artSrc に静的な素材パスを追加する。
+// 一覧は画像を表示せず、詳細画面（oppDetailHTML）のみで必要な時に読み込む。
 export const OPPONENTS = Object.freeze(
   ['beginner', 'intermediate', 'advanced'].flatMap((level) => [...CHARACTER_ROSTER[level], ...CHARACTER_ROSTER.additional.filter((c) => c.level === level)].map((c) => Object.freeze({
     id: c.id, name: c.name, age: c.age, level, levelLabel: LEVEL_LABELS[level], personalityKey: c.personality, styleLabel: c.styleLabel,
