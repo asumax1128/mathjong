@@ -13,12 +13,12 @@ import { decideCharacter as oldDecision, CHARACTER_ROSTER as oldRoster } from '.
 import { TRIO_PARAMS } from '../src/engine/character-ai-trio.js';
 import { rulesFor, makeGame, findTile } from './helpers.js';
 
-test('名簿：既存9人と既定3人を維持。追加3人は強さ・年齢を捏造しない別枠', () => {
+test('名簿：既存9人と既定3人を維持。新3人はオーナー指定の年齢・難易度表示に一致', () => {
   for (const level of ['beginner','intermediate','advanced']) {
     assert.equal(CHARACTER_ROSTER[level], oldRoster[level]); assert.equal(rosterForLevel(level), oldRoster[level]);
   }
   assert.deepEqual(TRIO_ROSTER.map(c => c.id), ['yujin','tara','nocchi']);
-  assert.ok(TRIO_ROSTER.every(c => c.age === null));
+  assert.deepEqual(TRIO_ROSTER.map(c => [c.id, c.age, c.level]), [['yujin',26,'beginner'],['tara',25,'intermediate'],['nocchi',28,'advanced']]);
   assert.equal(Object.values(CHARACTER_ROSTER).flat().length, 12);
   assert.deepEqual(TRIO_PARAMS, { yujin:{tripletWeight:4,formulaWeight:.25},tara:{minLive:6,maxDelay:2,minWall:24},nocchi:{defense:1.5,ownBase:2.5,opponentBase:3} });
 });
