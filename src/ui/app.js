@@ -17,7 +17,8 @@ import { reconcileOrder, defaultOrder } from './handorder.js';
 import { createHandDrag } from './handdrag.js';
 import { CHI_AUTOPASS_KEY, PON_AUTOPASS_KEY, parseChiAutoPass, parsePonAutoPass, visibleClaimActions, claimPendingForHint, claimPolicy, autoPassDue, policySettings, autoPassedKind, mergeKind, autoPassNotice } from './autopass.js';
 import { YAKU_GUIDE, GUIDE_NOTES, guideCondition } from './guide.js';
-import { createRoomState, pickRoomTile, checkRoom, nextRoom, roomHint, roomHTML } from './beginner-room.js';
+import { createRoomState, pickRoomTile, checkRoom, nextRoom, roomHint, roomHTML, enterStage, gotoStage, resumeRoom, retryRoom, openRoomList, roomPracticeSelect, roomPracticeAct, roomPracticeContinue, partsOf } from './beginner-room.js';
+import { loadProgress, saveProgress, hasProgress } from './beginner-progress.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, MAX_ROUND } from './params.js';
 import { validateReplay, replayQuery } from './replay.js';
 import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, scanEffects, fxOffer, fxAdvance, fxTimes, fxProgress, isLiteEffect } from './effects.js';
@@ -32,6 +33,9 @@ const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch { /* 保存できなくても動作する */ } },
 };
+// 初心者の部屋の進み具合（専用のキー。保存できない環境では画面の記憶だけで動く）
+const roomStorage = () => { try { return window.localStorage; } catch { return null; } };
+function saveRoom() { if (S.beginnerRoom) S.beginnerRoom.saveOk = saveProgress(roomStorage(), S.beginnerRoom.progress); }
 const params = new URLSearchParams(location.search);
 // テスト専用機能（山の指定・AI待ち時間0）はローカル開発環境でのみ有効。公開サイトでは無効。
 const IS_LOCAL = isLocalHost(location.hostname);
@@ -1335,28 +1339,62 @@ app.addEventListener('click', (ev) => {
       S.opp.selected = S.matchSettings.chars.slice();
       leaveGame('select');
       break;
-    case 'br-open':
-      S.beginnerRoom = createRoomState();
-      S.screen = 'beginner-room'; render(); break;
+    case 'br-open': {
+      // 初心者の部屋：この端末の進み具合を読む。続きがあれば一覧から、なければ第1段階から。
+      const room = createRoomState(loadProgress(roomStorage(), partsOf));
+      if (hasProgress(room.progress)) openRoomList(room);
+      else enterStage(room, rulesForMode('math1'), 0);
+      S.beginnerRoom = room;
+      S.screen = 'beginner-room'; saveRoom(); render(); break;
+    }
     case 'br-pick':
       if (S.screen !== 'beginner-room') break;
       pickRoomTile(S.beginnerRoom, rulesForMode('math1'), Number(el.dataset.idx)); render(); break;
     case 'br-check':
       if (S.screen !== 'beginner-room') break;
-      checkRoom(S.beginnerRoom, rulesForMode('math1')); render(); break;
+      checkRoom(S.beginnerRoom, rulesForMode('math1')); saveRoom(); render(); break;
     case 'br-hint':
       if (S.screen !== 'beginner-room') break;
       roomHint(S.beginnerRoom); render(); break;
     case 'br-reset':
+      // やり直し：今の段階（課題）を最初の局面から。通常対局には巻き戻しはない。
       if (S.screen !== 'beginner-room') break;
-      S.beginnerRoom = createRoomState(); render(); break;
+      retryRoom(S.beginnerRoom, rulesForMode('math1')); saveRoom(); render(); break;
     case 'br-next':
       if (S.screen !== 'beginner-room' || !S.beginnerRoom.done) break;
-      if (!nextRoom(S.beginnerRoom)) S.screen = 'title';
-      render(); break;
+      if (!nextRoom(S.beginnerRoom, rulesForMode('math1'))) openRoomList(S.beginnerRoom);
+      saveRoom(); render(); window.scrollTo(0, 0); break;
+    case 'br-list':
+      if (S.screen !== 'beginner-room') break;
+      openRoomList(S.beginnerRoom); render(); window.scrollTo(0, 0); break;
+    case 'br-goto':
+      if (S.screen !== 'beginner-room') break;
+      if (gotoStage(S.beginnerRoom, rulesForMode('math1'), Number(el.dataset.stage))) { saveRoom(); render(); window.scrollTo(0, 0); }
+      break;
+    case 'br-resume':
+      if (S.screen !== 'beginner-room') break;
+      resumeRoom(S.beginnerRoom, rulesForMode('math1')); saveRoom(); render(); window.scrollTo(0, 0); break;
     case 'br-title':
       if (S.screen !== 'beginner-room') break;
       S.screen = 'title'; render(); break;
+    case 'br-challenge':
+      // 卒業試験の後：通常の「対戦相手を選ぶ」画面へ（選択の状態はそのまま）
+      if (S.screen !== 'beginner-room' || !S.beginnerRoom.done) break;
+      S.opp.detail = null;
+      S.opp.notice = null;
+      S.screen = 'select'; render(); window.scrollTo(0, 0); break;
+    case 'bp-tile':
+      if (S.screen !== 'beginner-room') break;
+      roomPracticeSelect(S.beginnerRoom, Number(el.dataset.id)); render(); break;
+    case 'bp-discard': case 'bp-riichi': case 'bp-tsumo': case 'bp-ron': case 'bp-pon': case 'bp-chi': case 'bp-pass': {
+      if (S.screen !== 'beginner-room') break;
+      const type = { 'bp-discard': 'discard', 'bp-riichi': 'discard', 'bp-tsumo': 'tsumo', 'bp-ron': 'ron', 'bp-pon': 'pon', 'bp-chi': 'chi', 'bp-pass': 'pass' }[act];
+      roomPracticeAct(S.beginnerRoom, { type, riichi: act === 'bp-riichi', option: Number(el.dataset.opt) });
+      saveRoom(); render(); break;
+    }
+    case 'bp-continue':
+      if (S.screen !== 'beginner-room') break;
+      roomPracticeContinue(S.beginnerRoom); render(); break;
     case 'choose-opponents':
       // タイトルの「対戦相手を選ぶ」：選択画面へ（それまでの選択は残す）
       S.opp.detail = null;

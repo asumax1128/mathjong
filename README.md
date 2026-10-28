@@ -69,6 +69,8 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 | [Ver.0.6 残存 P3 の最終修正](docs/30-ver0.6-d-residual-p3.md) | 再監査 CONDITIONAL PASS への対応：AUC が定義できないときの評価（null）、ロン後半の演出の E2E を上限時間内の状態の確認に変更。残存 P3 の記録 |
 | [Ver.0.6 開発完了記録](docs/31-ver0.6-completion.md) | 9人のキャラクターAI の開発完了時点のまとめ：文書の一覧、監査の経過（FAIL → CONDITIONAL PASS ×2）、変更していないもの、残存課題（記録時点。その後 PR #17 はマージ・公開、docs/32） |
 | [Ver.0.6 自由選択と公開](docs/32-ver0.6-free-select-release.md) | 9人から3人を自由に選ぶ対戦相手の選択（2列/3列・詳細・おまかせ・座席の抽選・同じ3人と再戦・相手を変更）、main へのマージと既存の GitHub Pages の更新、**2026-10-28 正式完成**（iPhone 実機テスト 30/30 合格）、継続課題と引き継ぎ |
+| [初心者の部屋 第1〜3段階](docs/34-beginner-room-part1.md) | 数学Ⅰで3枚の数式・3面子・ツモと打牌を練習（PR #20・mainマージ・iPhone 7/7合格） |
+| [初心者の部屋 第4〜6段階](docs/36-beginner-room-lessons4to6.md) | 実際のエンジンの固定局面でチー・ポン・役の制限・リーチ・ロン・ツモ・卒業試験、進み具合の保存（Draft PR #21・未マージ・未公開） |
 | [iPhone 実機テスト手順](docs/12-iphone-test-guide.md) | テストURL、Pages 設定、固定seed、報告方法 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |
