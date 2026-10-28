@@ -298,10 +298,41 @@ export function chooseChi(rules, view, tileType, options, personality) {
 // level：AI 難易度（Ver.0.4-B）'beginner' | 'intermediate' | 'advanced'。省略時は中級（Ver.0.4-A までの AI と同一）。
 // info：試合の公開情報（持ち点・親番など。上級だけが使う。src/engine/ai-levels.js の matchInfo を参照）。
 export function decide(game, seat, personality, rng, level = 'intermediate', info = null) {
-  if (level === 'beginner') return decideBeginner(game, seat, rng);
-  if (level === 'advanced') return decideAdvanced(game, seat, personality, rng, info);
-  if (level !== 'intermediate') throw new Error(`unknown AI level ${level}`);
-  return decideIntermediate(game, seat, personality, rng);
+  if (level !== 'beginner' && level !== 'intermediate' && level !== 'advanced') throw new Error(`unknown AI level ${level}`);
+  // リーチ中（規則 riichi のとき）：ツモ和了できればツモ、できなければツモ切り（難易度によらない。鳴きはエンジンが出さない）
+  const p = game.pending();
+  if (p && p.type === 'turn' && game.riichi && game.riichi[seat]) {
+    if (p.canTsumo) return { type: 'tsumo' };
+    return { type: 'discard', tile: game.drawn };
+  }
+  let a;
+  if (level === 'beginner') a = decideBeginner(game, seat, rng);
+  else if (level === 'advanced') a = decideAdvanced(game, seat, personality, rng, info);
+  else a = decideIntermediate(game, seat, personality, rng);
+  return a.type === 'discard' ? withRiichi(game, seat, a, level) : a;
+}
+
+// 打牌を決めた後、その打牌でリーチするか（Ver.0.5-A）。打牌の選び方は各難易度のまま変えない。
+// 条件：規則 riichi・門前・未リーチ、その牌を捨てた8枚が聴牌。
+//   初級：聴牌ならいつもリーチ。
+//   中級・上級：待ちの牌が自分から見えていない分（＝山や他家の手にあり得る枚数）で1枚以上残っているときだけリーチ
+//              （残り0枚の待ちでツモ切りに縛られるのを避ける）。
+// 判断材料は自分の手牌と公開情報（unseenCounts）だけ。
+export function riichiDecision(game, seat, tileId, level) {
+  if (!game.riichiEnabled || game.riichi[seat] || game.melds[seat].length) return false;
+  const rules = game.rules;
+  const view = game.viewFor(seat);
+  const counts = viewCounts(rules, view);
+  counts[game.typeOf(tileId)]--;
+  const waits = game.waitsOf(counts);
+  if (!waits.length) return false;
+  if (level === 'beginner') return true;
+  const unseen = unseenCounts(rules, view);
+  return waits.reduce((n, t) => n + Math.max(0, unseen[t]), 0) >= 1;
+}
+
+function withRiichi(game, seat, a, level) {
+  return riichiDecision(game, seat, a.tile, level) ? { ...a, riichi: true } : a;
 }
 
 // 中級：Ver.0.4-A までの AI（判断・乱数の使い方とも変更しない）
@@ -323,7 +354,7 @@ function decideIntermediate(game, seat, personality, rng) {
 
 // Game に行動を適用する共通関数（UI・シミュレーター・テストで共有）
 export function applyAction(game, seat, action) {
-  if (action.type === 'discard') game.discard(seat, action.tile);
+  if (action.type === 'discard') game.discard(seat, action.tile, action.riichi ? { riichi: true } : undefined);
   else if (action.type === 'tsumo') game.tsumo(seat);
   else game.respond(seat, action);
 }

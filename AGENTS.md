@@ -1,8 +1,7 @@
 # MATHJONG — Codex独立監査ガイド
 
-> **2026-10-26現在の現行状態**：Ver.0.4-BはPR #10マージ済み、iPhone Safari実機7/7合格。現在の状態を復元する場合は **[docs/CHAT_START.md](docs/CHAT_START.md) → [docs/HANDOFF.md](docs/HANDOFF.md) → [docs/DECISIONS.md](docs/DECISIONS.md) → [docs/ROADMAP.md](docs/ROADMAP.md) → [docs/WORKFLOW.md](docs/WORKFLOW.md)** をまず読む。docs/18は**Ver.0.4-B監査前の歴史的な引き継ぎ**。旧仕様の記述よりmainの最新ソース・版別記録を優先。文書は未マージPR #11のブランチにある場合がある。
+> **現行（2026-10-28）：Ver.0.6正式完成**。9人のキャラクターAI＋3人自由選択がPR #17でmainマージ済み。iPhone Safari実機30/30項目合格。新チャットの標準入口は[CHAT_START](docs/CHAT_START.md)、現状は[HANDOFF](docs/HANDOFF.md)。これらの文書はPR #11（Draft・未マージ）に収録予定。2026-10-24以前の仕様・Ver.0.4-Bまでの記述を現在時制で誤用しない。
 
-> このファイル後半の初期監査チェックには「ロン＞チー」「ポンなし」「360°未決定」など**Ver.0.1時点の表現が残っていた**。現行は **ロン＞ポン＞チー、数学Ⅰ124枚・数学Ⅱ168枚、ポン実装済み**。役点の最終確定とは区別する。
 
 このファイルは `asumax1128/mathjong` で作業するCodexに向けたガイドライン。
 
@@ -13,14 +12,14 @@
 - **ChatGPT**: 監査指摘を整理して次の実装指示を作る。
 
 ## まず読むこと
-まず上記標準5ファイルを読む。その後 `README.md`, `docs/01-game-rules.md`, `docs/02-tiles-and-values.md`, `docs/03-yaku-catalog.md`, `docs/05-decision-log.md`, `docs/09-roadmap.md`, `docs/10-ver0.1-implementation.md`, `docs/11-audit-and-device-testing.md`。
+`README.md`, `docs/01-game-rules.md`, `docs/02-tiles-and-values.md`, `docs/03-yaku-catalog.md`, `docs/05-decision-log.md`, `docs/09-roadmap.md`, `docs/10-ver0.1-implementation.md`, `docs/11-audit-and-device-testing.md`。
 
-**採用済みの方針・Ver.0.1暫定設定・未承認の提案を混同しないこと。** 360°を含む数学Ⅱモードやポンは現在の試作として実装済みだが、役点などの永続的な採否・将来ルールは未決定。旧 `scripts/legacy/` は過去資料であり現行エンジンとは別。
+**採用済みの方針・Ver.0.1暫定設定・未承認の提案を混同しないこと。** 360°、役点、役満の鳴き可否などはまだ正式確定ではない。旧 `scripts/legacy/` は過去資料であり現行エンジンとは別。
 
 ## 優先監査項目
 1. 数学的正確性: sin/cos/tanの49有効面子、象限符号、未定義のtan90°/270°、結果値の同値正規化。
 2. 和了と役: 3面子の完全列挙、最高点、チー後の役必須、九角無双、同角三関、三重同式、牌の使用枚数制限。
-3. ゲーム状態: 牌IDを使った山・手牌・河・公開面子の保存、ツモ・打牌・チー・ロン・流局、ロン＞ポン＞チー、アタマハネ、後続ロンによるチー取消し、局切替。
+3. ゲーム状態: 牌IDを使った山・手牌・河・公開面子の保存、ツモ・打牌・チー・ロン・流局、ロン＞チー、アタマハネ、後続ロンによるチー取消し、局切替。
 4. 情報公平性: AIが他家の手牌・未来の山順を参照しない、seed固定時の挙動。
 5. UX: iPhone Safariを中心にタップ判定、押し間違い、分数表示、縦横スクロール、視認性、テンポ。
 6. 公開・安全: GitHub Pagesでの静的アセット相対パス、秘密情報流出・開発用機能の公開、キャッシュや改版の検証。
@@ -32,7 +31,7 @@
 - **発見事項を重大度 P0(致命的) / P1(高) / P2(中) / P3(低)** に区分。
 - 各指摘に**ファイル・行付近／根拠／再現手順またはテスト／影響／改善案**を記載。
 - 確認済み不具合と未検証の疑いを分ける。実行できなかったテストは「未実行」と明記。
-- 原則P0〜P2が未解決のPRはマージを推奨しない。P3は改善を記録し、オーナーが対応時期を決める。修正をClaude Codeに依頼し、Codexが再監査する。
+- P0/P1が未解決のPRはマージを推奨しない。修正をClaude Codeに依頼し、Codexが再監査する。
 - 監査だけを頼まれた場合は、無断コミット・マージ・ルール改変をしない。
 
 詳しい運用手順: `docs/11-audit-and-device-testing.md`。

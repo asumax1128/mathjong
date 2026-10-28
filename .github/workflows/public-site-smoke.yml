@@ -1,0 +1,30 @@
+name: Public site smoke test (read-only)
+# 既存の GitHub Pages（https://asumax1128.github.io/mathjong/）を実際に開いて、新しい版の配信と
+# タイトル → 対戦相手の選択 → 対局開始 を確認する。サイトの内容・公開設定は変更しない（読むだけ）。
+on:
+  page_build:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install browser
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Open the existing Pages URL (title → choose 3 opponents → start a match)
+        run: |
+          mkdir -p /tmp/public-shots
+          node tools/public-smoke.mjs --url https://asumax1128.github.io/mathjong/ --version 0.6.0-a --wait 900 --shots /tmp/public-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: public-smoke-shots
+          path: /tmp/public-shots

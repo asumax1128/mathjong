@@ -1,7 +1,5 @@
 # MATHJONG 開発ロードマップ（企画 → 遊べる試作 → 対戦版）
 
-> **【履歴資料】** 本書は2026-10-24の**企画段階のロードマップ**で、チェックリストが未更新でも現在の未実装を意味しない。Ver.0.4-Bまでmain反映済み・iPhone実機合格。 現行の参照先： [HANDOFF.md](HANDOFF.md) / [DECISIONS.md](DECISIONS.md) / [ROADMAP.md](ROADMAP.md) / [CHAT_START.md](CHAT_START.md)。旧本文は当時の文脈を保持しているため削除・静かに上書きしない。
-
 作成: 2026-10-24  
 対象リポジトリ: `asumax1128/mathjong`  
 状態: **開発計画（提案）**。新しいルール・期日をユーザー承認なく「正式決定」にしない。

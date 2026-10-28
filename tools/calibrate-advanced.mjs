@@ -64,7 +64,8 @@ for (let i = 0; i < GAMES; i++) {
           for (const [x, n] of need) for (let j = 0; j < n; j++) q *= (Math.max(0, unseen[x] - j) * hs) / U / (j + 1);
           w += q;
         }
-        danger.push([1, Math.log(w + 1e-3), turns, ex.length === 1 ? 1 : 0, ex.length >= 2 ? 1 : 0, view.rivers[o].includes(t) ? 1 : 0, Math.min(turns, 12) ** 2 / 10, w > 0 ? 1 : 0, g.ronAnalysis(o, id) ? 1 : 0]);
+        // 最後の特徴量（Ver.0.5-A）：その他家がリーチしているか（公開情報）
+        danger.push([1, Math.log(w + 1e-3), turns, ex.length === 1 ? 1 : 0, ex.length >= 2 ? 1 : 0, view.rivers[o].includes(t) ? 1 : 0, Math.min(turns, 12) ** 2 / 10, w > 0 ? 1 : 0, view.riichi && view.riichi[o] ? 1 : 0, g.ronAnalysis(o, id) ? 1 : 0]);
       }
     }
     const a = decide(g, s, pers[s], rng);
@@ -117,6 +118,6 @@ const dc = fit(danger);
 const wc = fit(win);
 console.log(JSON.stringify({
   mode: MODE, games: GAMES, seed: SEED,
-  danger: { rows: danger.length, ronRate: +(danger.filter((r) => r[8]).length / danger.length).toFixed(4), coef: dc, auc: auc(danger, dc), features: '[定数, log(w+0.001), turns, melds=1, melds=2, inRiver, min(turns,12)^2/10, w>0]' },
+  danger: { rows: danger.length, ronRate: +(danger.filter((r) => r[9]).length / danger.length).toFixed(4), coef: dc, auc: auc(danger, dc), features: '[定数, log(w+0.001), turns, melds=1, melds=2, inRiver, min(turns,12)^2/10, w>0, riichi]' },
   win: { rows: win.length, winRate: +(win.filter((r) => r[4]).length / win.length).toFixed(3), coef: wc, auc: auc(win, wc), features: '[定数, log(手の価値), 山の残り, 鳴いた回数]' },
 }, null, 1));

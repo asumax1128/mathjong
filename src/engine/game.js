@@ -27,6 +27,9 @@ export class Game {
     this.events = [];
     this.result = null;
     this.turnCount = 0;
+    // リーチ（規則 rules.riichi のときだけ）：席ごとに null または { tile: 宣言牌の id, turn: 宣言時の turnCount }
+    this.riichi = [null, null, null, null];
+    this._riichiMemo = null;
 
     for (let r = 0; r < rules.config.handSize; r++) {
       for (let k = 0; k < SEAT_COUNT; k++) this.hands[next(dealer, k)].push(this.wall.pop());
@@ -99,6 +102,48 @@ export class Game {
     return this.rules.analyzeWin(this.countsOf([...this.hands[seat], tileId]), this.exposedMelds(seat), { ron: true });
   }
 
+  get riichiEnabled() {
+    return this.rules.config.rules.riichi === true;
+  }
+
+  // 手の内 counts（和了牌を除く8枚など）が聴牌か：和了できる牌の種類（待ち）の一覧。
+  // 和了の判定は既存の analyzeWin（数式面子・刻子・特殊和了）をそのまま使う。
+  // その種類の牌が手の内ですでに全部使われている待ち（物理的にあり得ない牌）は数えない。
+  waitsOf(counts, exposed = []) {
+    const out = [];
+    for (let t = 0; t < counts.length; t++) {
+      if (counts[t] >= this.rules.types[t].copies) continue;
+      counts[t]++;
+      const ok = !!this.rules.analyzeWin(counts, exposed);
+      counts[t]--;
+      if (ok) out.push(t);
+    }
+    return out;
+  }
+
+  // リーチを宣言できる打牌：[{ type: 牌の種類, ids: [その種類の手牌の id…], waits: [待ちの種類…] }]。
+  // 条件：リーチの規則が有効・自分の打牌番・門前（公開面子なし）・未リーチ。9枚から1枚捨てた8枚が聴牌になる種類だけ。
+  // 同じ局面では結果を再利用する（pending() の多い UI・AI から何度も呼ばれるため）。
+  riichiOptions(seat) {
+    if (!this.riichiEnabled || this.phase !== 'turn' || this.current !== seat || this.riichi[seat] || this.melds[seat].length) return [];
+    const key = `${seat}:${this.events.length}`;
+    if (this._riichiMemo && this._riichiMemo.key === key) return this._riichiMemo.opts;
+    const counts = this.countsOf(this.hands[seat]);
+    const opts = [];
+    const seen = new Set();
+    for (const id of this.hands[seat]) {
+      const t = this.tileType[id];
+      if (seen.has(t)) continue;
+      seen.add(t);
+      counts[t]--;
+      const waits = this.waitsOf(counts);
+      counts[t]++;
+      if (waits.length) opts.push({ type: t, ids: this.hands[seat].filter((x) => this.tileType[x] === t), waits });
+    }
+    this._riichiMemo = { key, opts };
+    return opts;
+  }
+
   // チーとポンの合計回数の上限（旧設定の maxChi にも対応）
   get maxCalls() {
     const r = this.rules.config.rules;
@@ -107,7 +152,7 @@ export class Game {
 
   // seat が tileId（上家の打牌）でチーできる面子の候補（数式面子のみ）
   chiOptions(seat, tileId) {
-    if (this.melds[seat].length >= this.maxCalls) return [];
+    if (this.riichi[seat] || this.melds[seat].length >= this.maxCalls) return []; // リーチ後はチー不可
     const t = this.tileType[tileId];
     const out = [];
     for (const mi of this.rules.meldsByTile[t]) {
@@ -128,7 +173,7 @@ export class Game {
 
   // seat が tileId（他家の打牌）でポンできるか。できれば { meld: 刻子の index, use: [手牌の id×2] }、できなければ null。
   ponOption(seat, tileId) {
-    if (!this.rules.config.rules.pon || this.melds[seat].length >= this.maxCalls) return null;
+    if (!this.rules.config.rules.pon || this.riichi[seat] || this.melds[seat].length >= this.maxCalls) return null; // リーチ後はポン不可
     const t = this.tileType[tileId];
     const k = this.rules.koutsuOf(t);
     if (!k) return null;
@@ -137,12 +182,24 @@ export class Game {
   }
 
   // ---- 手番の行動 ----
-  discard(seat, tileId) {
+  // opts.riichi：この打牌でリーチを宣言する（riichiOptions の種類の牌だけ）。
+  // リーチ後の打牌はツモ切り（直前にツモった牌）だけ。それ以外はエンジンが拒否する（画面の制限だけに頼らない）。
+  discard(seat, tileId, { riichi = false } = {}) {
     this._expect(seat, 'turn');
     const i = this.hands[seat].indexOf(tileId);
     if (i < 0) throw new Error('tile not in hand');
+    if (this.riichi[seat]) {
+      if (riichi) throw new Error('already in riichi');
+      if (tileId !== this.drawn) throw new Error('riichi: tsumogiri only');
+    }
+    if (riichi) {
+      const t = this.tileType[tileId];
+      if (!this.riichiOptions(seat).some((o) => o.type === t)) throw new Error('riichi not possible');
+      this.riichi[seat] = { tile: tileId, turn: this.turnCount };
+      this.log({ type: 'riichi', seat, tile: tileId });
+    }
     this.hands[seat].splice(i, 1);
-    this.rivers[seat].push({ id: tileId, tsumogiri: tileId === this.drawn });
+    this.rivers[seat].push({ id: tileId, tsumogiri: tileId === this.drawn, ...(riichi ? { riichi: true } : {}) });
     this.log({ type: 'discard', seat, tile: tileId });
     this.drawn = null;
     this.justDrew = false;
@@ -245,8 +302,18 @@ export class Game {
     }
     this.phase = 'ended';
     this.claim = null;
+    analysis = this._withRiichi(seat, analysis);
     this.result = { type: 'win', winner: seat, how, from, tile: tileId, analysis, points: analysis.points };
     this.log({ type: 'win', seat, how, from });
+  }
+
+  // リーチした人の和了：基本点に riichiBonus を加え、役の一覧に「リーチ」を加える。
+  // 役満（通常の役・基本点を加算しない規則）には加算せず、riichi フラグだけを付ける。入力の analysis は変更しない。
+  _withRiichi(seat, analysis) {
+    if (!this.riichi[seat]) return analysis;
+    const bonus = analysis.yakuman ? 0 : (this.rules.config.rules.riichiBonus ?? 1);
+    const yaku = bonus ? [...analysis.yaku, { id: 'riichi', name: 'リーチ', points: bonus, yakuman: false, riichi: true }] : analysis.yaku;
+    return { ...analysis, yaku, points: analysis.points + bonus, riichi: true, riichiBonus: bonus };
   }
 
   _endDraw() {
@@ -272,6 +339,7 @@ export class Game {
       handCounts: this.hands.map((h) => h.length),
       wallCount: this.wall.length,
       dealer: this.dealer,
+      riichi: this.riichi.map((r) => !!r), // リーチ宣言（公開情報）
     };
   }
 

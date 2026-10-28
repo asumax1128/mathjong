@@ -6,7 +6,7 @@
 // 数学Ⅰ（度数法・0°〜180°・124枚）と数学Ⅱ（弧度法・0〜2π・168枚）の2モードを持つ。
 // 内部の角度は常に度（deg）で持ち、弧度法は画面表示だけで切り替える（angleUnit）。
 
-export const ENGINE_VERSION = '0.3.0-a';
+export const ENGINE_VERSION = '0.5.0-a';
 
 // Ver.0.1〜0.2.1 の規則（刻子・ポンなし、数式面子のみ、関数牌各16枚・0°〜360°）。
 // 互換テストと tools/simulate.mjs --legacy で使う（Ver.0.1 と同じ結果になることを確認する）。
@@ -141,6 +141,8 @@ export function modeConfig(mode = DEFAULT_MODE) {
     maxCalls: 2, // チーとポンの合計
     calledHandNeedsYaku: true, // チー・ポンをした手は役が必要
     sanankouRonCounts: true, // 三暗刻：ロンで完成した刻子も暗刻に数える（暫定。通常の麻雀とは異なる）
+    riichi: true, // リーチ（門前・聴牌で宣言。以後ツモ切りのみ・チー／ポン不可・ロン／ツモ可）
+    riichiBonus: 1, // リーチして和了したときの加点（基本点に加算。役満には加算しない）
   };
   delete c.rules.maxChi;
   // 既存の役は数式系：3組とも数式面子のときだけ評価する

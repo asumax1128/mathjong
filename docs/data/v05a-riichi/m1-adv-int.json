@@ -1,0 +1,81 @@
+{
+ "mode": "math1",
+ "length": 4,
+ "format": "1v3",
+ "a": "advanced",
+ "b": "intermediate",
+ "seed": 2,
+ "advanced": {
+  "missDecay": 0.15,
+  "softness": 3,
+  "valueExp": null,
+  "koutsuBias": null,
+  "wallScale": 0,
+  "defense": 1.5,
+  "callScale": 1,
+  "calls": true
+ },
+ "groups": 150,
+ "matches": 600,
+ "rounds": 3292,
+ "drawRate": 0,
+ "roundsPerMatch": 5.487,
+ "seconds": 163.9,
+ "levels": {
+  "advanced": {
+   "seats": 600,
+   "meanRank": 2.3,
+   "topRate": 0.308,
+   "lastRate": 0.177,
+   "meanScore": 103.33,
+   "winsPerMatch": 1.365,
+   "ronPerMatch": 1.042,
+   "tsumoPerMatch": 0.323,
+   "dealInPerMatch": 0.793,
+   "chiPerMatch": 0.518,
+   "ponPerMatch": 0.148,
+   "riichiPerMatch": 2.43,
+   "riichiWinsPerMatch": 1.2,
+   "msPerDecision": 7.228,
+   "msPerDiscard": 9.334,
+   "maxMsDecision": 271.1
+  },
+  "intermediate": {
+   "seats": 1800,
+   "meanRank": 2.522,
+   "topRate": 0.245,
+   "lastRate": 0.262,
+   "meanScore": 98.89,
+   "winsPerMatch": 1.374,
+   "ronPerMatch": 1.014,
+   "tsumoPerMatch": 0.359,
+   "dealInPerMatch": 1.097,
+   "chiPerMatch": 0.543,
+   "ponPerMatch": 0.081,
+   "riichiPerMatch": 2.59,
+   "riichiWinsPerMatch": 1.205,
+   "msPerDecision": 6.543,
+   "msPerDiscard": 8.354,
+   "maxMsDecision": 242.9
+  }
+ },
+ "diff": {
+  "note": "A − B（組ごとの平均の差）。順位は負なら A が上位、得点は正なら A が多い。95%CI = 平均 ± 1.96 SE",
+  "rank": {
+   "mean": -0.222,
+   "se": 0.044,
+   "ci95": [
+    -0.309,
+    -0.136
+   ]
+  },
+  "score": {
+   "mean": 4.44,
+   "se": 0.972,
+   "ci95": [
+    2.534,
+    6.346
+   ]
+  }
+ }
+}

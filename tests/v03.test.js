@@ -409,7 +409,8 @@ test('AI 4人の自動対局（数学Ⅰ・Ⅱ 各12局）：毎手の不変条�
       const a = g.result.analysis;
       if (g.melds[w].length) assert.ok(a.hasYaku, '鳴いた和了者は役あり');
       const re = r.analyzeWin(g.countsOf(g.hands[w]), g.exposedMelds(w), { ron: g.result.how === 'ron' });
-      assert.equal(re.points, a.points);
+      // Ver.0.5-A：リーチして和了した場合は基本点に riichiBonus（役満は 0）が加わる
+      assert.equal(re.points + (a.riichiBonus || 0), a.points);
       // 数学Ⅰでは 180° を超える角度の牌は存在しない
       if (r === M1) assert.ok(g.tileType.every((t) => r.types[t].kind !== 'angle' || r.types[t].deg <= 180));
     }

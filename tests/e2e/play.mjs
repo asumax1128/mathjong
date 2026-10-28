@@ -10,6 +10,8 @@ import { createRequire } from 'node:module';
 import { request as httpRequest } from 'node:http';
 import assert from 'node:assert/strict';
 import { startServer } from '../../tools/serve.mjs';
+import { RECIPES } from '../../src/ui/sound.js';
+import { RON_LATE_LIMIT_MS, judgeRonLate } from './ron-late.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -383,8 +385,7 @@ async function publicMode(browser) {
   // 不正な値は無視される（エラーにならない）。seed が不正なら再現 URL ではないのでタイトル画面から（Ver.0.4-A）
   await page.goto(`${PUBLIC}?seed=abc&round=-1&speed=%3Cscript%3E&len=9&hand=-2&dealer=7`);
   await page.waitForSelector('.title-screen');
-  await page.locator('button[data-action="start-match"]').tap();
-  await page.waitForSelector('.hand .tile');
+  await chooseAndStart(page);
   assert.match(await page.locator('.top .info').innerText(), /東1局/);
   // seed が正しくても、ほかの値が不正なら別の局面として黙って始めない（エラー画面）。Ver.0.4-A の最終修正
   await page.goto(`${PUBLIC}?seed=77&round=-1&len=9&hand=-2&dealer=7&renchan=abc`);
@@ -1736,9 +1737,15 @@ async function apForce(page, seat, key = null) {
 async function apDiscardDrawn(page) {
   await page.waitForSelector('.hand .tile.tap.drawn');
   const t = page.locator('.hand .tile.tap.drawn');
+  // 打牌の完了は「その牌の打牌が記録された」ことで判断する（手番が他家に移ったかだけを見ると、AI が速いときに
+  // 自分の手番まで一瞬で戻り、条件を見逃して待ち続ける）。局が替わっても判断できるよう、その時点の局を覚えておく。
+  const id = Number(await t.getAttribute('data-id'));
+  await page.evaluate(() => { window.__apGame = window.__mathjong.S.game; });
   if (!(await t.evaluate((e) => e.classList.contains('selected')))) await t.tap(); // 1回目で選択、2回目で打牌
   await t.tap();
-  await page.waitForFunction(() => { const p = window.__mathjong.S.game.pending(); return !p || p.seat !== 0; });
+  await page.waitForFunction((tile) => window.__apGame.events.some((e) => e.type === 'discard' && e.seat === 0 && e.tile === tile), id, { timeout: 8000 });
+  // 2回タップで打牌は1回だけ（その牌の打牌の記録がちょうど1件、河の末尾ではなく記録で数える）
+  assert.equal(await page.evaluate((tile) => window.__apGame.events.filter((e) => e.type === 'discard' && e.seat === 0 && e.tile === tile).length, id), 1, '打牌は1回だけ');
 }
 // 自分の打牌 → 下家・対面の打牌（ツモ牌）まで進め、上家の手番にする
 async function apToSeat3(page) {
@@ -1746,13 +1753,15 @@ async function apToSeat3(page) {
   await apForce(page, 1);
   await apForce(page, 2);
 }
-async function apSetting(page, on, { close = true } = {}) {
-  if (!(await page.locator('input[data-action="chi-autopass"]').count())) await page.locator('button[data-action="settings"]').tap();
-  const box = page.locator('input[data-action="chi-autopass"]');
-  // Ver.0.4-B：設定画面にチー・ポンの2つのスイッチが並ぶので、チーのラベルを指定する
-  if ((await box.isChecked()) !== on) await page.locator('label.setting.toggle:has(input[data-action="chi-autopass"])').tap();
-  assert.equal(await box.isChecked(), on);
-  if (close) await page.locator('.modal-actions button[data-action="close"]').tap();
+// Ver.0.5-A：チー・ポンの自動パスは対戦画面（手牌の下）の切替ボタン。設定画面から移動した。
+const apToggle = (page, kind = 'chi') => page.locator(`.hand-help button[data-action="toggle-${kind}-autopass"]`);
+const apToggleOn = async (page, kind = 'chi') => (await apToggle(page, kind).getAttribute('aria-pressed')) === 'true';
+async function apSetting(page, on) {
+  // 設定画面などが開いていれば閉じてから、対戦画面のボタンを押す
+  if (await page.locator('.overlay .modal-actions button[data-action="close"]').count()) await page.locator('.overlay .modal-actions button[data-action="close"]').tap();
+  if ((await apToggleOn(page)) !== on) await apToggle(page).tap();
+  assert.equal(await apToggleOn(page), on);
+  assert.equal(await page.evaluate(() => window.__mathjong.S.chiAutoPass), on);
 }
 async function apHint(page) {
   return page.evaluate(async (base) => {
@@ -1779,9 +1788,12 @@ async function chiAutoPass(browser) {
     let st = await apState(page);
     assert.equal(st.on, false, '初期値 OFF');
     assert.equal(st.stored, null);
+    assert.equal(await apToggleOn(page), false, '対戦画面のボタンも OFF');
+    assert.match(await apToggle(page).innerText(), /チー自動\s*OFF/);
     await page.locator('button[data-action="settings"]').tap();
-    assert.equal(await page.locator('input[data-action="chi-autopass"]').isChecked(), false);
-    // Ver.0.4-B：チー・ポンの2つの設定に共通の説明（指示どおりの文言）
+    // Ver.0.5-A：設定画面には切替の場所と安全仕様の説明だけ（二重管理しない）
+    assert.equal(await page.locator('.modal input[type="checkbox"]').count(), 0, '設定画面にスイッチはない');
+    assert.match(await page.locator('.setting-note').innerText(), /対戦画面の手牌の下のボタンで切り替えます/);
     assert.match(await page.locator('.setting-note').innerText(), /チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。/);
     await page.locator('.modal-actions button[data-action="close"]').tap();
     await apScene(page, apWall(AP_CHI_ONLY));
@@ -2007,7 +2019,7 @@ async function chiAutoPass(browser) {
     await apForce(page, 3, 'v:1/2');
     const st = await apState(page);
     assert.equal(st.modal, 'settings', 'モーダルは開いたまま');
-    assert.equal(await page.locator('input[data-action="chi-autopass"]').isChecked(), on);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.chiAutoPass), on);
     if (on) {
       assert.equal(st.count, 1);
       assert.deepEqual(st.p, { seat: 0, type: 'turn', ron: null, chi: null });
@@ -2056,8 +2068,8 @@ async function chiAutoPass(browser) {
     await page.reload();
     await page.waitForSelector('.hand .tile');
     assert.equal((await apState(page)).on, true, '再読み込み後も ON');
+    assert.equal(await apToggleOn(page), true, '対戦画面のボタンも ON');
     await page.locator('button[data-action="settings"]').tap();
-    assert.equal(await page.locator('input[data-action="chi-autopass"]').isChecked(), true);
     await page.locator('button[data-action="reset"]').tap();
     assert.equal((await apState(page)).on, true, '新しい対局でも ON');
     // 再読み込み後に実際に自動パスする
@@ -2146,10 +2158,10 @@ async function chiAutoPass(browser) {
   // (12) バージョン表示：ヘッダー・ページタイトル・再現情報
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.4.0-b');
-    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.4.0-b');
+    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.6.0-a');
+    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.6.0-a');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.4\.0-b ・ エンジン v0\.3\.0-a/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.6\.0-a ・ エンジン v0\.5\.0-a/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -2162,15 +2174,14 @@ async function chiAutoPassLayouts(browser) {
   for (const [w, h] of sizes) {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: w, height: h } });
     const where = `${w}×${h}`;
-    await page.locator('button[data-action="settings"]').tap();
-    // Ver.0.4-B：チー・ポンの2つのスイッチ。どちらも 44px 以上・画面内
-    for (const act of ['chi-autopass', 'pon-autopass']) {
-      const label = page.locator(`label.setting.toggle:has(input[data-action="${act}"])`);
-      await label.scrollIntoViewIfNeeded();
-      const lb = await label.boundingBox();
-      assert.ok(lb.height >= 44 && lb.width >= 44 && lb.x >= 0 && lb.x + lb.width <= w + 0.5, `${where}: ${act} のタップ領域 ${JSON.stringify(lb)}`);
+    // Ver.0.5-A：対戦画面のチー・ポンの切替ボタン。どちらも 44px 以上・画面内
+    for (const kind of ['chi', 'pon']) {
+      const b = apToggle(page, kind);
+      await b.scrollIntoViewIfNeeded();
+      const lb = await b.boundingBox();
+      assert.ok(lb.height >= 44 && lb.width >= 44 && lb.x >= 0 && lb.x + lb.width <= w + 0.5, `${where}: ${kind} のタップ領域 ${JSON.stringify(lb)}`);
     }
-    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 0, `${where}: 設定の横スクロール`);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 0, `${where}: 横スクロール`);
     await apSetting(page, true);
     await apScene(page, apWall(AP_CHI_ONLY));
     const barNormal = (await page.locator('.bar').boundingBox()).height;
@@ -2760,6 +2771,17 @@ async function v03bHints(browser) {
 }
 
 // ---- Ver.0.4-A：タイトル画面・4局戦／8局戦・親の連荘・親子の精算・試合終了 ----
+// Ver.0.6：タイトル →「対戦相手を選ぶ」→ 3人のチェック欄 →「対局開始」（選択画面での既存の選択は ids に合わせて入れ替える）
+async function chooseAndStart(page, ids = ['ousuke', 'natsuki', 'yuki']) {
+  await page.locator('button[data-action="choose-opponents"]').click();
+  await page.waitForSelector('.select-screen');
+  // 公開サイト相当（テスト用のフックなし）でも動くよう、選択は画面（選択済みのカード）から読む
+  const cur = await page.locator('.opp-card.selected').evaluateAll((es) => es.map((e) => e.dataset.id));
+  for (const id of cur) if (!ids.includes(id)) await page.locator(`.opp-check[data-id="${id}"]`).click();
+  for (const id of ids) if (!cur.includes(id)) await page.locator(`.opp-check[data-id="${id}"]`).click();
+  await page.locator('.select-screen button[data-action="start-match"]').click();
+  await page.waitForSelector('.hand .tile');
+}
 const matchState = (page) => page.evaluate(() => {
   const { S } = window.__mathjong;
   const m = S.match;
@@ -2767,6 +2789,7 @@ const matchState = (page) => page.evaluate(() => {
     screen: S.screen, modal: S.modal, label: m && document.querySelector('.top .hand-label') ? document.querySelector('.top .hand-label').textContent : null,
     hand: m && m.hand, renchan: m && m.renchan, played: m && m.played, over: m && m.over, length: m && m.length, scores: m && m.scores.slice(),
     sum: m ? m.scores.reduce((a, b) => a + b, 0) : null, dealer: S.dealer, round: S.round, ai: S.ai, mode: window.__mathjong.rules.config.mode,
+    chars: S.matchSettings ? S.matchSettings.chars.slice() : null, seats: S.matchSettings ? S.matchSettings.seats.slice() : null,
     info: (document.querySelector('.top .info') || {}).textContent || '',
   };
 });
@@ -2785,28 +2808,29 @@ const forceDraw = (page) => page.evaluate(() => {
 const TSUMO_HAND = ['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'];
 
 async function v04Match(browser) {
-  // (1) タイトル画面：数学モード・局数・AI難易度を選んで開始。選択は保存され、再読み込み後も残る
+  // (1) タイトル画面：数学モード・局数を選び、対戦相手を選んで開始。モード・局数は保存され、再読み込み後も残る
+  //     （Ver.0.6：AI 難易度の3択はタイトルから撤去。対戦相手の選択は保存しない）
   {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
     await page.goto(`${LOCAL}?speed=test`);
     await page.waitForSelector('.title-screen');
-    assert.match(await page.locator('.title-logo').innerText(), /数雀\s*MATHJONG/);
+    // Ver.0.5-C：ロゴは画像（alt が名前）。読み込めて、4:3 の比率で表示されること
+    assert.equal(await page.locator('.title-logo img').getAttribute('alt'), '数雀（MATHJONG）');
     assert.equal(await page.locator('input[data-action="title-mode"][value="math2"]').isChecked(), true, '既定は数学Ⅱ');
     assert.equal(await page.locator('input[data-action="title-length"][value="4"]').isChecked(), true, '既定は4局戦');
-    assert.equal(await page.locator('input[data-action="title-ai"][value="intermediate"]').isChecked(), true, '既定は中級');
-    // Ver.0.4-B：初級・上級を有効化（「準備中」の表示はなく、各難易度の説明を表示）
-    assert.equal(await page.locator('.title-set .soon').count(), 0, '準備中の表示はない');
+    assert.equal(await page.locator('input[data-action="title-ai"]').count(), 0, 'AI 難易度の3択はない');
+    assert.equal(await page.locator('text=AI難易度').count(), 0);
+    assert.equal(await page.locator('button[data-action="start-match"]').count(), 0, 'タイトルに対局開始はない');
+    assert.equal(await page.locator('button[data-action="choose-opponents"]').innerText(), '対戦相手を選ぶ');
     assert.equal(await page.locator('text=準備中').count(), 0);
-    for (const lv of ['beginner', 'intermediate', 'advanced']) assert.ok((await page.locator(`label.setting.radio:has(input[value="${lv}"]) small`).innerText()).length > 5, `${lv} の説明`);
     await page.locator('label.setting.radio', { hasText: '数学Ⅰ' }).tap();
     await page.locator('label.setting.radio', { hasText: '8局戦' }).tap();
-    await page.locator('label.setting.radio', { hasText: '上級' }).tap();
-    await page.locator('button[data-action="start-match"]').tap();
-    await page.waitForSelector('.hand .tile');
+    await chooseAndStart(page, ['fukuyama', 'kaoru', 'asuma']);
     let st = await matchState(page);
-    assert.deepEqual([st.screen, st.mode, st.length, st.ai, st.label, st.scores], ['game', 'math1', 8, 'advanced', '東1局', [100, 100, 100, 100]]);
+    assert.deepEqual([st.screen, st.mode, st.length, st.label, st.scores], ['game', 'math1', 8, '東1局', [100, 100, 100, 100]]);
+    assert.deepEqual([st.chars, st.seats.slice().sort()], [['fukuyama', 'kaoru', 'asuma'], ['asuma', 'fukuyama', 'kaoru']]);
     // 対局中に設定からタイトルへ（確認あり）
     await page.locator('button[data-action="settings"]').tap();
     await page.locator('button[data-action="ask-title"]').tap();
@@ -2824,7 +2848,8 @@ async function v04Match(browser) {
     await page.waitForSelector('.title-screen');
     assert.equal(await page.locator('input[data-action="title-mode"][value="math1"]').isChecked(), true, '保存');
     assert.equal(await page.locator('input[data-action="title-length"][value="8"]').isChecked(), true);
-    assert.equal(await page.locator('input[data-action="title-ai"][value="advanced"]').isChecked(), true);
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    assert.deepEqual(await page.evaluate(() => window.__mathjong.S.opp.selected), [], '対戦相手の選択は保存しない（再読み込みで0人）');
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -2906,7 +2931,8 @@ async function v04Match(browser) {
     assert.match(fin, /実施した局数：2局/);
     assert.match(fin, /連荘回数：1回/);
     assert.match(fin, /数学Ⅰ/);
-    assert.match(fin, /AI難易度：中級/);
+    assert.match(fin, /対戦相手：下家 おうすけ（中級）・対面 なつき（中級）・上家 ゆき（中級）/);
+    assert.equal(await page.locator('text=AI難易度').count(), 0);
     const ranksShown = await page.locator('.final-table td.rank').allInnerTexts();
     assert.deepEqual(ranksShown, ['1位', '2位', '2位', '2位'], '同点は同順位');
     assert.match(fin, /\+12/);
@@ -2955,9 +2981,15 @@ async function v04Match(browser) {
     await page.waitForSelector('.title-screen');
     const over = () => page.evaluate(() => document.documentElement.scrollWidth - innerWidth);
     assert.ok(await over() <= 0, `${w}px タイトル`);
-    const sb = await page.locator('button[data-action="start-match"]').boundingBox();
+    const sb = await page.locator('button[data-action="choose-opponents"]').boundingBox();
     assert.ok(sb.x >= 0 && sb.x + sb.width <= w && sb.height >= 44);
-    await page.locator('button[data-action="start-match"]').tap();
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    await page.waitForSelector('.select-screen');
+    assert.ok(await over() <= 0, `${w}px 対戦相手の選択`);
+    await page.locator('button[data-action="opp-random"]').tap();
+    const stb = await page.locator('.select-screen button[data-action="start-match"]').boundingBox();
+    assert.ok(stb.x >= 0 && stb.x + stb.width <= w && stb.height >= 44);
+    await page.locator('.select-screen button[data-action="start-match"]').tap();
     await page.waitForSelector('.hand .tile');
     assert.ok(await over() <= 0, `${w}px 対局`);
     await forceDraw(page);
@@ -2971,7 +3003,7 @@ async function v04Match(browser) {
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  console.log('✓ Ver.0.4-A：タイトル（モード・局数・AI難易度の保存）・ヒントボタンの移動・親の連荘／親交代・精算（合計400）・最終の親の延長・試合終了（同点同順位）・もう一度／タイトルへ・再現URL・320〜430px');
+  console.log('✓ Ver.0.4-A：タイトル（モード・局数の保存、Ver.0.6 で対戦相手の選択へ）・ヒントボタンの移動・親の連荘／親交代・精算（合計400）・最終の親の延長・試合終了（同点同順位）・もう一度／タイトルへ・再現URL・320〜430px');
 }
 
 // ---- Ver.0.4-A 監査対応（PR #9）：もう一度遊ぶ・長い連荘の再現 URL・再現情報の注意書き ----
@@ -2984,8 +3016,8 @@ const reproQuery = async (page) => {
 };
 
 async function v04Fixes(browser) {
-  // (1) P2-1：もう一度遊ぶは、終了した試合と同じ設定（数学モード・局数・AI難易度）。予約中の次回用モードは使わない。逆方向も。
-  for (const [startMode, pending, length, ai, otherLength] of [['math1', 'math2', 4, 'advanced', 8], ['math2', 'math1', 8, 'beginner', 4]]) {
+  // (1) P2-1：もう一度遊ぶ（Ver.0.6：同じ3人と再戦）は、終了した試合と同じ設定（数学モード・局数・3人）。予約中の次回用モードは使わない。逆方向も。
+  for (const [startMode, pending, length, chars, otherLength] of [['math1', 'math2', 4, ['fukuyama', 'kaoru', 'asuma'], 8], ['math2', 'math1', 8, ['kanata', 'mitsuki', 'aoto'], 4]]) {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
@@ -2994,9 +3026,7 @@ async function v04Fixes(browser) {
     const lab = { math1: '数学Ⅰ', math2: '数学Ⅱ' };
     await page.locator('label.setting.radio', { hasText: lab[startMode] }).tap();
     await page.locator('label.setting.radio', { hasText: `${length}局戦` }).tap();
-    await page.locator(`input[data-action="title-ai"][value="${ai}"]`).evaluate((e) => e.click());
-    await page.locator('button[data-action="start-match"]').tap();
-    await page.waitForSelector('.hand .tile');
+    await chooseAndStart(page, chars);
     const seed1 = await page.evaluate(() => window.__mathjong.S.seedBase);
     // 試合中に、次回用の別の数学モードを予約する（設定画面）。S.length もタイトルの別の値にしておく（採用元を取り違えないこと）
     await page.locator('button[data-action="settings"]').tap();
@@ -3013,17 +3043,19 @@ async function v04Fixes(browser) {
     assert.equal(before.mode, startMode);
     assert.equal(before.next, pending, '予約中の次回用モード');
     assert.ok(before.scores.some((x) => x !== 100) && before.hist > 0);
-    assert.match(await page.locator('.final-info').innerText(), new RegExp(`AI難易度：${{ beginner: '初級', advanced: '上級' }[ai]}`));
+    const finInfo = await page.locator('.final-info').innerText();
+    for (const id of chars) assert.match(finInfo, new RegExp({ fukuyama: 'ふくやま', kaoru: 'かおる', asuma: 'アスマ', kanata: 'かなた', mitsuki: 'みつき', aoto: 'あおと' }[id]));
+    assert.equal(await page.locator('button[data-action="again"]').innerText(), '同じ3人と再戦');
     await page.locator('button[data-action="again"]').tap();
     await page.waitForSelector('.hand .tile');
     const after = await page.evaluate(() => {
       const { S, rules } = window.__mathjong;
-      return { mode: rules.config.mode, deck: S.game.tileType.length, len: S.match.length, ai: S.matchSettings.ai, scores: S.match.scores.slice(), hist: S.history.length, played: S.match.played, renchan: S.match.renchan, wins: S.match.wins.slice(), seed: S.seedBase, next: S.nextMode, round: S.round, hintOpen: S.hintOpen, hints: S.hintsUsed, label: document.querySelector('.hand-label').textContent };
+      return { mode: rules.config.mode, deck: S.game.tileType.length, len: S.match.length, chars: S.matchSettings.chars.slice(), scores: S.match.scores.slice(), hist: S.history.length, played: S.match.played, renchan: S.match.renchan, wins: S.match.wins.slice(), seed: S.seedBase, next: S.nextMode, round: S.round, hintOpen: S.hintOpen, hints: S.hintsUsed, label: document.querySelector('.hand-label').textContent };
     });
     assert.equal(after.mode, startMode, `もう一度遊ぶは ${startMode} のまま（予約中の ${pending} にならない）`);
     assert.equal(after.deck, startMode === 'math1' ? 124 : 168);
     assert.equal(after.len, length, '局数も同じ');
-    assert.equal(after.ai, ai, 'AI 難易度も同じ');
+    assert.deepEqual(after.chars, chars, '同じ3人');
     assert.deepEqual([after.scores, after.hist, after.played, after.renchan, after.wins, after.round, after.label, after.hintOpen, after.hints], [[100, 100, 100, 100], 0, 0, 0, [0, 0, 0, 0], 1, '東1局', false, 0], '得点・履歴・局数・連荘・和了回数・ヒントは初期化');
     assert.notEqual(after.seed, before.seed, '新しい山（seed）');
     assert.equal(after.next, pending, '予約中の次回用モードは保持（再試合には影響しない）');
@@ -3097,8 +3129,7 @@ async function v04Fixes(browser) {
     await page.locator('button[data-action="to-title"]').tap();
     await page.waitForSelector('.title-screen');
     assert.ok(!new URL(page.url()).search, `${bad}: 戻ると URL の検索部分を外す（再読み込みで同じエラーに戻らない）`);
-    await page.locator('button[data-action="start-match"]').tap();
-    await page.waitForSelector('.hand .tile');
+    await chooseAndStart(page);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -3169,13 +3200,11 @@ const PA_HANDS = {
   ronPonChi: ['=1/2', '=1/2', 'sin', '30', 'cos', '60', 'sin', '150'], // ロン＋ポン＋チー
 };
 async function paSettings(page, chi, pon) {
-  await page.locator('button[data-action="settings"]').tap();
-  for (const [act, on] of [['chi-autopass', chi], ['pon-autopass', pon]]) {
-    const box = page.locator(`input[data-action="${act}"]`);
-    if ((await box.isChecked()) !== on) await page.locator(`label.setting.toggle:has(input[data-action="${act}"])`).tap();
-    assert.equal(await box.isChecked(), on);
+  // Ver.0.5-A：対戦画面の切替ボタンで設定する
+  for (const [kind, on] of [['chi', chi], ['pon', pon]]) {
+    if ((await apToggleOn(page, kind)) !== on) await apToggle(page, kind).tap();
+    assert.equal(await apToggleOn(page, kind), on);
   }
-  await page.locator('.modal-actions button[data-action="close"]').tap();
 }
 async function paClaim(page, hand, { hint = false } = {}) {
   await v3Scene(page, presetWall(hand, PA_DRAWS, PA_OTHERS));
@@ -3188,17 +3217,18 @@ async function paClaim(page, hand, { hint = false } = {}) {
 const paStored = (page) => page.evaluate(() => { try { return [localStorage.getItem('mj-chi-autopass'), localStorage.getItem('mj-pon-autopass')]; } catch { return 'ERR'; } });
 
 async function v04bLevels(browser) {
-  // (1) タイトルで選んだ難易度が試合の AI 全員に使われる。もう一度遊ぶでも同じ。最終結果に実際の難易度を表示
-  for (const [lv, label] of [['beginner', '初級'], ['advanced', '上級']]) {
+  // (1) Ver.0.6：選んだ3人（混合難易度）が試合の AI。各席の判断は、その席に表示した名前のキャラクターの AI だけが行う。
+  //     同じ3人と再戦でも同じ3人（座席は選び直す）。最終結果・再現情報に3人の名前と ID（席の順）を出す
+  for (const chars of [['kanata', 'natsuki', 'asuma'], ['aoto', 'yuki', 'kaoru']]) {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    // 試合の山の seed は Math.random 由来。AI が数手で和了すると後続の検査が成り立たないので、乱数を固定した列にして再現可能にする（本番のコードには影響しない）
+    await ctx.addInitScript(() => { let x = 20261027; Math.random = () => { x = (Math.imul(x, 1664525) + 1013904223) >>> 0; return x / 4294967296; }; });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
     await page.goto(`${LOCAL}?speed=test`);
     await page.waitForSelector('.title-screen');
     await page.locator('label.setting.radio', { hasText: '数学Ⅰ' }).tap();
-    await page.locator(`label.setting.radio:has(input[value="${lv}"])`).tap();
-    await page.locator('button[data-action="start-match"]').tap();
-    await page.waitForSelector('.hand .tile');
+    await chooseAndStart(page, chars);
     // AI の手番を何回か進める（自分はツモ牌を捨てる）
     for (let i = 0; i < 3; i++) {
       await v3WaitHuman(page);
@@ -3207,10 +3237,21 @@ async function v04bLevels(browser) {
       if (p.type === 'turn') await apDiscardDrawn(page);
       else await page.locator('button[data-action="pass"]').tap();
     }
-    const d = await page.evaluate(() => ({ ...window.__mathjong.S.aiDecisions, ms: window.__mathjong.S.matchSettings.ai }));
-    assert.equal(d.ms, lv);
-    assert.ok(d[lv] > 0, `${lv} の AI が判断 ${JSON.stringify(d)}`);
-    for (const other of ['beginner', 'intermediate', 'advanced']) if (other !== lv) assert.equal(d[other] || 0, 0, `${other} は使わない`);
+    const seatCheck = () => page.evaluate(() => {
+      const { S } = window.__mathjong;
+      return [1, 2, 3].map((s) => ({ id: S.matchSettings.seats[s - 1], shown: document.querySelector(`.panel.seat-${s} .name`).textContent, deciders: Object.keys(S.aiDecisionsBySeat[s]) }));
+    });
+    const NAMES = { kanata: 'かなた', natsuki: 'なつき', asuma: 'アスマ', aoto: 'あおと', yuki: 'ゆき', kaoru: 'かおる' };
+    let sc = await seatCheck();
+    assert.deepEqual(sc.map((x) => x.id).sort(), chars.slice().sort());
+    for (const x of sc) {
+      assert.equal(x.shown, NAMES[x.id], '席に表示した名前');
+      assert.ok(x.deciders.every((d) => d === x.id), `席の判断はその名前の AI だけ ${JSON.stringify(x)}`);
+    }
+    assert.ok(sc.some((x) => x.deciders.length > 0), 'AI が判断した');
+    const d = await page.evaluate(() => ({ ...window.__mathjong.S.aiDecisions }));
+    const levelOf = { kanata: 'beginner', aoto: 'beginner', natsuki: 'intermediate', yuki: 'intermediate', asuma: 'advanced', kaoru: 'advanced' };
+    for (const lv of Object.keys(d)) assert.ok(chars.some((c) => levelOf[c] === lv), `選んだ3人の難易度だけ ${JSON.stringify(d)}`);
     // 試合を終わらせて最終結果（東4局で親が流局 → 終了）
     await page.evaluate(() => { const { S } = window.__mathjong; S.match.hand = 3; S.match.startDealer = 1; });
     await forceDraw(page);
@@ -3218,10 +3259,11 @@ async function v04bLevels(browser) {
     await page.locator('button[data-action="next"]').tap();
     await page.waitForSelector('.final');
     const info = await page.locator('.final-info').innerText();
-    assert.match(info, new RegExp(`AI難易度：${label}`));
-    assert.doesNotMatch(info, /準備中/);
-    // もう一度遊ぶ：同じ難易度（タイトルの選択を変えても試合の設定を使う）
-    await page.evaluate(() => { window.__mathjong.S.ai = 'intermediate'; window.__mathjong.S.aiDecisions = {}; });
+    const seats1 = sc.map((x) => x.id);
+    assert.match(info, new RegExp(`対戦相手：下家 ${NAMES[seats1[0]]}（.級）・対面 ${NAMES[seats1[1]]}（.級）・上家 ${NAMES[seats1[2]]}（.級）`));
+    for (const [id, nm] of Object.entries(NAMES)) if (chars.includes(id)) assert.match(await page.locator('.final-table').innerText(), new RegExp(nm));
+    assert.deepEqual(await page.locator('.final .modal-actions button').allInnerTexts(), ['同じ3人と再戦', '相手を変更', 'タイトルへ戻る']);
+    // 同じ3人と再戦：同じ3人（座席は選び直す）。判断は新しい席の名前どおり
     await page.locator('button[data-action="again"]').tap();
     await page.waitForSelector('.hand .tile');
     for (let i = 0; i < 2; i++) {
@@ -3230,17 +3272,18 @@ async function v04bLevels(browser) {
       if (!p) break;
       if (p === 'turn') await apDiscardDrawn(page); else await page.locator('button[data-action="pass"]').tap();
     }
-    const d2 = await page.evaluate(() => ({ ...window.__mathjong.S.aiDecisions, ms: window.__mathjong.S.matchSettings.ai }));
-    assert.equal(d2.ms, lv, 'もう一度遊ぶは同じ難易度');
-    assert.ok(d2[lv] > 0 && !d2.intermediate, JSON.stringify(d2));
-    // 再現 URL に難易度が入る
+    assert.deepEqual(await page.evaluate(() => window.__mathjong.S.matchSettings.chars), chars, '同じ3人');
+    sc = await seatCheck();
+    for (const x of sc) { assert.equal(x.shown, NAMES[x.id]); assert.ok(x.deciders.every((dd) => dd === x.id)); }
+    // 再現情報に ID（席の順）が入る
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info code').innerText(), new RegExp(`&ai=${lv}$`));
-    assert.match(await page.locator('.report-info').innerText(), new RegExp(`AI ${label}`));
+    const seats2 = sc.map((x) => x.id);
+    assert.match(await page.locator('.report-info code').innerText(), new RegExp(`&chars=${seats2.join(',')}$`));
+    assert.match(await page.locator('.report-info').innerText(), new RegExp(`ID ${seats2.join(',')}`));
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  // (2) 再現 URL の ai：指定どおりの難易度で始まる。不正な値はエラー画面
+  // (2) 再現 URL：従来の ai（難易度の既定の3人・従来の席の順）と、新しい chars（席1〜3の順）。不正な値はエラー画面
   {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
@@ -3248,14 +3291,22 @@ async function v04bLevels(browser) {
     await page.goto(`${LOCAL}?seed=12&round=1&dealer=1&hand=0&renchan=0&len=4&mode=math1&ai=beginner&speed=test`);
     await page.waitForSelector('.hand .tile');
     await page.waitForFunction(() => (window.__mathjong.S.aiDecisions.beginner || 0) > 0);
-    assert.equal(await page.evaluate(() => window.__mathjong.S.matchSettings.ai), 'beginner');
+    assert.deepEqual(await page.evaluate(() => window.__mathjong.S.matchSettings.seats), ['kanata', 'mitsuki', 'aoto']);
+    await page.goto(`${LOCAL}?seed=12&round=1&dealer=1&hand=0&renchan=0&len=4&mode=math1&chars=asuma,kanata,yuki&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    assert.deepEqual(await page.evaluate(() => window.__mathjong.S.matchSettings.seats), ['asuma', 'kanata', 'yuki'], '席1〜3は URL のとおり（抽選しない）');
+    assert.deepEqual(await page.locator('.panel .name').allInnerTexts().then((xs) => xs.sort()), ['アスマ', 'かなた', 'ゆき'].sort());
+    assert.equal(await page.locator('.panel.seat-1 .name').innerText(), 'アスマ');
     await page.goto(`${LOCAL}?seed=12&round=1&ai=expert`);
     await page.waitForSelector('.replay-error');
     assert.match(await page.locator('.re-list').innerText(), /ai/);
+    await page.goto(`${LOCAL}?seed=12&round=1&chars=kanata,kanata,yuki`);
+    await page.waitForSelector('.replay-error');
+    assert.match(await page.locator('.re-list').innerText(), /chars/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  console.log('✓ Ver.0.4-B：AI難易度（タイトル → 試合の AI 全員・もう一度遊ぶで維持・最終結果・再現 URL）');
+  console.log('✓ Ver.0.4-B→0.6：選んだ3人（混合難易度）が試合の AI・各席の判断は表示した名前の AI だけ・同じ3人と再戦・最終結果と再現情報（ai／chars の再現 URL）');
 }
 
 async function v04bPonAutoPass(browser) {
@@ -3264,15 +3315,15 @@ async function v04bPonAutoPass(browser) {
     const init = saved === null ? null : { fn: (v) => { try { localStorage.setItem('mj-pon-autopass', v); } catch { /* */ } }, arg: saved };
     const { ctx, page, errors } = await v3Page(browser, 'math1', { init });
     assert.equal(await page.evaluate(() => window.__mathjong.S.ponAutoPass), on, `保存値 ${saved}`);
-    await page.locator('button[data-action="settings"]').tap();
-    assert.equal(await page.locator('input[data-action="pon-autopass"]').isChecked(), on);
-    assert.match(await page.locator('.setting-note').innerText(), /チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。/);
+    assert.equal(await apToggleOn(page, 'pon'), on);
+    assert.match(await apToggle(page, 'pon').innerText(), new RegExp(`ポン自動\\s*${on ? 'ON' : 'OFF'}`));
     if (saved === null) {
-      await page.locator('label.setting.toggle:has(input[data-action="pon-autopass"])').tap();
+      await apToggle(page, 'pon').tap();
       assert.deepEqual(await paStored(page), [null, '1']);
-      await page.locator('label.setting.toggle:has(input[data-action="pon-autopass"])').tap();
+      assert.equal(await apToggleOn(page, 'pon'), true);
+      await apToggle(page, 'pon').tap();
       assert.deepEqual(await paStored(page), [null, '0']);
-      await page.locator('label.setting.toggle:has(input[data-action="chi-autopass"])').tap();
+      await apToggle(page, 'chi').tap();
       assert.deepEqual(await paStored(page), ['1', '0'], 'チーとポンは独立');
     }
     assert.deepEqual(errors, []);
@@ -3402,12 +3453,10 @@ async function v04bPonAutoPass(browser) {
   // (7) 320〜430px：2つのスイッチと宣言ボタン（ロン＋ポン＋チー）が画面に収まる
   for (const w of [320, 375, 430]) {
     const { ctx, page, errors } = await v3Page(browser, 'math1', { viewport: { width: w, height: 700 } });
-    await page.locator('button[data-action="settings"]').tap();
-    for (const act of ['chi-autopass', 'pon-autopass']) {
-      const b = await page.locator(`label.setting.toggle:has(input[data-action="${act}"])`).boundingBox();
-      assert.ok(b.height >= 44 && b.x >= 0 && b.x + b.width <= w + 0.5, `${w}px ${act} ${JSON.stringify(b)}`);
+    for (const kind of ['chi', 'pon']) {
+      const b = await apToggle(page, kind).boundingBox();
+      assert.ok(b.height >= 44 && b.x >= 0 && b.x + b.width <= w + 0.5, `${w}px ${kind} ${JSON.stringify(b)}`);
     }
-    await page.locator('.modal-actions button[data-action="close"]').tap();
     await paClaim(page, PA_HANDS.ronPonChi);
     for (const sel of ['ron', 'pon', 'chi', 'pass']) {
       const b = await page.locator(`.bar button[data-action="${sel}"]`).first().boundingBox();
@@ -3419,6 +3468,836 @@ async function v04bPonAutoPass(browser) {
     await ctx.close();
   }
   console.log('✓ Ver.0.4-B：320／375／430px（スイッチ2つ・ロン＋ポン＋チーのボタン）');
+}
+
+// ---- Ver.0.5-A：リーチ ----
+const RI_HAND = ['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45']; // 0 を捨てて =1 待ち、45 を捨てて =0 待ち
+const RI_O1 = ['sin', 'sin', '0', '90', '90', '=-√3', '=√3', '150'];
+const RI_O2 = ['cos', '135', '=√3', '=-1/√2', '120', '120', 'tan', '=0'];
+const RI_O3 = ['=-1', 'tan', 'tan', '120', '=1/√3', '90', '=-1/√2', '=-√3'];
+const riState = (page) => page.evaluate(() => {
+  const { S } = window.__mathjong;
+  const g = S.game;
+  g.checkInvariants();
+  const p = g.pending();
+  return {
+    p: p && { seat: p.seat, type: p.type, canTsumo: p.canTsumo ?? null }, riichi: g.riichi.map((r) => !!r), input: { ...S.input },
+    buttons: [...document.querySelectorAll('.bar button[data-action]')].map((b) => b.dataset.action),
+    status: (document.querySelector('.bar .actions .status') || {}).textContent?.trim() || '',
+    taps: document.querySelectorAll('.hand .tile.tap').length, locked: document.querySelectorAll('.hand .tile.locked').length,
+    hand0: g.hands[0].length, river0: g.rivers[0].length, drawn: g.drawn,
+  };
+});
+// 自分の打牌番で止まるまで待つ
+const riWaitTurn = (page) => page.waitForFunction(() => { const p = window.__mathjong.S.game.pending(); return p && p.seat === 0 && p.type === 'turn'; }, null, { timeout: 8000 });
+
+async function v05Riichi(browser) {
+  // (1) 自分のリーチ：宣言 → 聴牌になる牌だけ選べる → 宣言牌 → 以後ツモ切りだけ → ツモで基本点＋1
+  for (const mode of ['math1', 'math2']) {
+    const { ctx, page, errors } = await v3Page(browser, mode);
+    await v3Scene(page, presetWall(RI_HAND, ['0', '=-1/√3', '=-√3/2', '=-1/√2', '=0', '=-1/√3', '=-√3/2', '=-1/√2', '=1'], [RI_O1, RI_O2, RI_O3]));
+    let st = await riState(page);
+    assert.ok(st.buttons.includes('riichi'), `${mode}：聴牌ならリーチのボタン`);
+    await page.locator('button[data-action="riichi"]').tap();
+    st = await riState(page);
+    assert.deepEqual(st.buttons.filter((b) => b.startsWith('riichi')), ['riichi-cancel', 'riichi-discard']);
+    assert.equal(st.taps, 2, '聴牌になる牌（0・45）だけ選べる');
+    assert.equal(st.locked, 7);
+    // やめる → 通常の打牌に戻る
+    await page.locator('button[data-action="riichi-cancel"]').tap();
+    st = await riState(page);
+    assert.equal(st.taps, 9);
+    await page.locator('button[data-action="riichi"]').tap();
+    // 選べない牌（sin）はタップしても選択されない
+    const sinId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'f:sin'); });
+    await page.locator(`.hand .tile[data-id="${sinId}"]`).tap({ force: true });
+    assert.equal(await page.evaluate(() => window.__mathjong.S.selected), null);
+    assert.equal(await page.locator('button[data-action="riichi-discard"]').isDisabled(), true);
+    const zeroId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'a:0'); });
+    await page.locator(`.hand .tile[data-id="${zeroId}"]`).tap();
+    await page.locator('button[data-action="riichi-discard"]').tap();
+    st = await riState(page);
+    assert.deepEqual(st.riichi, [true, false, false, false]);
+    assert.equal(await page.locator('.self .riichi-badge').count(), 1, '自分の表示にリーチ');
+    assert.equal(await page.locator('.river.mine .tile.riichi-decl').count(), 1, '宣言牌に印');
+    assert.match(await page.locator('.msg').innerText(), /リーチ/);
+    // 他家は（強制的に）ツモ切り → 自分の番：ツモ切りだけ
+    await apForce(page, 1); await apForce(page, 2); await apForce(page, 3);
+    await riWaitTurn(page);
+    st = await riState(page);
+    assert.equal(st.p.canTsumo, false);
+    assert.ok(st.buttons.includes('tsumogiri') && !st.buttons.includes('discard') && !st.buttons.includes('riichi'));
+    assert.match(st.status, /リーチ中：ツモ切り/);
+    assert.equal(st.taps, 1, 'ツモ牌だけ選べる');
+    // ツモ牌以外をエンジンに直接渡しても拒否される（画面の制限だけに頼らない）
+    const bypass = await page.evaluate(() => { const { S } = window.__mathjong; const g = S.game; const other = g.hands[0].find((x) => x !== g.drawn); try { g.discard(0, other); return 'accepted'; } catch (e) { return e.message; } });
+    assert.match(bypass, /tsumogiri only/);
+    await page.locator('button[data-action="tsumogiri"]').tap();
+    st = await riState(page);
+    assert.equal(st.river0, 2);
+    await apForce(page, 1); await apForce(page, 2); await apForce(page, 3);
+    await riWaitTurn(page);
+    st = await riState(page);
+    assert.equal(st.p.canTsumo, true, '=1 を引いてツモ和了できる');
+    assert.ok(st.buttons.includes('tsumo') && st.buttons.includes('tsumogiri'));
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.waitForSelector('.result');
+    const res = await page.evaluate(() => { const { S } = window.__mathjong; const r = S.game.result; return { points: r.points, riichi: r.analysis.riichi, bonus: r.analysis.riichiBonus, delta: S.match.scores.map((x, i) => x - S.prevScores[i]) }; });
+    assert.equal(res.riichi, true);
+    assert.equal(res.bonus, 1);
+    const yakuText = await page.locator('.result .yaku').innerText();
+    assert.match(yakuText, /リーチ\s*\+1/);
+    assert.match(yakuText, new RegExp(`合計\\s*${res.points}点`));
+    // 親（自分）のツモ：子3人が 2×和了点ずつ（和了点はリーチ込み）
+    assert.deepEqual(res.delta, [6 * res.points, -2 * res.points, -2 * res.points, -2 * res.points]);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-A：リーチ（宣言・聴牌の牌だけ選択・やめる・ツモ切りだけ・エンジンも拒否・ツモで＋1・親の精算）数学Ⅰ・Ⅱ');
+
+  // (2) リーチ後は自分にチー・ポンの選択肢が出ない（上家の sin：リーチ前ならチー・ポンできる形）。ロンは出る
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    const hand = ['sin', 'sin', '30', '=1/2', 'cos', '180', '=-1', '45'];
+    await v3Scene(page, presetWall(hand, ['0', '=-1/√3', '=-√3/2', 'sin'], [RI_O1.map((x) => (x === 'sin' ? '135' : x)), RI_O2, RI_O3]));
+    await page.locator('button[data-action="riichi"]').tap();
+    const zeroId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'a:0'); });
+    await page.locator(`.hand .tile[data-id="${zeroId}"]`).tap();
+    await page.locator('button[data-action="riichi-discard"]').tap();
+    await apForce(page, 1); await apForce(page, 2);
+    await apForce(page, 3, 'f:sin');
+    const claim = await page.evaluate(() => { const g = window.__mathjong.S.game; const p = g.pending(); return p && p.seat === 0 && p.type === 'claim' ? { chi: p.chi.length, pon: !!p.pon } : null; });
+    assert.equal(claim, null, 'リーチ後は宣言待ちにならない（チー・ポンなし、ロンもない形）');
+    await riWaitTurn(page);
+    const st = await riState(page);
+    assert.ok(!st.buttons.includes('chi') && !st.buttons.includes('pon'));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-A：リーチ後はチー・ポンの選択肢が出ない');
+
+  // (3) AI のリーチ：聴牌した AI はリーチを宣言し、対戦画面に表示する（初級・中級・上級）
+  for (const ai of ['beginner', 'intermediate', 'advanced']) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await page.evaluate((a) => { window.__mathjong.S.matchSettings.ai = a; }, ai);
+    // 下家（席1）に聴牌の手（不要牌 0 をツモ）。自分はツモ切り
+    await v3Scene(page, presetWall(['=-1/√3', '=-1/√3', '=-√3/2', '=-√3/2', '=-1/√2', '=-1/√2', '=√3', '=√3'], ['=-1', '0'], [RI_HAND, RI_O2, RI_O3]));
+    await apDiscardDrawn(page);
+    await page.waitForFunction(() => window.__mathjong.S.game.riichi[1] !== null || window.__mathjong.S.game.rivers[1].length > 0, null, { timeout: 8000 });
+    const st = await riState(page);
+    assert.equal(st.riichi[1], true, `${ai}：下家がリーチ`);
+    assert.equal(await page.locator('.panel.seat-1 .riichi-badge').count(), 1, `${ai}：下家の表示にリーチ`);
+    assert.equal(await page.locator('.panel.seat-1 .river .tile.riichi-decl').count(), 1);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-A：AI のリーチ（初級・中級・上級）と対戦画面の表示');
+
+  // (4) 320／375／430px：リーチのボタン・宣言牌の選択・ツモ切りが画面に収まる
+  for (const w of [320, 375, 430]) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { viewport: { width: w, height: 700 } });
+    await v3Scene(page, presetWall(RI_HAND, ['0', '=-1/√3', '=-√3/2', '=-1/√2', '=-1/√3'], [RI_O1, RI_O2, RI_O3]));
+    for (const sel of ['button[data-action="riichi"]', 'button[data-action="discard"]']) {
+      const b = await page.locator(sel).boundingBox();
+      assert.ok(b && b.x >= 0 && b.x + b.width <= w + 0.5 && b.height >= 44, `${w}px ${sel} ${JSON.stringify(b)}`);
+    }
+    await page.locator('button[data-action="riichi"]').tap();
+    for (const sel of ['button[data-action="riichi-cancel"]', 'button[data-action="riichi-discard"]']) {
+      const b = await page.locator(sel).boundingBox();
+      assert.ok(b && b.x >= 0 && b.x + b.width <= w + 0.5 && b.height >= 44, `${w}px ${sel} ${JSON.stringify(b)}`);
+    }
+    await page.locator('.hand .tile.tap').first().tap();
+    await page.locator('button[data-action="riichi-discard"]').tap();
+    await apForce(page, 1); await apForce(page, 2); await apForce(page, 3);
+    await riWaitTurn(page);
+    const b = await page.locator('button[data-action="tsumogiri"]').boundingBox();
+    assert.ok(b && b.x + b.width <= w + 0.5 && b.height >= 44, `${w}px ツモ切り ${JSON.stringify(b)}`);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 0, `${w}px 横スクロール`);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v05-riichi-${w}.png` });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-A：320／375／430px（リーチ・宣言牌の選択・ツモ切り）');
+}
+
+// ---- Ver.0.5-B：ロン・ポン・チーの演出 ----
+const FX_O1 = ['sin', 'sin', '0', '90', '90', '=-√3', '=√3', '150'];
+const FX_O2 = ['cos', '135', '=√3', '=-1/√2', '120', '120', 'tan', '=0'];
+const FX_O3 = ['=1/2', 'tan', 'tan', '120', '120', '90', '=-1/√2', '=-1/√2']; // 席3：=1/2 を持つ（上家の打牌）
+const fxState = (page) => page.evaluate(() => {
+  const { S } = window.__mathjong;
+  const l = document.getElementById('fx-layer');
+  const g = S.game;
+  const p = g && g.pending();
+  return {
+    cls: l.className, word: (l.querySelector('.fx-word') || {}).textContent || '', who: (l.querySelector('.fx-who .fx-name') || {}).textContent || '',
+    tiles: l.querySelectorAll('.fx-tiles .fx-t').length, win: l.querySelectorAll('.fx-wintile .tile').length, flash: l.querySelectorAll('.fx-flash').length,
+    history: [...S.fx.history], shake: document.querySelectorAll('.table.fx-shake').length, glow: document.querySelectorAll('.meld.fx-glow').length,
+    events: g ? g.events.length : null, p: p && { seat: p.seat, type: p.type }, modal: S.modal, mode: S.fx.mode,
+  };
+});
+const fxGone = (page) => page.waitForFunction(() => document.getElementById('fx-layer').className === '' && document.getElementById('fx-layer').innerHTML === '', null, { timeout: 5000 });
+// 自分の打牌 → 下家・対面の打牌（ツモ牌）→ 上家が =1/2 を捨てる。自分の宣言待ちで止まる
+async function fxToClaim(page, hand, others = [FX_O1, FX_O2, FX_O3], draws = ['45', '=-1/√3', '=-√3/2', '=-1/√2']) {
+  await v3Scene(page, presetWall(hand, draws, others));
+  await apDiscardDrawn(page);
+  await apForce(page, 1); await apForce(page, 2);
+  await apForce(page, 3, 'v:1/2');
+  await v3WaitHuman(page);
+}
+
+async function v05bEffects(browser) {
+  // (1) ポン・チー：自分の鳴き。演出が出て、終わると消える。ゲームの進行は演出と無関係に進む
+  for (const [kind, hand, word, tiles] of [
+    ['pon', ['=1/2', '=1/2', 'sin', '0', '135', '=-√3', 'tan', '150'], 'ポン！', 3],
+    ['chi', ['=1/2', '45', 'sin', '30', '0', '0', '135', '=-√3'], 'チー！', 3],
+  ]) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await fxToClaim(page, hand);
+    assert.deepEqual((await fxState(page)).history, [], '鳴く前は演出なし');
+    const evBefore = (await fxState(page)).events;
+    await page.locator(`button[data-action="${kind}"]`).first().tap();
+    let st = await fxState(page);
+    assert.equal(st.cls, `fx-${kind}`, `${kind}：演出のレイヤー`);
+    assert.equal(st.word, word);
+    assert.equal(st.tiles, tiles, '鳴いた面子の3枚');
+    assert.equal(st.who, 'あなた');
+    assert.deepEqual(st.history, [kind]);
+    assert.ok(st.glow === 1, '鳴いた面子が光る');
+    assert.deepEqual(st.p, { seat: 0, type: 'turn' }, '進行は演出を待たず、自分の打牌番');
+    assert.equal(st.events, evBefore + 1, '記録は鳴きの1件だけ増える（演出は記録を増やさない）');
+    // 演出中も操作できる：ヒント・自動パスの切替・手牌の選択（タップを通す）
+    await page.locator('button[data-action="hint"]').tap();
+    assert.equal(await page.evaluate(() => window.__mathjong.S.hintOpen), true, '演出中もヒントが開く');
+    await apToggle(page, 'pon').tap();
+    assert.equal(await apToggleOn(page, 'pon'), true, '演出中も自動パスを切り替えられる');
+    // 再描画（ヒント・切替）でも演出は途切れず、同じ演出の二重発火もない
+    assert.deepEqual((await fxState(page)).history, [kind]);
+    await fxGone(page);
+    st = await fxState(page);
+    assert.deepEqual([st.cls, st.glow, st.shake], ['', 0, 0], '終わると消える');
+    assert.deepEqual(st.history, [kind], '1回だけ');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-B：ポン・チーの演出（文字・3枚・面子の発光）・終わると消える・演出中もヒント／自動パスの切替が可能・記録を増やさない');
+
+  // (2) ロン：自分のロン（赤〜金の演出・画面揺れ・和了牌）。結果画面・精算は従来どおり
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['0', '=-1/√3', '=-√3/2', '=-1/√2'], [['=1', 'sin', '0', '90', '90', '=-√3', '=√3', '150'], FX_O2, FX_O3]));
+    await page.locator('.hand .tile.tap.drawn').tap(); await page.locator('.hand .tile.tap.drawn').tap(); // 0 を捨てる（=1 待ち）
+    await apForce(page, 1, 'v:1');
+    await v3WaitHuman(page);
+    assert.equal((await v3State(page)).p.ron, true);
+    await page.locator('button[data-action="ron"]').tap();
+    let st = await fxState(page);
+    assert.equal(st.cls, 'fx-ron');
+    assert.equal(st.word, 'ロン！');
+    assert.equal(st.win, 1, '和了牌を大きく表示');
+    assert.equal(st.flash, 1, 'フラッシュ');
+    assert.equal(st.shake, 1, '画面揺れ（盤面だけ。操作バーは動かさない）');
+    assert.equal(st.modal, 'result', '結果画面は演出を待たずに開く（進行・精算は従来どおり）');
+    const res = await page.evaluate(() => { const { S } = window.__mathjong; const r = S.game.result; return { winner: r.winner, how: r.how, points: r.points, delta: S.match.scores.map((x, i) => x - S.prevScores[i]) }; });
+    assert.deepEqual([res.winner, res.how], [0, 'ron']);
+    assert.deepEqual(res.delta, [6 * res.points, -6 * res.points, 0, 0], '精算は演出と無関係（親ロン 6B）');
+    // 揺れるのは盤面だけ：操作バー（固定配置）は動かない
+    assert.equal(await page.evaluate(() => document.querySelector('.bar').closest('.fx-shake')), null, '操作バーは揺れる盤面（.table）の外');
+    assert.equal(await page.evaluate(() => !!document.querySelector('.table').contains(document.querySelector('.bar'))), false);
+    await fxGone(page);
+    st = await fxState(page);
+    assert.deepEqual([st.cls, st.shake], ['', 0]);
+    assert.deepEqual(st.history, ['ron']);
+    // 結果画面から次の局へ：演出の持ち越しなし・従来どおり進む
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.hand .tile');
+    st = await fxState(page);
+    assert.deepEqual([st.cls, st.history.length, st.modal], ['', 1, null]);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-B：ロンの演出（文字・和了牌・フラッシュ・盤面だけの揺れ）・結果画面と精算は従来どおり・次の局へ持ち越さない');
+
+  // (3) AI のロン・ポン：他家の鳴き・和了でも演出が出る（AI の名前を表示）
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(['=1', 'sin', 'sin', '0', '90', '=-√3', '=√3', '150'], ['45', '=-1/√3', '=-√3/2', '=-1/√2'],
+      [['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], FX_O2, FX_O3])); // 下家（席1）は =1 待ちの聴牌
+    await page.locator('.hand .tile.tap:not(.drawn)').first().evaluate((e) => e.click()); // 何もしない（選択のみ）
+    const oneId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'v:1'); });
+    await page.locator(`.hand .tile[data-id="${oneId}"]`).tap();
+    await page.locator(`.hand .tile[data-id="${oneId}"]`).tap();
+    await page.waitForFunction(() => window.__mathjong.S.fx.history.includes('ron'), null, { timeout: 8000 });
+    const st = await fxState(page);
+    assert.equal(st.word, 'ロン！');
+    assert.equal(st.who, 'おうすけ', '和了した AI の名前');
+    assert.equal(st.modal, 'result');
+    assert.equal((await page.evaluate(() => window.__mathjong.S.game.result.winner)), 1);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  {
+    // AI のポン：自分（席0）が =1/2 を捨て、下家（席1・速攻型）が対々和に向かう手（=1/2 の対子と sin の刻子）でポンする
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(['=1/2', 'sin', 'sin', '0', '90', '=-√3', '=√3', '150'], ['45', '=-1/√3', '=-√3/2', '=-1/√2'],
+      [['=1/2', '=1/2', 'sin', 'sin', 'sin', '0', '0', '=-√3'], FX_O2, FX_O3.map((x) => (x === '=1/2' ? '=-1' : x))]));
+    const halfId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'v:1/2'); });
+    await page.locator(`.hand .tile[data-id="${halfId}"]`).tap();
+    await page.locator(`.hand .tile[data-id="${halfId}"]`).tap();
+    await page.waitForFunction(() => window.__mathjong.S.fx.history.includes('pon'), null, { timeout: 8000 });
+    const st = await fxState(page);
+    assert.equal(st.word, 'ポン！');
+    assert.equal(st.who, 'おうすけ', 'ポンした AI の名前');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game.melds[1].length), 1);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-B：AI のロン・ポンでも演出（AI の名前を表示）');
+
+  // (4) 重なり：表示中のロンを後から来たポン・チーで潰さない。チー表示中のポン・チーは待ち、ロンが来たら捨てる（Ver.0.5-E）。進行・記録は変わらない
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['0', '=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    const before = await fxState(page);
+    const seq = await page.evaluate(() => {
+      const { S, fx } = window.__mathjong;
+      const g = S.game;
+      const ev = g.events.length;
+      const out = [];
+      const snap = () => out.push(document.getElementById('fx-layer').className);
+      const q = [];
+      fx.fire('chi', { type: 'chi', seat: 1, tile: g.hands[1][0] }); snap(); q.push(S.fx.queue.length);
+      fx.fire('pon', { type: 'pon', seat: 2, tile: g.hands[2][0] }); snap(); q.push(S.fx.queue.length); // Ver.0.5-E：表示中のチーを消さず、ポンは待つ
+      fx.fire('chi', { type: 'chi', seat: 1, tile: g.hands[1][0] }); snap(); q.push(S.fx.queue.length); // これも待つ
+      fx.fire('ron', { type: 'win', seat: 3, how: 'ron', from: 0 }); snap(); q.push(S.fx.queue.length); // ロンは最優先：すぐ表示し、待っている演出を捨てる
+      fx.fire('pon', { type: 'pon', seat: 2, tile: g.hands[2][0] }); snap(); q.push(S.fx.queue.length); // ロン表示中は潰さない
+      fx.fire('chi', { type: 'chi', seat: 1, tile: g.hands[1][0] }); snap(); q.push(S.fx.queue.length);
+      return { out, q, history: [...S.fx.history], eventsSame: g.events.length === ev, pending: JSON.stringify(g.pending()) };
+    });
+    assert.deepEqual(seq.out, ['fx-chi', 'fx-chi', 'fx-chi', 'fx-ron', 'fx-ron', 'fx-ron']);
+    assert.deepEqual(seq.q, [0, 1, 2, 0, 0, 0], '待つ演出の数（ロンで捨てる）');
+    assert.deepEqual(seq.history, ['chi', 'ron'], '出さなかった演出は記録に残らない');
+    assert.equal(seq.eventsSame, true, '演出はゲームの記録を変えない');
+    assert.equal(JSON.stringify((await page.evaluate(() => window.__mathjong.S.game.pending()))), seq.pending, '進行は変わらない');
+    await fxGone(page);
+    // 局の切り替え・タイトルへ戻る：演出が残らない
+    await page.evaluate(() => window.__mathjong.fx.fire('pon', { type: 'pon', seat: 1, tile: window.__mathjong.S.game.hands[1][0] }));
+    await page.evaluate(() => window.__mathjong.startRound());
+    assert.equal((await fxState(page)).cls, '', '新しい局で演出を消す');
+    await page.evaluate(() => window.__mathjong.fx.fire('chi', { type: 'chi', seat: 1, tile: window.__mathjong.S.game.hands[1][0] }));
+    await page.locator('button[data-action="settings"]').tap();
+    await page.locator('button[data-action="ask-title"]').tap();
+    await page.locator('button[data-action="to-title"]').tap();
+    await page.waitForSelector('.title-screen');
+    assert.equal((await fxState(page)).cls, '', 'タイトルへ戻ると演出を消す');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.fx.timer), null, '演出のタイマーも止まる');
+    assert.deepEqual(errors, []);
+    void before;
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-B：演出が重なっても進行・記録は不変（ロン優先）・新しい局／タイトルで演出を消す');
+
+  // (5) リーチ・自動パス・ヒントとの競合なし：リーチ中のロン演出／自動パスでポンを見送れば演出は出ない
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    // 自分がリーチ → 下家が =1 を捨てて、リーチ中の自分がロン（演出あり、ロンは自動パスされない）
+    await v3Scene(page, presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['0', '=-1/√3', '=-√3/2', '=-1/√2', '=0', '=-1/√3', '=-√3/2'], [['=1', 'sin', '0', '90', '90', '=-√3', '=√3', '150'], FX_O2, FX_O3]));
+    await page.locator('button[data-action="riichi"]').tap();
+    const zeroId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'a:0'); });
+    await page.locator(`.hand .tile[data-id="${zeroId}"]`).tap();
+    await page.locator('button[data-action="riichi-discard"]').tap();
+    assert.deepEqual((await fxState(page)).history, ['riichi'], 'リーチが成立した時にリーチの演出（Ver.0.5-D）');
+    await apForce(page, 1, 'v:1');
+    await v3WaitHuman(page);
+    await apToggle(page, 'chi').tap(); await apToggle(page, 'pon').tap(); // 自動パス ON でも、ロンは出る
+    assert.equal((await v3State(page)).p.ron, true);
+    await page.locator('button[data-action="ron"]').tap();
+    const st = await fxState(page);
+    assert.equal(st.cls, 'fx-ron');
+    const res = await page.evaluate(() => window.__mathjong.S.game.result);
+    assert.equal(res.analysis.riichi, true, 'リーチ＋1は従来どおり');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await paSettings(page, true, true); // チー・ポンの自動パス ON（この手は sin150°=1/2 でチーもできるので両方 ON）
+    await fxToClaim(page, ['=1/2', '=1/2', 'sin', '0', '135', '=-√3', 'tan', '150']);
+    const st = await fxState(page);
+    assert.equal(st.history.length, 0, '自動パスで見送ったポンは鳴いていないので演出なし');
+    assert.deepEqual([st.p.seat, st.p.type], [0, 'turn']);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-B：リーチ・自動パス・ヒントと競合しない（ロンは自動パスされず演出、見送ったポンは演出なし）');
+
+  // (6) 簡易表示：設定で切替。文字だけ（フラッシュ・揺れ・牌・発光なし）。保存は 'lite'
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await page.locator('button[data-action="settings"]').tap();
+    assert.equal(await page.locator('select[data-action="fx-mode"]').inputValue(), 'full');
+    await page.locator('select[data-action="fx-mode"]').selectOption('lite');
+    assert.equal(await page.evaluate(() => localStorage.getItem('mj-effects')), 'lite');
+    await page.locator('.modal-actions button[data-action="close"]').tap();
+    await v3Scene(page, presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['0', '=-1/√3'], [['=1', 'sin', '0', '90', '90', '=-√3', '=√3', '150'], FX_O2, FX_O3]));
+    await page.locator('.hand .tile.tap.drawn').tap(); await page.locator('.hand .tile.tap.drawn').tap();
+    await apForce(page, 1, 'v:1');
+    await v3WaitHuman(page);
+    await page.locator('button[data-action="ron"]').tap();
+    const st = await fxState(page);
+    assert.equal(st.cls, 'fx-ron lite');
+    assert.deepEqual([st.word, st.flash, st.win, st.tiles, st.shake, st.glow], ['ロン！', 0, 0, 0, 0, 0], '簡易：文字だけ');
+    await page.reload();
+    await page.waitForSelector('.hand .tile');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.fx.mode), 'lite', '再読み込みでも保持');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // reduced motion（OS の「視差効果を減らす」）も文字だけ
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?mode=math1&seed=1&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    await page.evaluate(() => { const { S, fx } = window.__mathjong; fx.fire('ron', { type: 'win', seat: 1, how: 'ron', from: 0 }); });
+    const st = await fxState(page);
+    assert.equal(st.cls, 'fx-ron lite');
+    assert.equal(st.shake, 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-B：簡易表示（設定・保存・文字だけ）と reduced motion');
+
+  // (7) 320／375／430px：演出の文字・牌・名前が画面内に収まり、横スクロールが出ない。ロンの揺れで操作バーがずれない
+  for (const w of [320, 375, 430]) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { viewport: { width: w, height: 700 } });
+    await v3Scene(page, presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['0', '=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    for (const kind of ['ron', 'pon', 'chi']) {
+      await page.evaluate((k) => {
+        const { S, fx } = window.__mathjong; const g = S.game;
+        S.game.result = k === 'ron' ? { ...(g.result || {}), tile: g.hands[0][0] } : g.result;
+        if (k !== 'ron') g.melds[1].push({ meld: 0, kind: 'formula', call: k, tiles: g.hands[1].slice(0, 3), claimed: g.hands[1][0], from: 0 });
+        fx.fire(k, { type: k === 'ron' ? 'win' : k, seat: 1, how: 'ron', from: 0, tile: g.hands[1][0] });
+      }, kind);
+      await page.waitForTimeout(120);
+      const m = await page.evaluate(() => {
+        const l = document.getElementById('fx-layer');
+        const r = (el) => { const b = el.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom }; };
+        return { word: r(l.querySelector('.fx-word')), card: r(l.querySelector('.fx-card')), over: document.documentElement.scrollWidth - innerWidth, fs: parseFloat(getComputedStyle(l.querySelector('.fx-word')).fontSize), vh: innerHeight };
+      });
+      assert.ok(m.card.l >= -1 && m.card.r <= w + 1, `${w}px ${kind}：演出が画面の幅に収まる ${JSON.stringify(m.card)}`);
+      assert.ok(m.word.t >= 0 && m.word.b <= m.vh, `${w}px ${kind}：文字が画面の高さに収まる`);
+      assert.ok(m.fs >= 40, `${w}px ${kind}：文字の大きさ ${m.fs}px`);
+      assert.ok(m.over <= 0, `${w}px ${kind}：横スクロールなし`);
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/v05b-${kind}-${w}.png` });
+      await fxGone(page);
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-B：320／375／430px で演出（ロン・ポン・チー）が画面内に収まる');
+}
+
+// ---- Ver.0.5-B Codex 監査 P2-1：演出中に「通常／簡易」を変えても、表示中の演出の表示は変わらない ----
+// 演出の見た目をまとめて返す：レイヤー（文字・牌・フラッシュ）と盤面（揺れ・発光）の両方
+const fxLook = (page) => page.evaluate(() => {
+  const l = document.getElementById('fx-layer');
+  return {
+    cls: l.className, flash: l.querySelectorAll('.fx-flash').length, win: l.querySelectorAll('.fx-wintile .tile').length, tiles: l.querySelectorAll('.fx-tiles .fx-t').length,
+    shake: document.querySelectorAll('.table.fx-shake').length, glow: document.querySelectorAll('.meld.fx-glow').length,
+    delay: (document.querySelector('.table.fx-shake') || document.querySelector('.meld.fx-glow') || { style: {} }).style.animationDelay || '',
+    cur: window.__mathjong.S.fx.current && { kind: window.__mathjong.S.fx.current.kind, lite: window.__mathjong.S.fx.current.lite, startedAt: window.__mathjong.S.fx.current.startedAt },
+    mode: window.__mathjong.S.fx.mode,
+  };
+});
+// 設定画面で通常／簡易を切り替える（実際の画面操作）。閉じると再描画される。
+async function fxSetMode(page, mode) {
+  await page.locator('button[data-action="settings"]').tap();
+  await page.locator('select[data-action="fx-mode"]').selectOption(mode);
+  await page.locator('.modal-actions button[data-action="close"]').tap();
+}
+// 盤面の準備（ポン・チー用に、下家の手牌に3枚ある局面）と演出の発火（本物のゲームの記録がなくても、演出だけを出す）
+const fxSceneFire = (page, kind) => page.evaluate((k) => {
+  const { S, fx } = window.__mathjong; const g = S.game;
+  if (k === 'ron' || k === 'tsumo') g.result = { ...(g.result || {}), tile: g.hands[0][0] };
+  else g.melds[1].push({ meld: 0, kind: 'formula', call: k, tiles: g.hands[1].slice(0, 3), claimed: g.hands[1][0], from: 0 });
+  fx.fire(k, { type: k === 'ron' || k === 'tsumo' ? 'win' : k, seat: 1, how: k === 'tsumo' ? 'tsumo' : 'ron', from: 0, tile: g.hands[1][0] });
+}, kind);
+
+async function v05bFxModeFixed(browser) {
+  const hand = ['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'];
+  const wall = () => presetWall(hand, ['0', '=-1/√3'], [FX_O1, FX_O2, FX_O3]);
+  // A・B：ロン。通常 → 簡易、簡易 → 通常。ポン・チーも同じ（C）
+  for (const [from, to] of [['full', 'lite'], ['lite', 'full']]) {
+    for (const kind of ['ron', 'tsumo', 'pon', 'chi']) {
+      const { ctx, page, errors } = await v3Page(browser, 'math1', { init: { fn: (m) => { try { localStorage.setItem('mj-effects', m); } catch { /* */ } }, arg: from } });
+      await v3Scene(page, wall());
+      await fxSceneFire(page, kind);
+      const where = `${from}→${to} ${kind}`;
+      const before = await fxLook(page);
+      assert.equal(before.cur.lite, from === 'lite', `${where}：開始時のモードを保存`);
+      assert.equal(before.cls, `fx-${kind}${from === 'lite' ? ' lite' : ''}`, where);
+      // 演出中に設定を変えて閉じる（再描画される）
+      await fxSetMode(page, to);
+      const after = await fxLook(page);
+      assert.equal(after.mode, to, `${where}：設定は変わる（次の演出から反映）`);
+      assert.equal(after.cur.lite, before.cur.lite, `${where}：表示中の演出のモードは変わらない`);
+      assert.equal(after.cur.startedAt, before.cur.startedAt, `${where}：同じ演出が続く（作り直さない）`);
+      assert.equal(after.cls, before.cls, `${where}：文字のレイヤーは変わらない`);
+      assert.deepEqual([after.flash, after.win, after.tiles], [before.flash, before.win, before.tiles], `${where}：フラッシュ・和了牌・3枚は変わらない`);
+      // 盤面の揺れ・発光：通常で始まった演出は続き、簡易で始まった演出は付かない（レイヤーと一致）
+      if (from === 'full') {
+        assert.equal(kind === 'ron' || kind === 'tsumo' ? after.shake : after.glow, 1, `${where}：揺れ・発光が続く`);
+        assert.match(after.delay, /^-\d+ms$/, `${where}：開始時点からの経過で続きから再生する`);
+        assert.ok(parseInt(after.delay.slice(1), 10) >= 0);
+      } else {
+        assert.deepEqual([after.shake, after.glow], [0, 0], `${where}：簡易で始まった演出に、途中から揺れ・発光を付けない`);
+      }
+      // 次の演出は新しい設定（簡易 ↔ 通常）
+      await fxGone(page);
+      await fxSceneFire(page, kind);
+      const next = await fxLook(page);
+      assert.equal(next.cur.lite, to === 'lite', `${where}：次の演出は新しい設定`);
+      assert.equal(next.cls, `fx-${kind}${to === 'lite' ? ' lite' : ''}`, where);
+      if (to === 'lite') assert.deepEqual([next.flash, next.win, next.tiles, next.shake, next.glow], [0, 0, 0, 0, 0], `${where}：簡易は文字だけ`);
+      else assert.equal(kind === 'ron' || kind === 'tsumo' ? next.shake : next.glow, 1, `${where}：通常は揺れ・発光あり`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  }
+  console.log('✓ Ver.0.5-B P2-1：演出中に通常／簡易を変えても、表示中の演出（文字・フラッシュ・牌・揺れ・発光）は変わらず、次の演出から新しい設定（ロン・ポン・チー、両方向）');
+
+  // reduced motion は演出開始時の判定で簡易表示に反映される。開始後に変わっても表示中の演出は変わらない
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?mode=math1&seed=1&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    await v3Scene(page, wall());
+    await fxSceneFire(page, 'ron');
+    let l = await fxLook(page);
+    assert.equal(l.cur.lite, true, 'reduced motion：開始時に簡易');
+    assert.equal(l.cls, 'fx-ron lite');
+    await page.emulateMedia({ reducedMotion: 'no-preference' }); // 演出中に OS の設定が変わっても
+    await page.evaluate(() => window.__mathjong.render());
+    l = await fxLook(page);
+    assert.deepEqual([l.cur.lite, l.cls, l.shake], [true, 'fx-ron lite', 0], '表示中の演出は簡易のまま（揺れを付けない）');
+    await fxGone(page);
+    await fxSceneFire(page, 'ron'); // 次の演出は新しい判定（通常）
+    l = await fxLook(page);
+    assert.deepEqual([l.cur.lite, l.cls, l.shake], [false, 'fx-ron', 1]);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-B P2-1：reduced motion は開始時の判定で簡易に反映、途中で変わっても表示中の演出は不変');
+
+  // 経過時間の維持：設定変更・再描画のあとも、演出の開始時刻・終了のタイマーは変わらず、終了時に消える
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, wall());
+    await fxSceneFire(page, 'ron');
+    const t0 = (await fxLook(page)).cur.startedAt;
+    await page.waitForTimeout(250);
+    await fxSetMode(page, 'lite');
+    await page.evaluate(() => window.__mathjong.render());
+    const l = await fxLook(page);
+    assert.equal(l.cur.startedAt, t0, '開始時刻は変わらない');
+    const d = parseInt(l.delay.slice(1), 10);
+    assert.ok(d >= 250 && d < 800, `経過 ${d}ms が続きから反映される（やり直さない）`);
+    await fxGone(page); // 元のタイマーで終了する
+    const e = await fxLook(page);
+    assert.deepEqual([e.cls, e.shake, e.glow, e.cur], ['', 0, 0, null]);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.fx.timer), null, 'タイマーは終了で止まる');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-B P2-1：設定変更・再描画のあとも開始時刻と経過が維持され、元のタイマーで終了する');
+
+  // 既存の確認：重なり（ロン＞ポン＞チー）・新しい局／タイトルで消去・設定の保存と再読み込み
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, wall());
+    await page.evaluate(() => {
+      const { S, fx } = window.__mathjong; const g = S.game; const e = (k) => ({ type: k, seat: 1, tile: g.hands[1][0], how: 'ron', from: 0 });
+      fx.fire('chi', e('chi')); fx.fire('pon', e('pon')); fx.fire('ron', { type: 'win', seat: 1, how: 'ron', from: 0 }); fx.fire('pon', e('pon'));
+    });
+    assert.deepEqual((await page.evaluate(() => [...window.__mathjong.S.fx.history])), ['chi', 'ron'], 'ロン＞ポン＞チー（Ver.0.5-E：チー表示中のポンは待ち、ロンで捨てる）');
+    await fxSetMode(page, 'lite');
+    assert.equal((await fxLook(page)).cur.kind, 'ron', '設定変更でも優先度の結果は変わらない');
+    await page.evaluate(() => window.__mathjong.startRound());
+    const cleared = await fxLook(page);
+    assert.deepEqual([cleared.cls, cleared.cur, cleared.shake], ['', null, 0], '新しい局で演出を消す');
+    assert.equal(await page.evaluate(() => localStorage.getItem('mj-effects')), 'lite', '設定は保存される');
+    await page.reload();
+    await page.waitForSelector('.hand .tile');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.fx.mode), 'lite', '再読み込みでも保持');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-B P2-1：重なり（ロン＞ポン＞チー）・新しい局での消去・設定の保存と再読み込みは従来どおり');
+}
+
+// ---- Ver.0.5-C：ツモ演出の強化・タイトル画像 ----
+const TS_HAND = ['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45']; // =1 待ち（tan45°=1）
+// 牌種類 key の「表示ラベル」（牌の aria-label）。画面と同じ描画関数で、演出とは別に作って比べる
+const tileLabelOf = (page, key) => page.evaluate(async ([base, k]) => {
+  const { tileHTML } = await import(`${base}src/ui/render.js`);
+  const t = window.__mathjong.rules.types.find((x) => x.key === k);
+  const box = document.createElement('div');
+  box.innerHTML = tileHTML(t, { size: 'm' });
+  return box.firstElementChild.getAttribute('aria-label');
+}, [BASE, key]);
+// 演出に表示された和了牌：{ label, 牌の id・種類 }（ゲームの結果 result.tile と比べる）
+const fxWinTile = (page) => page.evaluate(() => {
+  const { S, rules } = window.__mathjong; const g = S.game; const r = g.result;
+  const el = document.querySelector('#fx-layer .fx-wintile .tile');
+  const hand = document.querySelector(`.hand .tile[data-id="${r.tile}"]`);
+  return { shown: el && el.getAttribute('aria-label'), id: r.tile, key: rules.types[g.typeOf(r.tile)].key, handLabel: hand && hand.getAttribute('aria-label'), count: document.querySelectorAll('#fx-layer .fx-wintile .tile').length };
+});
+async function v05cTsumo(browser) {
+  // (1) 自分のツモ和了：ロンと同格の演出（文字・閃光・光の輪・和了牌・盤面の揺れ）。結果画面・精算は従来どおり
+  for (const mode of ['math1', 'math2']) {
+    const { ctx, page, errors } = await v3Page(browser, mode);
+    await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
+    assert.equal((await v3State(page)).p.type, 'turn');
+    const evBefore = (await fxState(page)).events;
+    // 実際にツモした牌（山から引いた牌の id と種類）を、和了の前に記録する
+    const drawn = await page.evaluate(() => { const { S, rules } = window.__mathjong; const g = S.game; return { id: g.drawn, key: rules.types[g.typeOf(g.drawn)].key }; });
+    assert.equal(drawn.key, 'v:1', `${mode}：山から引いた牌は =1`);
+    await page.locator('button[data-action="tsumo"]').tap();
+    const st = await fxState(page);
+    assert.equal(st.cls, 'fx-tsumo', `${mode}：ツモの演出`);
+    assert.equal(st.word, 'ツモ！');
+    assert.equal(st.who, 'あなた');
+    assert.equal(st.flash, 1, '閃光');
+    assert.equal(st.win, 1, '和了牌（引いた牌）を大きく表示');
+    assert.equal(await page.locator('#fx-layer .fx-halo').count(), 1, '光の輪（ツモだけの演出）');
+    assert.equal(st.shake, 1, '盤面が揺れる');
+    assert.deepEqual(st.history, ['tsumo']);
+    assert.equal(st.events, evBefore + 1, '記録は和了の1件だけ（演出は記録を増やさない）');
+    assert.equal(st.modal, 'result', '結果画面は演出を待たずに開く');
+    // 和了牌は、実際にツモした牌と一致する（ラベルが空でないだけでなく、牌そのものを比べる）
+    const wt = await fxWinTile(page);
+    assert.equal(wt.count, 1);
+    assert.equal(wt.id, drawn.id, `${mode}：結果の和了牌は、ツモした牌（id ${drawn.id}）`);
+    assert.equal(wt.key, drawn.key);
+    const expectedLabel = await tileLabelOf(page, drawn.key);
+    assert.ok(expectedLabel && expectedLabel.length > 0);
+    assert.equal(wt.shown, expectedLabel, `${mode}：演出の和了牌の表示（${wt.shown}）が、ツモした牌（${drawn.key}）の表示（${expectedLabel}）と一致`);
+    assert.equal(wt.shown, wt.handLabel, `${mode}：手牌の同じ牌（id ${drawn.id}）の表示とも一致`);
+    for (const other of ['f:sin', 'a:30', 'v:1/2']) assert.notEqual(wt.shown, await tileLabelOf(page, other), `${mode}：ほかの牌（${other}）の表示ではない`);
+    const res = await page.evaluate(() => { const { S } = window.__mathjong; const r = S.game.result; return { winner: r.winner, how: r.how, points: r.points, delta: S.match.scores.map((x, i) => x - S.prevScores[i]) }; });
+    assert.deepEqual([res.winner, res.how], [0, 'tsumo']);
+    assert.deepEqual(res.delta, [6 * res.points, -2 * res.points, -2 * res.points, -2 * res.points], '親ツモの精算は演出と無関係（6B・各 −2B）');
+    // 揺れるのは盤面だけ：操作バーは揺れる盤面の外
+    assert.equal(await page.evaluate(() => !!document.querySelector('.table').contains(document.querySelector('.bar'))), false);
+    // ロンと見分けられる：色の系統（青白〜金）と、光の輪の有無
+    const color = await page.evaluate(() => getComputedStyle(document.querySelector('#fx-layer .fx-word')).textShadow);
+    assert.match(color, /127, 208, 255|58, 155, 255|79, 125, 255/, '青白〜青系の発光');
+    assert.doesNotMatch(color, /255, 74, 28|255, 45, 26/, 'ロンの赤い発光ではない');
+    await fxGone(page);
+    const e = await fxState(page);
+    assert.deepEqual([e.cls, e.shake], ['', 0]);
+    // 結果画面から次の局へ：演出の持ち越しなし
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.hand .tile');
+    const n = await fxState(page);
+    assert.deepEqual([n.cls, n.modal, n.history], ['', null, ['tsumo']]);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-C：自分のツモ和了の演出（文字・閃光・光の輪・和了牌・盤面の揺れ）・結果画面と親ツモの精算は従来どおり・次の局へ持ち越さない（数学Ⅰ・Ⅱ）');
+
+  // (2) AI のツモ和了：下家（席1）が =1 を引いてツモ。演出に AI の名前と、AI が実際に引いた牌（数学Ⅰ・Ⅱ）
+  for (const mode of ['math1', 'math2']) {
+    const { ctx, page, errors } = await v3Page(browser, mode);
+    await v3Scene(page, presetWall(['=-1/√3', '=-1/√3', '=-√3/2', '=-√3/2', '=1/√2', '=1/√2', '=√3', '=1/√3'], ['45', '=1'], [TS_HAND, FX_O2, FX_O3]));
+    await apDiscardDrawn(page);
+    // AI（席1）がツモ和了できる手番で、引いた牌を記録する（AI の判断を待つ間に読む）
+    await page.waitForFunction(() => { const g = window.__mathjong.S.game; const p = g.pending(); return p && p.seat === 1 && p.type === 'turn' && p.canTsumo; }, null, { timeout: 8000 });
+    const drawn = await page.evaluate(() => { const { S, rules } = window.__mathjong; const g = S.game; return { id: g.drawn, key: rules.types[g.typeOf(g.drawn)].key }; });
+    assert.equal(drawn.key, 'v:1', `${mode}：AI が引いた牌は =1`);
+    await page.waitForFunction(() => window.__mathjong.S.fx.history.includes('tsumo'), null, { timeout: 8000 });
+    const st = await fxState(page);
+    assert.equal(st.word, 'ツモ！');
+    assert.equal(st.who, 'おうすけ', '和了した AI の名前');
+    assert.equal(st.cls, 'fx-tsumo');
+    assert.equal(st.modal, 'result');
+    assert.equal(await page.evaluate(() => { const r = window.__mathjong.S.game.result; return [r.winner, r.how].join(); }), '1,tsumo');
+    const wt = await fxWinTile(page);
+    assert.equal(wt.count, 1);
+    assert.equal(wt.id, drawn.id, `${mode}：AI の和了牌は、AI が引いた牌（id ${drawn.id}）`);
+    const expectedLabel = await tileLabelOf(page, drawn.key);
+    assert.equal(wt.shown, expectedLabel, `${mode}：演出の和了牌（${wt.shown}）が、AI が引いた牌（${drawn.key}）の表示（${expectedLabel}）と一致`);
+    for (const other of ['f:sin', 'a:45', 'v:1/2']) assert.notEqual(wt.shown, await tileLabelOf(page, other), `${mode}：ほかの牌（${other}）の表示ではない`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-C P3-C：ツモ演出の和了牌が、実際にツモした牌（自分・AI、数学Ⅰ・Ⅱ）と一致（ラベルの比較・ほかの牌との区別）');
+
+  // (3) 他の演出・機能との競合なし：リーチ後のツモ、重なり（ツモ＞ポン・チー）、自動パス ON でもツモは自動で見送らない、ヒント
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(TS_HAND, ['0', '=-1/√3', '=-√3/2', '=-1/√2', '=1'], [FX_O1, FX_O2, FX_O3]));
+    await page.locator('button[data-action="riichi"]').tap();
+    const zeroId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'a:0'); });
+    await page.locator(`.hand .tile[data-id="${zeroId}"]`).tap();
+    await page.locator('button[data-action="riichi-discard"]').tap();
+    await apToggle(page, 'chi').tap(); await apToggle(page, 'pon').tap(); // 自動パス ON
+    await page.locator('button[data-action="hint"]').tap(); // ヒント
+    await apForce(page, 1); await apForce(page, 2); await apForce(page, 3);
+    await riWaitTurn(page);
+    assert.equal((await riState(page)).p.canTsumo, true);
+    await page.locator('button[data-action="tsumo"]').tap();
+    const st = await fxState(page);
+    assert.equal(st.cls, 'fx-tsumo', '自動パスが ON でも、ツモは自動で見送られず演出が出る');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game.result.analysis.riichi), true, 'リーチ＋1は従来どおり');
+    // 重なり：ツモの演出中に後から来たポン・チーは、ツモを潰さない（優先度ツモ＞ポン＞チー）
+    await page.evaluate(() => { const { S, fx } = window.__mathjong; const g = S.game; const t = g.hands[1][0]; fx.fire('pon', { type: 'pon', seat: 1, tile: t }); fx.fire('chi', { type: 'chi', seat: 1, tile: t }); });
+    assert.equal((await fxState(page)).cls, 'fx-tsumo');
+    assert.deepEqual((await fxState(page)).history, ['riichi', 'tsumo']);
+    await fxGone(page);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-C：ツモ演出がリーチ・自動パス・ヒントと競合しない・ポン／チーで潰れない');
+
+  // (4) 簡易表示（文字だけ）と、設定変更でも表示中の演出が変わらない（P2-1）。再試合・タイトルで演出を消す
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { init: { fn: (m) => { try { localStorage.setItem('mj-effects', m); } catch { /* */ } }, arg: 'lite' } });
+    await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
+    await page.locator('button[data-action="tsumo"]').tap();
+    const l = await fxState(page);
+    assert.equal(l.cls, 'fx-tsumo lite');
+    assert.deepEqual([l.word, l.flash, l.win, l.shake], ['ツモ！', 0, 0, 0], '簡易は文字だけ');
+    assert.equal(await page.locator('#fx-layer .fx-halo').count(), 0, '簡易は光の輪も出さない');
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
+    await page.locator('button[data-action="tsumo"]').tap();
+    const before = await fxLook(page);
+    assert.equal(before.cur.lite, false);
+    await page.locator('button[data-action="close-result"]').tap();
+    await fxSetMode(page, 'lite'); // 演出中に簡易へ
+    const after = await fxLook(page);
+    assert.deepEqual([after.cls, after.cur.lite, after.shake, after.flash, after.win], [before.cls, false, 1, 1, 1], '表示中のツモ演出は通常のまま続く');
+    assert.equal(await page.locator('#fx-layer .fx-halo').count(), 1);
+    await fxGone(page);
+    // 再試合・タイトルへ戻る：演出が残らない
+    await page.evaluate(() => window.__mathjong.fx.fire('tsumo', { type: 'win', seat: 1, how: 'tsumo', from: null }));
+    assert.equal((await fxState(page)).cls, 'fx-tsumo lite', '次の演出は新しい設定（簡易）');
+    await page.evaluate(() => window.__mathjong.startRound());
+    assert.equal((await fxState(page)).cls, '', '新しい局で消える');
+    await page.evaluate(() => window.__mathjong.fx.fire('tsumo', { type: 'win', seat: 1, how: 'tsumo', from: null }));
+    await page.locator('button[data-action="settings"]').tap();
+    await page.locator('button[data-action="ask-title"]').tap();
+    await page.locator('button[data-action="to-title"]').tap();
+    await page.waitForSelector('.title-screen');
+    const t = await fxState(page);
+    assert.equal(t.cls, '', 'タイトルへ戻ると消える');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.fx.timer), null, 'タイマーも止まる');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-C：ツモの簡易表示（文字だけ）・設定変更でも表示中の演出は不変・新しい局／タイトルで演出を消す');
+
+  // (5) 320／375／430px：ツモの演出（文字・和了牌・光の輪）が画面内に収まり、揺れでも横スクロールしない
+  for (const w of [320, 375, 430]) {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { viewport: { width: w, height: 700 } });
+    await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
+    await page.locator('button[data-action="tsumo"]').tap();
+    for (const t of [60, 200, 380]) {
+      await page.waitForTimeout(t === 60 ? 60 : 140);
+      const m = await page.evaluate(() => {
+        const l = document.getElementById('fx-layer');
+        const r = (el) => { const b = el.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom }; };
+        return { card: r(l.querySelector('.fx-card')), word: r(l.querySelector('.fx-word')), fs: parseFloat(getComputedStyle(l.querySelector('.fx-word')).fontSize), over: document.documentElement.scrollWidth - innerWidth, vh: innerHeight };
+      });
+      assert.ok(m.card.l >= -1 && m.card.r <= w + 1, `${w}px ツモ ${t}ms：演出が画面の幅に収まる ${JSON.stringify(m.card)}`);
+      assert.ok(m.word.t >= 0 && m.word.b <= m.vh, `${w}px：文字が画面の高さに収まる`);
+      assert.ok(m.fs >= 40, `${w}px：文字 ${m.fs}px`);
+      assert.ok(m.over <= 0, `${w}px ${t}ms：揺れの最中も横スクロールなし（${m.over}px）`);
+    }
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v05c-tsumo-${w}.png` });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-C：320／375／430px でツモの演出が画面内に収まり、揺れの最中も横スクロールしない');
+}
+
+// 正式採用のタイトル画像（オーナー採用：1536×1024、3:2、背景透過 PNG）と、表示幅に合わせた縮小版
+const TITLE_LOGO_SHA = 'aee4ed6781d44eef9f1a666a56ac04e27c16790a376cf770a112f48434a7ca1f';
+const TITLE_LADDER = [384, 576, 768, 960, 1152, 1536];
+async function v05cTitleLogo(browser) {
+  // (1) 縦横8サイズ：読み込める・3:2 を保つ・見切れない・極端に小さくならない・横スクロールなし・画像の取得に失敗がない
+  const sizes = [[320, 568, 2], [375, 667, 2], [390, 844, 3], [430, 932, 3], [568, 320, 2], [844, 390, 3], [768, 1024, 2], [1366, 768, 1]];
+  for (const [w, h, dpr] of sizes) {
+    const ctx = await newContext(browser, { viewport: { width: w, height: h }, deviceScaleFactor: dpr, isMobile: w < 800, hasTouch: w < 800 });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?speed=test`);
+    await page.waitForSelector('.title-logo img');
+    await page.waitForFunction(() => document.querySelector('.title-logo img').complete && document.querySelector('.title-logo img').naturalWidth > 0);
+    const m = await page.evaluate(() => {
+      const i = document.querySelector('.title-logo img'); const r = i.getBoundingClientRect();
+      return { alt: i.alt, w: r.width, h: r.height, l: r.left, r: r.right, t: r.top, b: r.bottom, src: i.currentSrc.split('/').pop(), nat: i.naturalWidth > 0, over: document.documentElement.scrollWidth - innerWidth, start: !!document.querySelector('[data-action="choose-opponents"]'), vh: innerHeight };
+    });
+    const where = `${w}×${h}`;
+    assert.equal(m.alt, '数雀（MATHJONG）', where);
+    assert.ok(m.nat, `${where}：読み込める`);
+    assert.ok(Math.abs(m.w / m.h - 3 / 2) < 0.01, `${where}：3:2 を保つ ${m.w}×${m.h}`);
+    assert.ok(m.l >= 0 && m.r <= w + 0.5 && m.t >= 0, `${where}：見切れない ${JSON.stringify([m.l, m.r, m.t])}`);
+    assert.ok(m.b <= m.vh + 0.5, `${where}：縦にも見切れない（画像の下端 ${Math.round(m.b)}px が画面の高さ ${m.vh}px 以内）`);
+    assert.ok(m.w >= 150, `${where}：極端に小さくならない ${m.w}`);
+    assert.ok(m.over <= 0, `${where}：横スクロールなし`);
+    assert.ok(new RegExp(`^title-logo-(${TITLE_LADDER.join('|')})\\.png$`).test(m.src), `${where}：用意した大きさのどれか ${m.src}`);
+    assert.equal(m.start, true, '「対戦相手を選ぶ」のボタンがある（画面は従来どおり使える）');
+    assert.deepEqual(errors, [], `${where}：画像の取得に失敗がない`);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v05c-title-${w}x${h}.png` });
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-C：タイトル画像（読み込み・3:2・見切れなし・縦横8サイズ・横スクロールなし）');
+
+  // (2) P3-B：画面の幅と解像度に応じて、必要な幅以上で最小の画像を1枚だけ取得する（低い横画面でも過大に取得しない）。
+  //     実際にネットワークで取得されたファイルで確認する（currentSrc だけでなく、取得した画像の幅と枚数）。
+  const dprCases = [[320, 568, 1], [320, 568, 2], [320, 568, 3], [375, 667, 2], [375, 667, 3], [390, 844, 2], [390, 844, 3], [430, 932, 3],
+    [667, 375, 2], [667, 375, 3], [812, 375, 3], [844, 390, 2], [844, 390, 3], [932, 430, 2], [932, 430, 3], [1024, 768, 2], [1366, 768, 1], [1366, 768, 2]];
+  for (const [w, h, dpr] of dprCases) {
+    const ctx = await newContext(browser, { viewport: { width: w, height: h }, deviceScaleFactor: dpr, isMobile: w < 800, hasTouch: w < 800 });
+    const page = await ctx.newPage();
+    const fetched = [];
+    page.on('response', (r) => { const mm = r.url().match(/title-logo-(\d+)\.png/); if (mm && r.status() === 200) fetched.push(Number(mm[1])); });
+    await page.goto(`${LOCAL}?speed=test`);
+    await page.waitForFunction(() => document.querySelector('.title-logo img').complete);
+    const css = await page.evaluate(() => document.querySelector('.title-logo img').getBoundingClientRect().width);
+    const need = css * dpr;
+    const smallest = TITLE_LADDER.find((x) => x >= need - 0.5) ?? TITLE_LADDER[TITLE_LADDER.length - 1];
+    const where = `${w}×${h}@${dpr}`;
+    assert.deepEqual(fetched, [smallest], `${where}：表示幅 ${css.toFixed(0)}px×${dpr}＝必要 ${need.toFixed(0)}px → 取得は ${smallest} 幅の1枚だけ（実際：${fetched}）`);
+    assert.ok(smallest / need <= 1.6, `${where}：必要な幅に対して大きすぎない（${(smallest / need).toFixed(2)} 倍）`);
+    await ctx.close();
+  }
+  // 修正前の過大取得（低い横画面 DPR3 で必要の約2倍）が出ないこと：667×375@3 は 768 幅、844×390@3 は 960 幅
+  console.log('✓ Ver.0.5-C P3-B：18の画面×解像度で、必要な幅以上で最小の画像を1枚だけ取得（低い横画面でも過大取得なし）');
+
+  // (3) 元画像（正式採用画像）はバイト単位で同一のまま配信される。縮小版は 3:2 で、公開サイトと同じサブパスから PNG として配信される
+  const { createHash } = await import('node:crypto');
+  const get = async (name) => { const r = await fetch(`${LOCAL}src/ui/${name}`); assert.equal(r.status, 200, name); assert.equal(r.headers.get('content-type'), 'image/png', name); return Buffer.from(await r.arrayBuffer()); };
+  const orig = await get('title-logo-1536.png');
+  assert.equal(createHash('sha256').update(orig).digest('hex'), TITLE_LOGO_SHA, '元画像（採用画像）はバイト単位で同一');
+  for (const wd of TITLE_LADDER) {
+    const buf = await get(`title-logo-${wd}.png`);
+    const [iw, ih, depth, colorType] = [buf.readUInt32BE(16), buf.readUInt32BE(20), buf[24], buf[25]];
+    assert.deepEqual([iw, ih], [wd, (wd * 2) / 3], `title-logo-${wd}.png の大きさ（3:2）`);
+    assert.deepEqual([depth, colorType], [8, 6], `title-logo-${wd}.png は 8bit RGBA（透過あり）`);
+  }
+  // 旧画像（1448×1086 の別の画像）はもう配信されない
+  for (const old of ['title-logo-1448.png', 'title-logo-1084.png', 'title-logo-724.png']) assert.equal((await fetch(`${LOCAL}src/ui/${old}`)).status, 404, `${old} は削除済み`);
+  console.log('✓ Ver.0.5-C：元画像は SHA-256 が同一・縮小版は 3:2 の RGBA PNG・旧画像は配信されない');
 }
 
 async function v04End(browser) {
@@ -3541,6 +4420,1752 @@ async function v04End(browser) {
   console.log('✓ Ver.0.4-A 最終修正：終了理由（上限の局で親和了・子和了・流局→round-limit／通常終了を優先／東4局・南4局は通常）・精算1回・局結果と最終結果で一致・不可能な局状態の URL はエラー画面・旧形式は従来どおり');
 }
 
+// ---- Ver.0.5-D：リーチ演出・効果音・ロン延長 ----
+// 偽の AudioContext（iPhone Safari の制限を再現する）：resume='ok'（resume で running）／'never'（ずっと suspended）。none：AudioContext がない。
+// 数えるもの：created（作った数）・resumes・sources（予約された声。無音の1サンプルを含む）。
+const SND_FN = (cfg) => {
+  const C = window.__snd = { created: 0, resumes: 0, sources: 0, ctxs: [] };
+  if (cfg.none) { window.AudioContext = undefined; window.webkitAudioContext = undefined; return; }
+  const P = () => ({ value: 0, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {}, cancelScheduledValues() {} });
+  class FakeCtx {
+    constructor() { C.created++; C.ctxs.push(this); this.state = cfg.initial || 'suspended'; this.sampleRate = 44100; this.currentTime = 0; this.destination = {}; }
+    resume() { C.resumes++; if (cfg.resume !== 'never') this.state = 'running'; return Promise.resolve(); }
+    createBuffer(ch, len) { return { length: len, getChannelData: () => new Float32Array(len) }; }
+    createGain() { return { gain: P(), connect() {}, disconnect() {} }; }
+    createDynamicsCompressor() { return { threshold: P(), knee: P(), ratio: P(), attack: P(), release: P(), connect() {} }; }
+    createBiquadFilter() { return { type: '', Q: P(), frequency: P(), connect() {} }; }
+    createOscillator() { C.sources++; return { type: '', frequency: P(), connect() {}, start() {}, stop() {} }; }
+    createBufferSource() { C.sources++; return { buffer: null, connect() {}, start() {}, stop() {} }; }
+  }
+  window.AudioContext = FakeCtx; window.webkitAudioContext = undefined;
+};
+const sndPage = (browser, cfg = {}, mode = 'math1', opts = {}) => v3Page(browser, mode, { ...opts, init: { fn: SND_FN, arg: cfg } });
+const sndLog = (page) => page.evaluate(() => window.__mathjong.sound.log.map((x) => `${x.kind}:${x.status}`));
+const sndKinds = (page) => page.evaluate(() => window.__mathjong.sound.log.map((x) => x.kind));
+const sndCounts = (page) => page.evaluate(() => ({ ...window.__snd, ctxs: undefined, state: window.__mathjong.sound.state() }));
+// 予約された声の数が、鳴った音の声の合計＋無音の1サンプルに一致する（音が1回ずつ予約されたことの確認）
+const sndVoices = (kinds) => 1 + kinds.reduce((n, k) => n + RECIPES[k].length, 0);
+// 宣言牌の選択からリーチ成立まで（実際の画面操作）
+async function riDeclare(page, key = 'a:0') {
+  await page.locator('button[data-action="riichi"]').tap();
+  const id = await page.evaluate((k) => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === k); }, key);
+  await page.locator(`.hand .tile[data-id="${id}"]`).tap();
+  await page.locator('button[data-action="riichi-discard"]').tap();
+}
+// 演出が終わるまでの時間（開始時刻 S.fx.current.startedAt から）
+const fxDuration = (page) => page.evaluate(() => new Promise((res) => {
+  const c = window.__mathjong.S.fx.current;
+  if (!c) return res(null);
+  const t0 = c.startedAt;
+  const tick = () => { if (!window.__mathjong.S.fx.current) res(performance.now() - t0); else requestAnimationFrame(tick); };
+  tick();
+}));
+const RI_DRAWS = ['0', '=-1/√3', '=-√3/2', '=-1/√2', '=0', '=-1/√3', '=-√3/2', '=-1/√2', '=1'];
+
+async function v05dRiichiFx(browser) {
+  // (1) 自分のリーチ：ボタン・宣言牌の選択・やめる では出ない。宣言が成立した時だけ1回（数学Ⅰ・Ⅱ）
+  for (const mode of ['math1', 'math2']) {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' }, mode);
+    await v3Scene(page, presetWall(RI_HAND, RI_DRAWS, [RI_O1, RI_O2, RI_O3]));
+    const hist = async () => (await fxState(page)).history;
+    await page.locator('button[data-action="riichi"]').tap();
+    assert.deepEqual(await hist(), [], `${mode}：リーチのボタンを押しただけでは出さない`);
+    assert.deepEqual(await sndKinds(page), [], 'リーチ音も鳴らない');
+    await page.locator('button[data-action="riichi-cancel"]').tap();
+    assert.deepEqual(await hist(), [], 'やめる（キャンセル）でも出さない');
+    await page.locator('button[data-action="riichi"]').tap();
+    const zero = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'a:0'); });
+    await page.locator(`.hand .tile[data-id="${zero}"]`).tap();
+    assert.deepEqual(await hist(), [], '宣言牌を選んだだけ（確定前）でも出さない');
+    assert.deepEqual(await sndKinds(page), []);
+    assert.equal((await riState(page)).riichi[0], false, 'まだリーチは成立していない');
+    await page.locator('button[data-action="riichi-discard"]').tap();
+    const st = await fxState(page);
+    assert.deepEqual(st.history, ['riichi'], '成立した時に1回だけ');
+    assert.equal(st.cls, 'fx-riichi');
+    assert.equal(st.word, 'リーチ！');
+    assert.equal(st.who, 'あなた');
+    assert.equal(st.flash, 1, '閃光');
+    const look = await page.evaluate(() => ({ streak: document.querySelectorAll('#fx-layer .fx-streak').length, decl: [...document.querySelectorAll('#fx-layer .fx-decl .tile')].map((t) => t.getAttribute('aria-label')), glow: document.querySelectorAll('.river.mine .tile.riichi-decl.fx-glow-riichi').length }));
+    assert.equal(look.streak, 2, '鋭い光条（横・縦）');
+    assert.deepEqual(look.decl, [await tileLabelOf(page, 'a:0')], '宣言牌（捨てた 0°）を大きく表示');
+    assert.equal(look.glow, 1, '河の宣言牌が光る');
+    assert.deepEqual(await sndKinds(page), ['riichi'], '音もリーチ音の1回だけ（宣言牌の打牌音は重ねない）');
+    assert.equal((await riState(page)).riichi[0], true);
+    // 再描画・step・scan を繰り返しても二重に出ない
+    for (let i = 0; i < 4; i++) await page.evaluate(() => { const m = window.__mathjong; m.render(); m.fx.scan(); m.soundScan(); });
+    assert.deepEqual((await fxState(page)).history, ['riichi']);
+    assert.deepEqual(await sndKinds(page), ['riichi']);
+    const dur = await fxDuration(page);
+    assert.ok(dur >= 900 && dur <= 1150, `リーチ演出は約 0.9 秒（Ver.0.5-E）（${dur}ms）`);
+    const e = await fxState(page);
+    assert.deepEqual([e.cls, (await fxLook(page)).glow], ['', 0]);
+    // 以後は通常どおり（ツモ切りだけ）。AI の打牌音は1打牌1回
+    await apForce(page, 1); await apForce(page, 2); await apForce(page, 3);
+    assert.deepEqual(await sndKinds(page), ['riichi', 'discard', 'discard', 'discard']);
+    assert.deepEqual((await fxState(page)).history, ['riichi']);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D：リーチ演出は成立の1回だけ（ボタン・やめる・宣言牌の選択では出ない）・宣言牌の強調・約0.7秒・二重に出ない（数学Ⅰ・Ⅱ）');
+
+  // (2) AI のリーチ（初級・中級・上級）：AI の名前・宣言牌・効果音
+  for (const ai of ['beginner', 'intermediate', 'advanced']) {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await page.evaluate((a) => { window.__mathjong.S.matchSettings.ai = a; }, ai);
+    await v3Scene(page, presetWall(['=-1/√3', '=-1/√3', '=-√3/2', '=-√3/2', '=-1/√2', '=-1/√2', '=√3', '=√3'], ['=-1', '0'], [RI_HAND, RI_O2, RI_O3]));
+    await apDiscardDrawn(page);
+    await page.waitForFunction(() => window.__mathjong.S.fx.history.includes('riichi'), null, { timeout: 8000 });
+    const st = await fxState(page);
+    assert.equal(st.word, 'リーチ！');
+    assert.equal(st.who, 'おうすけ', `${ai}：宣言した AI の名前`);
+    assert.equal(st.cls, 'fx-riichi');
+    assert.equal(await page.locator('#fx-layer .fx-decl .tile').count(), 1);
+    assert.equal(await page.locator('.panel.seat-1 .river .tile.riichi-decl.fx-glow-riichi').count(), 1, `${ai}：AI の河の宣言牌が光る`);
+    const kinds = await sndKinds(page);
+    assert.equal(kinds.filter((k) => k === 'riichi').length, 1, `${ai}：AI のリーチ音は1回`);
+    assert.deepEqual(kinds.slice(0, 2), ['discard', 'riichi'], '自分の打牌 → AI のリーチ（宣言牌の打牌音は重ねない）');
+    assert.equal((await fxState(page)).history.filter((h) => h === 'riichi').length, 1);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D：AI のリーチ（初級・中級・上級）の演出（名前・宣言牌・河の発光）と効果音が1回ずつ');
+
+  // (3) 簡易表示・reduced motion：リーチも文字だけ
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(RI_HAND, RI_DRAWS, [RI_O1, RI_O2, RI_O3]));
+    await fxSetMode(page, 'lite');
+    await riDeclare(page);
+    const l = await page.evaluate(() => { const L = document.getElementById('fx-layer'); return { cls: L.className, word: L.querySelector('.fx-word').textContent, extra: L.querySelectorAll('.fx-flash,.fx-streak,.fx-decl').length, glow: document.querySelectorAll('.fx-glow-riichi').length }; });
+    assert.deepEqual(l, { cls: 'fx-riichi lite', word: 'リーチ！', extra: 0, glow: 0 });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D：簡易表示ではリーチも文字だけ');
+
+  // (4) リーチ → ロン（ロンがリーチを置き換える）。ロン 1100ms・結果画面と精算は待たない・演出中に次の局へ進んでも消える
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['0', '=-1/√3', '=-√3/2', '=-1/√2', '=0', '=-1/√3', '=-√3/2'], [['=1', 'sin', '0', '90', '90', '=-√3', '=√3', '150'], FX_O2, FX_O3]));
+    await riDeclare(page);
+    assert.deepEqual((await fxState(page)).history, ['riichi']);
+    await apForce(page, 1, 'v:1');
+    await v3WaitHuman(page);
+    assert.equal((await v3State(page)).p.ron, true);
+    await page.locator('button[data-action="ron"]').tap();
+    const t = Date.now();
+    let st = await fxState(page);
+    assert.equal(st.cls, 'fx-ron', 'ロンはリーチ演出を置き換える');
+    assert.equal(st.modal, 'result', '結果画面は演出を待たずに開く');
+    assert.equal(await page.locator('.overlay .result').isVisible(), true);
+    assert.ok(Date.now() - t < 700, '結果画面の表示は演出で遅れない');
+    assert.deepEqual(st.history, ['riichi', 'ron']);
+    const res = await page.evaluate(() => { const { S } = window.__mathjong; const r = S.game.result; return { winner: r.winner, how: r.how, riichi: r.analysis.riichi, delta: S.match.scores.map((x, i) => x - S.prevScores[i]), points: r.points }; });
+    assert.deepEqual([res.winner, res.how, res.riichi], [0, 'ron', true], 'リーチ＋1は従来どおり');
+    assert.deepEqual(res.delta, [6 * res.points, -6 * res.points, 0, 0]);
+    assert.deepEqual(await sndKinds(page), ['riichi', 'discard', 'ron'], '音：リーチ → AI の打牌 → ロン（各1回）');
+    const dur = await fxDuration(page);
+    assert.ok(dur >= 2200 && dur <= 2450, `ロン演出は約 2.2 秒（Ver.0.5-E）（${dur}ms）`);
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.hand .tile');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  {
+    // 演出の途中で「次の局」へ進んでも、演出・音が残らない
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['0', '=-1/√3'], [['=1', 'sin', '0', '90', '90', '=-√3', '=√3', '150'], FX_O2, FX_O3]));
+    await apDiscardDrawn(page);
+    await apForce(page, 1, 'v:1');
+    await v3WaitHuman(page);
+    await page.locator('button[data-action="ron"]').tap();
+    await page.waitForTimeout(250);
+    assert.equal((await fxState(page)).cls, 'fx-ron');
+    assert.ok(await page.evaluate(() => !!window.__mathjong.sound.master), 'ロン音が鳴っている');
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.hand .tile');
+    const st = await fxState(page);
+    assert.deepEqual([st.cls, st.history.length], ['', 1], '次の局へ：演出を消す（持ち越さない）');
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.master), null, '音の出力も絞って止める');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.fx.timer), null);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D：リーチ → ロン（ロン約1.1秒・結果画面と精算は待たない・リーチ＋1は従来どおり）・演出中に次の局へ進んでも演出と音を止める');
+
+  // (5) リーチ → ツモ（ツモ 1.0 秒を維持）。リーチ音 → ツモ音
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(TS_HAND, ['0', '=-1/√3', '=-√3/2', '=-1/√2', '=1'], [FX_O1, FX_O2, FX_O3]));
+    await riDeclare(page);
+    await apForce(page, 1); await apForce(page, 2); await apForce(page, 3);
+    await riWaitTurn(page);
+    assert.equal((await riState(page)).p.canTsumo, true);
+    await page.locator('button[data-action="tsumo"]').tap();
+    const st = await fxState(page);
+    assert.equal(st.cls, 'fx-tsumo');
+    assert.equal(st.modal, 'result');
+    assert.deepEqual(st.history, ['riichi', 'tsumo']);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game.result.analysis.riichi), true);
+    assert.deepEqual(await sndKinds(page), ['riichi', 'discard', 'discard', 'discard', 'tsumo']);
+    const dur = await fxDuration(page);
+    assert.ok(dur >= 2000 && dur <= 2250, `ツモ演出は約 2.0 秒（Ver.0.5-E）（${dur}ms）`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D：リーチ → ツモ（ツモ 1.0 秒のまま・リーチ音 → ツモ音・リーチ＋1は従来どおり）');
+
+  // (6) ロンの強化：赤〜金の光条・和了牌・盤面の揺れ（盤面だけ）。ツモの揺れは従来のまま
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['0', '=-1/√3'], [['=1', 'sin', '0', '90', '90', '=-√3', '=√3', '150'], FX_O2, FX_O3]));
+    await apDiscardDrawn(page);
+    await apForce(page, 1, 'v:1');
+    await v3WaitHuman(page);
+    await page.locator('button[data-action="ron"]').tap();
+    const r = await page.evaluate(() => {
+      const L = document.getElementById('fx-layer'); const tb = document.querySelector('.table');
+      return { rays: L.querySelectorAll('.fx-rays').length, flash: L.querySelectorAll('.fx-flash').length, win: L.querySelectorAll('.fx-wintile .tile').length,
+        shake: tb.classList.contains('fx-shake'), ronShake: tb.classList.contains('fx-shake-ron'), anim: getComputedStyle(tb).animationName, dur: getComputedStyle(L.querySelector('.fx-word')).animationDuration,
+        barInTable: tb.contains(document.querySelector('.bar')), over: document.documentElement.scrollWidth - innerWidth };
+    });
+    assert.deepEqual([r.rays, r.flash, r.win, r.shake, r.ronShake, r.barInTable], [1, 1, 1, true, true, false]);
+    assert.equal(r.anim, 'fx-shake-ron');
+    assert.equal(r.dur, '2.2s', 'ロンの文字の動きも 2.2 秒（Ver.0.5-E）');
+    assert.ok(r.over <= 0, '横スクロールなし');
+    await ctx.close();
+  }
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
+    await page.locator('button[data-action="tsumo"]').tap();
+    const r = await page.evaluate(() => { const tb = document.querySelector('.table'); return { ronShake: tb.classList.contains('fx-shake-ron'), anim: getComputedStyle(tb).animationName, halo: document.querySelectorAll('#fx-layer .fx-halo').length, rays: document.querySelectorAll('#fx-layer .fx-rays').length }; });
+    assert.deepEqual(r, { ronShake: false, anim: 'fx-shake', halo: 1, rays: 0 });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D：ロンの強化（光条・和了牌・盤面だけの揺れ・文字 1.1 秒）／ツモの揺れ・光の輪は従来のまま');
+
+  // (7) 320／375／430px：リーチ演出が画面内に収まる・横スクロールなし・操作を妨げない
+  for (const w of [320, 375, 430]) {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' }, 'math1', { viewport: { width: w, height: 700 } });
+    await v3Scene(page, presetWall(RI_HAND, RI_DRAWS, [RI_O1, RI_O2, RI_O3]));
+    await riDeclare(page);
+    await page.waitForTimeout(180);
+    const g = await page.evaluate(() => {
+      const r = (s) => { const e = document.querySelector(s); const b = e.getBoundingClientRect(); return { l: b.left, r: b.right, t: b.top, b: b.bottom }; };
+      return { word: r('#fx-layer .fx-word'), decl: r('#fx-layer .fx-decl'), pe: getComputedStyle(document.getElementById('fx-layer')).pointerEvents, over: document.documentElement.scrollWidth - innerWidth, vh: innerHeight };
+    });
+    for (const k of ['word', 'decl']) assert.ok(g[k].l >= 0 && g[k].r <= w + 0.5 && g[k].t >= 0 && g[k].b <= g.vh, `${w}px ${k} ${JSON.stringify(g[k])}`);
+    assert.equal(g.pe, 'none', '演出はタップを通す');
+    assert.ok(g.over <= 0, `${w}px 横スクロール`);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v05d-riichi-${w}.png` });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D：320／375／430px でリーチ演出が画面内に収まる・横スクロールなし・タップを通す');
+}
+
+async function v05dSound(browser) {
+  // (1) iPhone Safari：最初の操作まで AudioContext を作らない。操作で作って resume。止まっていれば音は鳴らさず待たない
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok', initial: 'suspended' });
+    let c = await sndCounts(page);
+    assert.deepEqual([c.created, c.resumes, c.sources], [0, 0, 0], '操作の前は AudioContext を作らない');
+    await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
+    assert.equal((await sndCounts(page)).created, 0, '局の開始（操作ではない）でも作らない');
+    await page.locator('.hand .tile.tap').first().tap(); // 最初の操作（選択だけ）
+    c = await sndCounts(page);
+    assert.equal(c.created, 1, '最初の操作で作る');
+    assert.ok(c.resumes >= 1, 'suspended → resume() を呼ぶ');
+    assert.equal(c.state, 'running');
+    assert.equal(c.sources, 1, '無音の1サンプルだけ（再生許可）');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D 音：最初の操作まで AudioContext を作らない・操作で作成と resume（iOS の制限）');
+
+  // (2) 全6種類の音が、自分・AI のそれぞれの場面で1回ずつ鳴る（偽の AudioContext の声の数も、レシピのとおり）
+  const once = async (name, setup, act, expectKinds) => {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await setup(page);
+    await act(page);
+    await page.waitForTimeout(150);
+    const kinds = await sndKinds(page);
+    assert.deepEqual(kinds, expectKinds, `${name}：音の並び`);
+    assert.ok((await sndLog(page)).every((x) => x.endsWith(':played')), `${name}：すべて鳴った`);
+    assert.equal((await sndCounts(page)).sources, sndVoices(kinds), `${name}：声の数＝レシピの声の合計（二重に予約していない）`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  };
+  await once('自分の打牌', (p) => v3Scene(p, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3])), (p) => apDiscardDrawn(p), ['discard']);
+  await once('AI の打牌', (p) => v3Scene(p, presetWall(TS_HAND, ['=-1/√3', '=-√3/2'], [FX_O1, FX_O2, FX_O3])), async (p) => { await apDiscardDrawn(p); await apForce(p, 1); }, ['discard', 'discard']);
+  await once('自分のチー', (p) => fxToClaim(p, ['=1/2', '45', 'sin', '30', '0', '0', '135', '=-√3']), (p) => p.locator('button[data-action="chi"]').first().tap(), ['discard', 'discard', 'discard', 'discard', 'chi']);
+  await once('自分のポン', (p) => fxToClaim(p, ['=1/2', '=1/2', 'sin', '0', '135', '=-√3', 'tan', '150']), (p) => p.locator('button[data-action="pon"]').first().tap(), ['discard', 'discard', 'discard', 'discard', 'pon']);
+  await once('自分のロン', (p) => v3Scene(p, presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['0', '=-1/√3'], [['=1', 'sin', '0', '90', '90', '=-√3', '=√3', '150'], FX_O2, FX_O3])),
+    async (p) => { await apDiscardDrawn(p); await apForce(p, 1, 'v:1'); await v3WaitHuman(p); await p.locator('button[data-action="ron"]').tap(); }, ['discard', 'discard', 'ron']);
+  await once('自分のツモ', (p) => v3Scene(p, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3])), (p) => p.locator('button[data-action="tsumo"]').tap(), ['tsumo']);
+  await once('自分のリーチ', (p) => v3Scene(p, presetWall(RI_HAND, RI_DRAWS, [RI_O1, RI_O2, RI_O3])), (p) => riDeclare(p), ['riichi']);
+  await once('AI のロン', (p) => v3Scene(p, presetWall(['=1', 'sin', 'sin', '0', '90', '=-√3', '=√3', '150'], ['45', '=-1/√3', '=-√3/2', '=-1/√2'], [['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], FX_O2, FX_O3])),
+    async (p) => { const id = await p.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'v:1'); }); await p.locator(`.hand .tile[data-id="${id}"]`).tap(); await p.locator(`.hand .tile[data-id="${id}"]`).tap(); await p.waitForFunction(() => !!window.__mathjong.S.game.result, null, { timeout: 8000 }); }, ['discard', 'ron']);
+  await once('AI のツモ', (p) => v3Scene(p, presetWall(['=-1/√3', '=-1/√3', '=-√3/2', '=-√3/2', '=1/√2', '=1/√2', '=√3', '=1/√3'], ['45', '=1'], [TS_HAND, FX_O2, FX_O3])),
+    async (p) => { await apDiscardDrawn(p); await p.waitForFunction(() => !!window.__mathjong.S.game.result, null, { timeout: 8000 }); }, ['discard', 'tsumo']);
+  await once('AI のポン', (p) => v3Scene(p, presetWall(['=1/2', 'sin', 'sin', '0', '90', '=-√3', '=√3', '150'], ['45', '=-1/√3', '=-√3/2', '=-1/√2'], [['=1/2', '=1/2', 'sin', 'sin', 'sin', '0', '0', '=-√3'], FX_O2, FX_O3.map((x) => (x === '=1/2' ? '=-1' : x))])),
+    async (p) => { const id = await p.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'v:1/2'); }); await p.locator(`.hand .tile[data-id="${id}"]`).tap(); await p.locator(`.hand .tile[data-id="${id}"]`).tap(); await p.waitForFunction(() => window.__mathjong.S.fx.history.includes('pon'), null, { timeout: 8000 }); }, ['discard', 'pon']);
+  console.log('✓ Ver.0.5-D 音：打牌・チー・ポン・リーチ・ロン・ツモ（自分／AI）がそれぞれ1回ずつ。声の数はレシピどおり');
+
+  // (3) AI のリーチ音
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(['=-1/√3', '=-1/√3', '=-√3/2', '=-√3/2', '=-1/√2', '=-1/√2', '=√3', '=√3'], ['=-1', '0'], [RI_HAND, RI_O2, RI_O3]));
+    await apDiscardDrawn(page);
+    await page.waitForFunction(() => window.__mathjong.S.game.riichi[1] !== null, null, { timeout: 8000 });
+    const kinds = await sndKinds(page);
+    assert.deepEqual(kinds.slice(0, 2), ['discard', 'riichi']);
+    assert.equal(kinds.filter((k) => k === 'riichi').length, 1);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D 音：AI のリーチ音（打牌 → リーチ、宣言牌の打牌音は重ねない）');
+
+  // (4) 二重再生しない：再描画・step・設定画面の開閉・scan の繰り返しで、同じ記録の音を鳴らし直さない
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['0', '=-1/√3'], [['=1', 'sin', '0', '90', '90', '=-√3', '=√3', '150'], FX_O2, FX_O3]));
+    await apDiscardDrawn(page);
+    await apForce(page, 1, 'v:1');
+    await v3WaitHuman(page);
+    await page.locator('button[data-action="ron"]').tap();
+    const before = await sndLog(page);
+    assert.deepEqual(before, ['discard:played', 'discard:played', 'ron:played']);
+    for (let i = 0; i < 6; i++) await page.evaluate(() => { const m = window.__mathjong; m.render(); m.step(); m.soundScan(); m.fx.scan(); });
+    await page.waitForTimeout(1300);
+    assert.deepEqual(await sndLog(page), before, '再描画・step・scan を繰り返しても鳴らし直さない');
+    assert.equal((await sndCounts(page)).sources, sndVoices(['discard', 'discard', 'ron']));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D 音：再描画・step・scan を繰り返しても、同じ記録の音を二重に鳴らさない');
+
+  // (5) 設定：既定はオン。オフにすると保存され（再読込後も）、音は鳴らず AudioContext も作らない。ゲームの進行はオンと同一
+  const events = async (p) => p.evaluate(() => JSON.stringify(window.__mathjong.S.game.events));
+  const claimRun = async (cfg, preSetOff) => {
+    const { ctx, page, errors } = await sndPage(browser, cfg);
+    if (preSetOff) await page.evaluate(() => { window.__mathjong.S.sound.on = false; });
+    await fxToClaim(page, ['=1/2', '=1/2', 'sin', '0', '135', '=-√3', 'tan', '150']);
+    await page.locator('button[data-action="pon"]').first().tap();
+    const ev = await events(page);
+    const log = await sndLog(page);
+    const counts = await sndCounts(page);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+    return { ev, log, counts };
+  };
+  {
+    const on = await claimRun({ resume: 'ok' }, false);
+    const off = await claimRun({ resume: 'ok' }, true);
+    assert.equal(on.ev, off.ev, 'オフでもゲームの記録（進行・結果）はオンと完全に同じ');
+    assert.ok(on.log.length === 5 && on.log.every((x) => x.endsWith(':played')));
+    assert.ok(off.log.length === 5 && off.log.every((x) => x === `${x.split(':')[0]}:off`), JSON.stringify(off.log));
+    assert.equal(off.counts.sources, 0, 'オフでは声を1つも予約しない');
+  }
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    assert.equal(await page.evaluate(() => window.__mathjong.S.sound.on), true, '既定はオン');
+    await page.locator('button[data-action="settings"]').tap();
+    assert.equal(await page.locator('select[data-action="sound"]').inputValue(), '1');
+    // P3：演出の設定名は「視覚演出」（リーチ・ツモも対象）。選択肢と保存キーは従来どおり
+    const fxLabel = await page.locator('label.setting:has(select[data-action="fx-mode"])').innerText();
+    assert.ok(fxLabel.trim().startsWith('視覚演出') && !fxLabel.includes('ロン・ポン・チーの演出'), fxLabel);
+    assert.deepEqual(await page.locator('select[data-action="fx-mode"] option').allInnerTexts(), ['通常', '簡易（文字だけ）']);
+    await page.locator('select[data-action="fx-mode"]').selectOption('lite');
+    assert.equal(await page.evaluate(() => localStorage.getItem('mj-effects')), 'lite', '保存キー mj-effects は不変');
+    await page.locator('select[data-action="fx-mode"]').selectOption('full');
+    await page.locator('select[data-action="sound"]').selectOption('0');
+    assert.equal(await page.evaluate(() => localStorage.getItem('mj-sound')), '0', 'オフが保存される');
+    await page.locator('.modal-actions button[data-action="close"]').tap();
+    await page.reload();
+    await page.waitForSelector('.hand .tile');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.sound.on), false, '再読込後もオフ');
+    await page.locator('.hand .tile.tap').first().tap(); // オフのまま操作しても AudioContext を作らない
+    assert.equal((await sndCounts(page)).created, 0);
+    await page.locator('button[data-action="settings"]').tap();
+    assert.equal(await page.locator('select[data-action="sound"]').inputValue(), '0');
+    await page.locator('select[data-action="sound"]').selectOption('1');
+    assert.equal(await page.evaluate(() => localStorage.getItem('mj-sound')), '1');
+    assert.equal((await sndCounts(page)).created, 1, 'オンにした操作の中で再生を許可する');
+    await page.locator('.modal-actions button[data-action="close"]').tap();
+    await page.reload();
+    await page.waitForSelector('.hand .tile');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.sound.on), true, '再読込後もオン');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  {
+    // 保存値が壊れていてもオン（'0' だけがオフ）
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    for (const [v, want] of [['abc', true], ['', true], ['1', true], ['0', false]]) {
+      await page.evaluate((x) => localStorage.setItem('mj-sound', x), v);
+      await page.reload();
+      await page.waitForSelector('.hand .tile');
+      assert.equal(await page.evaluate(() => window.__mathjong.S.sound.on), want, `保存値 ${JSON.stringify(v)}`);
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D 音：設定のオン／オフ・保存・再読込後も維持・既定オン・異常値はオン／オフでもゲームの記録はオンと同一・オフでは声を予約しない');
+
+  // (6) iPhone Safari の制限：resume が通らない（ずっと suspended）・AudioContext がない・途中で interrupted → 操作で復帰
+  {
+    const run = async (cfg) => {
+      const { ctx, page, errors } = await sndPage(browser, cfg);
+      await fxToClaim(page, ['=1/2', '=1/2', 'sin', '0', '135', '=-√3', 'tan', '150']);
+      await page.locator('button[data-action="pon"]').first().tap();
+      const ev = await events(page);
+      const log = await sndLog(page);
+      const counts = await sndCounts(page);
+      assert.deepEqual(errors, [], JSON.stringify(cfg));
+      await ctx.close();
+      return { ev, log, counts };
+    };
+    const ref = await run({ resume: 'ok' });
+    const never = await run({ resume: 'never' });
+    assert.equal(never.ev, ref.ev, 'ずっと suspended でもゲームの進行・記録は同じ');
+    assert.ok(never.log.length === 5 && never.log.every((x) => x.endsWith(':blocked')), JSON.stringify(never.log));
+    assert.equal(never.counts.sources, 1, '声は予約しない（無音の1サンプルだけ）');
+    assert.ok(never.counts.resumes >= 5, '音が出せないたびに再開を試みる（待たない）');
+    const none = await run({ none: true });
+    assert.equal(none.ev, ref.ev, 'AudioContext がなくてもゲームは同じ');
+    assert.ok(none.log.length === 5 && none.log.every((x) => x.endsWith(':nocontext')), JSON.stringify(none.log));
+  }
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3', '=-√3/2', '=-1/√2'], [FX_O1, FX_O2, FX_O3]));
+    await apDiscardDrawn(page);
+    assert.deepEqual(await sndLog(page), ['discard:played']);
+    // 着信・バックグラウンドで interrupted になった（iOS）
+    await page.evaluate(() => { for (const c of window.__snd.ctxs) c.state = 'interrupted'; });
+    await apForce(page, 1);
+    assert.deepEqual(await sndLog(page), ['discard:played', 'discard:blocked'], '止まっている間は鳴らさず、待たない');
+    assert.equal((await v3State(page)).p.seat, 2, 'ゲームは止まらず進む');
+    const r0 = (await sndCounts(page)).resumes;
+    await page.locator('.hand .tile').first().tap(); // 次の操作で再開
+    assert.ok((await sndCounts(page)).resumes > r0 || (await sndCounts(page)).state === 'running');
+    await apForce(page, 2);
+    assert.equal((await sndLog(page)).pop(), 'discard:played', '操作のあとは復帰して鳴る');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D 音：suspended のまま・AudioContext なし・interrupted → 操作で復帰。いずれも無音で待たず、ゲームの記録は同一・エラーなし');
+
+  // (7) 実際の音の波形（OfflineAudioContext で本物の Web Audio に描画）：無音でない・クリップしない・NaN なし・終わりが静か・長さ・音量の釣り合い・種類ごとに違う
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1');
+    const m = await page.evaluate(async (base) => {
+      const snd = await import(`${base}src/ui/sound.js`);
+      const out = {};
+      for (const kind of Object.keys(snd.RECIPES)) {
+        const sr = 44100;
+        const oc = new OfflineAudioContext(1, Math.ceil(sr * (snd.recipeEnd(snd.RECIPES[kind]) + 0.3)), sr);
+        snd.scheduleRecipe(oc, snd.createMasterChain(oc), kind, 0.01);
+        const d = (await oc.startRendering()).getChannelData(0);
+        let peak = 0, sq = 0, nan = false, zc = 0, last = 0;
+        for (let i = 0; i < d.length; i++) {
+          const a = Math.abs(d[i]);
+          if (!Number.isFinite(d[i])) nan = true;
+          if (a > peak) peak = a;
+          if (a > 0.005) last = i;
+          sq += d[i] * d[i];
+          if (i && (d[i] >= 0) !== (d[i - 1] >= 0)) zc++;
+        }
+        let tail = 0;
+        for (let i = d.length - Math.floor(sr * 0.02); i < d.length; i++) tail = Math.max(tail, Math.abs(d[i]));
+        out[kind] = { peak, rms: Math.sqrt(sq / d.length), nan, len: (last / sr) - 0.01, tail, zcr: zc / (d.length / sr) / 2 };
+      }
+      return out;
+    }, BASE);
+    const k = Object.keys(m);
+    for (const kind of k) {
+      const x = m[kind];
+      assert.ok(!x.nan, `${kind}: NaN なし`);
+      assert.ok(x.peak >= 0.15 && x.peak <= 0.98, `${kind}: ピーク ${x.peak.toFixed(2)}（無音でなく、クリップしない）`);
+      assert.ok(x.tail < 0.001, `${kind}: 終わりが静か（ぷつっという切れがない）`);
+    }
+    const peaks = k.map((x) => m[x].peak);
+    assert.ok(Math.max(...peaks) / Math.min(...peaks) <= 4, `音量の釣り合い（最大/最小 ${(Math.max(...peaks) / Math.min(...peaks)).toFixed(1)}）`);
+    assert.ok(m.discard.len <= 0.15 && m.chi.len <= 0.3 && m.pon.len <= 0.4, '打牌・チー・ポンは短い');
+    assert.ok(m.discard.peak < m.ron.peak && m.discard.peak < m.tsumo.peak && m.discard.peak < m.riichi.peak, '打牌は控えめ（最も多く鳴る音）、決着の音は大きい');
+    for (let i = 0; i < k.length; i++) for (let j = i + 1; j < k.length; j++) {
+      const a = m[k[i]], b = m[k[j]];
+      const dLen = Math.abs(a.len - b.len) / Math.max(a.len, b.len, 0.05);
+      const dZc = Math.abs(a.zcr - b.zcr) / Math.max(a.zcr, b.zcr);
+      assert.ok(dLen > 0.12 || dZc > 0.12, `${k[i]} と ${k[j]} は長さか明るさが違う（${dLen.toFixed(2)}, ${dZc.toFixed(2)}）`);
+    }
+    console.log('  音の波形：' + k.map((x) => `${x} peak${m[x].peak.toFixed(2)} len${m[x].len.toFixed(2)}s`).join(' / '));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D 音：本物の Web Audio（OfflineAudioContext）で描画した波形が、無音でない・クリップしない・NaN なし・終わりが静か・音量の釣り合い・種類ごとに違う');
+
+  // (8) 公開サイトでは開発用フックが無効（sound を公開しない）
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 } });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${PUBLIC}?mode=math1&seed=1`);
+    await page.waitForSelector('.title-screen, .hand .tile');
+    assert.equal(await page.evaluate(() => typeof window.__mathjong), 'undefined', '公開サイトでは開発用フックなし');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D：公開サイトでは開発用フック（sound を含む）が無効');
+}
+
+// ---- Ver.0.5-D P2 修正：実際の AudioContext（Chromium）で、中断（suspend）した効果音が復帰後に鳴らないこと ----
+// 本物の AudioContext を継承し、出力（destination）の手前に録音用のノード（ScriptProcessor）を挟んで、実際に出力へ流れた波形のピークを時刻つきで記録する。
+// 数えるもの：created（AudioContext を作った数）・stateListeners（statechange の登録数）・gains（createGain の数）。
+const REAL_TAP_FN = () => {
+  const Real = window.AudioContext;
+  const R = window.__rec = { blocks: [], created: 0, stateListeners: 0, gains: 0 };
+  class TapCtx extends Real {
+    constructor(...a) {
+      super(...a);
+      R.created++;
+      const tap = super.createGain();
+      tap.connect(super.destination);
+      this.__tap = tap;
+      const sp = super.createScriptProcessor(1024, 1, 1);
+      tap.connect(sp);
+      sp.connect(super.destination);
+      sp.onaudioprocess = (e) => {
+        const d = e.inputBuffer.getChannelData(0);
+        let pk = 0;
+        for (let i = 0; i < d.length; i++) { const v = Math.abs(d[i]); if (v > pk) pk = v; }
+        R.blocks.push({ w: performance.now(), ct: this.currentTime, peak: pk });
+      };
+      this.__sp = sp;
+    }
+    get destination() { return this.__tap; }
+    createGain() { R.gains++; return super.createGain(); }
+    addEventListener(type, ...rest) { if (type === 'statechange') R.stateListeners++; return super.addEventListener(type, ...rest); }
+  }
+  window.AudioContext = TapCtx; window.webkitAudioContext = undefined;
+};
+const realPage = (browser, mode = 'math1', opts = {}) => v3Page(browser, mode, { ...opts, init: { fn: REAL_TAP_FN, arg: null } });
+const rcMark = (page) => page.evaluate(() => window.__rec.blocks.length);
+// 区間 [from, to) の出力ピークの最大値
+const rcPeak = (page, from, to = null) => page.evaluate(([f, t]) => { const b = window.__rec.blocks.slice(f, t === null ? undefined : t); return b.reduce((m, x) => Math.max(m, x.peak), 0); }, [from, to]);
+const rcState = (page) => page.evaluate(() => { const s = window.__mathjong.sound; return { state: s.state(), buses: s.buses ? s.buses.size : null, master: !!s.master, drops: s.drops ?? null }; });
+const rcRunning = (page) => page.waitForFunction(() => window.__mathjong.sound.state() === 'running', null, { timeout: 5000 });
+// 最初の操作（unlock）：手牌を1回タップ（選択だけ）
+async function rcUnlock(page) {
+  await page.locator('.hand .tile.tap').first().tap();
+  await rcRunning(page);
+}
+// 牌を捨てない操作（上部の余白のタップ）。2回目の牌のタップは打牌になってしまうので、復帰の操作には使わない
+const rcTap = (page) => page.locator('.top').first().tap({ position: { x: 4, y: 4 } });
+// kind の音を鳴らし、鳴らし始めから ms 後に実際の AudioContext を suspend する（ページ内で測るので、時間のずれが小さい）
+const rcPlaySuspend = (page, kind, ms) => page.evaluate(async ([k, d]) => {
+  const s = window.__mathjong.sound;
+  const st = s.play(k);
+  await new Promise((r) => setTimeout(r, d));
+  await s.ctx.suspend();
+  return st;
+}, [kind, ms]);
+const RC_SUSPEND_MS = { discard: 30, chi: 70, pon: 80, riichi: 100, ron: 100, tsumo: 100 };
+const SND_MS = { discard: 90, chi: 220, pon: 240, riichi: 800, ron: 950, tsumo: 900 };
+const RC_EPS = 1e-4;
+
+async function v05dSoundSuspend(browser) {
+  // (1) 6種類すべて：鳴らし始めてすぐ suspend → 演出時間を超えて待つ → 操作で resume → 中断前の音の後半は出力されない。その後の新しい音は出る
+  for (const kind of Object.keys(RC_SUSPEND_MS)) {
+    const { ctx, page, errors } = await realPage(browser);
+    await rcUnlock(page);
+    const m0 = await rcMark(page);
+    assert.equal(await rcPlaySuspend(page, kind, RC_SUSPEND_MS[kind]), 'played');
+    await page.waitForFunction(() => window.__mathjong.sound.ctx.state === 'suspended', null, { timeout: 3000 });
+    const m1 = await rcMark(page);
+    assert.ok(await rcPeak(page, m0, m1) > 0.01, `${kind}：中断前は実際に出力された（録音の確認）`);
+    await page.waitForTimeout(SND_MS[kind] + 700); // 音も演出も終わる時間
+    await rcTap(page); // 操作で復帰
+    await rcRunning(page);
+    const m2 = await rcMark(page);
+    await page.waitForTimeout(SND_MS[kind] + 500);
+    const m3 = await rcMark(page);
+    assert.ok(m3 - m2 >= 10, `${kind}：復帰後も録音が進んでいる（${m3 - m2}ブロック）`);
+    assert.ok(await rcPeak(page, m2, m3) < RC_EPS, `${kind}：復帰後に中断前の音が出力されない（ピーク ${await rcPeak(page, m2, m3)}）`);
+    // 新しい音は正常に出る
+    assert.equal(await page.evaluate((k) => window.__mathjong.sound.play(k), kind), 'played');
+    await page.waitForTimeout(SND_MS[kind] * 0.6 + 80);
+    const m4 = await rcMark(page);
+    assert.ok(await rcPeak(page, m3, m4) > 0.01, `${kind}：復帰後の新しい音は出力される`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：実際の AudioContext で、6種類の音とも suspend → 待機 → resume 後に古い音が出力されず、新しい音は出力される（出力波形のピークで確認）');
+
+  // (2) 実際のゲームの流れ：AI がリーチ → リーチ音の途中で suspend → 画面のリーチ演出が終わるまで待つ → 操作で resume → 古いリーチ音は出ず、次の新しい打牌音・リーチ音は出る
+  {
+    const { ctx, page, errors } = await realPage(browser);
+    await rcUnlock(page);
+    await v3Scene(page, presetWall(['=-1/√3', '=-1/√3', '=-√3/2', '=-√3/2', '=-1/√2', '=-1/√2', '=√3', '=√3'], ['=-1', '0'], [RI_HAND, RI_O2, RI_O3]));
+    await apDiscardDrawn(page); // 自分の打牌（打牌音）
+    await page.waitForFunction(() => window.__mathjong.sound.log.some((x) => x.kind === 'riichi'), null, { timeout: 8000 });
+    // 以後 AI の手番を止める（復帰後の無音区間に新しいゲームイベントを混ぜない）
+    const m0 = await page.evaluate(async () => {
+      const m = window.__mathjong; clearTimeout(m.S.timer); m.S.timer = null;
+      const n = window.__rec.blocks.length;
+      await new Promise((r) => setTimeout(r, 60));
+      await m.sound.ctx.suspend();
+      return n;
+    });
+    await page.waitForFunction(() => window.__mathjong.sound.ctx.state === 'suspended');
+    const m1 = await rcMark(page);
+    assert.ok(await rcPeak(page, m0, m1) > 0.01, 'AI のリーチ音は中断前に出力された');
+    await page.waitForTimeout(1500); // 画面のリーチ演出（0.7秒）より長く待つ
+    assert.equal((await fxState(page)).cls, '', 'リーチ演出は終わっている');
+    await rcTap(page);
+    await rcRunning(page);
+    const m2 = await rcMark(page);
+    await page.waitForTimeout(1200);
+    const m3 = await rcMark(page);
+    assert.ok(await rcPeak(page, m2, m3) < RC_EPS, `復帰後に古いリーチ音が出力されない（ピーク ${await rcPeak(page, m2, m3)}）`);
+    assert.deepEqual((await sndKinds(page)).filter((k) => k === 'riichi').length, 1, 'リーチ音のゲームイベントは1回だけ');
+    // 復帰後の新しいゲームイベント：自分の打牌（打牌音）。続けて新しいリーチ音
+    const before = (await sndLog(page)).length;
+    await page.evaluate(() => window.__mathjong.sound.play('discard'));
+    await page.waitForTimeout(120);
+    const m4 = await rcMark(page);
+    assert.ok(await rcPeak(page, m3, m4) > 0.01, '復帰後の新しい打牌音は出力される');
+    await page.evaluate(() => window.__mathjong.sound.play('riichi'));
+    await page.waitForTimeout(500);
+    assert.ok(await rcPeak(page, m4) > 0.05, '復帰後の新しいリーチ音は出力される');
+    assert.equal((await sndLog(page)).length, before + 2);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：AI のリーチ → 音の途中で suspend → 演出終了後に resume しても古いリーチ音は出ず、新しい打牌音・リーチ音は出る');
+
+  // (3) 中断中に新しい音を要求しても、復帰後に鳴らない（その場で無音・待たない）。複数回の中断・復帰。AudioContext を作り直さない・ノード／リスナーが増え続けない
+  {
+    const { ctx, page, errors } = await realPage(browser);
+    await rcUnlock(page);
+    const base = await page.evaluate(() => ({ ...window.__rec, blocks: undefined }));
+    assert.deepEqual([base.created, base.stateListeners], [1, 1]);
+    for (let round = 0; round < 3; round++) {
+      const a = await rcMark(page);
+      assert.equal(await rcPlaySuspend(page, 'ron', 80), 'played', `${round}回目`);
+      await page.waitForFunction(() => window.__mathjong.sound.ctx.state === 'suspended');
+      // 中断中に新しい音を要求（ron・tsumo・pon・chi・discard・riichi）：すべて blocked
+      const st = await page.evaluate(() => ['ron', 'tsumo', 'pon', 'chi', 'discard', 'riichi'].map((k) => window.__mathjong.sound.play(k)));
+      assert.deepEqual(st, ['blocked', 'blocked', 'blocked', 'blocked', 'blocked', 'blocked'], '中断中の要求は無音で戻る（待たない）');
+      assert.equal((await rcState(page)).buses, 0, '中断中は鳴っている音の出力を持たない');
+      await page.waitForTimeout(1100);
+      await rcTap(page);
+      await rcRunning(page);
+      const b = await rcMark(page);
+      await page.waitForTimeout(1100);
+      assert.ok(await rcPeak(page, b) < RC_EPS, `${round}回目：復帰後に、中断前の音も中断中に要求した音も出ない（ピーク ${await rcPeak(page, b)}）`);
+      assert.ok(await rcPeak(page, a, b) > 0.01, `${round}回目：中断前の音は出力された`);
+    }
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.play('tsumo')), 'played');
+    await page.waitForTimeout(400);
+    assert.ok(await rcPeak(page, await rcMark(page) - 12) > 0.05, '3回の中断・復帰のあとも新しい音は出力される');
+    const end = await page.evaluate(() => ({ ...window.__rec, blocks: undefined }));
+    assert.equal(end.created, 1, 'AudioContext は作り直さない');
+    assert.equal(end.stateListeners, 1, 'statechange のリスナーは増えない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：中断中の要求は無音で待たず復帰後も鳴らない・3回の中断復帰・AudioContext とリスナーを増やさない');
+
+  // (4) 再開の失敗（resume が拒否される）：例外を出さず、止まっている間は鳴らさず、再開できるようになれば古い音なしで鳴る
+  {
+    const { ctx, page, errors } = await realPage(browser);
+    await rcUnlock(page);
+    assert.equal(await rcPlaySuspend(page, 'riichi', 100), 'played');
+    await page.waitForFunction(() => window.__mathjong.sound.ctx.state === 'suspended');
+    await page.evaluate(() => { const c = window.__mathjong.sound.ctx; c.__resume = c.resume; c.resume = () => Promise.reject(new Error('NotAllowedError')); });
+    await page.waitForTimeout(1000);
+    const a = await rcMark(page);
+    await rcTap(page); await rcTap(page); // 再開に失敗する操作
+    assert.equal((await rcState(page)).state, 'suspended');
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.play('pon')), 'blocked');
+    await page.evaluate(() => { const c = window.__mathjong.sound.ctx; c.resume = c.__resume; }); // 再開できるようになった
+    await rcTap(page);
+    await rcRunning(page);
+    const b = await rcMark(page);
+    await page.waitForTimeout(1000);
+    assert.ok(await rcPeak(page, b) < RC_EPS, `再開に失敗した後に再開できても、古い音は出ない（ピーク ${await rcPeak(page, b)}）`);
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.play('chi')), 'played');
+    await page.waitForTimeout(260);
+    assert.ok(await rcPeak(page, b) > 0.01, 'その後の新しい音は出力される');
+    void a;
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：再開の失敗でも例外なし・失敗中は無音・再開後に古い音は出ない');
+
+  // (5) 画面が隠れた（iPhone のバックグラウンド移行）：running のままでも鳴っている音を切り離し、戻っても続きは鳴らない。新しい音は鳴る
+  {
+    const { ctx, page, errors } = await realPage(browser);
+    await rcUnlock(page);
+    await page.evaluate(() => window.__mathjong.sound.play('tsumo'));
+    await page.waitForTimeout(120);
+    const a = await rcMark(page);
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
+    assert.deepEqual([(await rcState(page)).buses, (await rcState(page)).master], [0, false], '隠れたら鳴っている音の出力を切り離す');
+    await page.waitForTimeout(80); // 録音の1ブロック分の遅れ
+    const b = await rcMark(page);
+    await page.waitForTimeout(1000);
+    assert.ok(await rcPeak(page, b) < RC_EPS, `隠れた後は、続きが出力されない（ピーク ${await rcPeak(page, b)}）`);
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); });
+    const c = await rcMark(page);
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.play('ron')), 'played');
+    await page.waitForTimeout(300);
+    assert.ok(await rcPeak(page, c) > 0.05, '戻った後の新しい音は出力される');
+    // pagehide でも同様
+    await page.waitForTimeout(900);
+    await page.evaluate(() => window.__mathjong.sound.play('riichi'));
+    await page.waitForTimeout(100);
+    await page.evaluate(() => window.dispatchEvent(new Event('pagehide')));
+    assert.equal((await rcState(page)).buses, 0);
+    await page.waitForTimeout(80);
+    const d = await rcMark(page);
+    await page.waitForTimeout(900);
+    assert.ok(await rcPeak(page, d) < RC_EPS, 'pagehide の後も続きは出力されない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：画面が隠れた・ページを離れたときも、鳴っている音を切り離し、戻っても続きは鳴らない');
+
+  // (6) 次の局・タイトル移動：ロン音の途中で移動すると音が止まる（中断復帰の処理が通常の音声停止を壊さない）。中断中の移動でも古い音が残らない
+  for (const nav of ['next', 'title', 'next-suspended']) {
+    const { ctx, page, errors } = await realPage(browser);
+    await rcUnlock(page);
+    await v3Scene(page, presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['0', '=-1/√3'], [['=1', 'sin', '0', '90', '90', '=-√3', '=√3', '150'], FX_O2, FX_O3]));
+    await apDiscardDrawn(page);
+    await apForce(page, 1, 'v:1');
+    await v3WaitHuman(page);
+    const a = await rcMark(page);
+    await page.locator('button[data-action="ron"]').tap();
+    assert.deepEqual((await sndKinds(page)).slice(-1), ['ron']);
+    await page.waitForTimeout(150);
+    if (nav === 'next-suspended') { await page.evaluate(() => window.__mathjong.sound.ctx.suspend()); await page.waitForFunction(() => window.__mathjong.sound.ctx.state === 'suspended'); }
+    if (nav === 'title') {
+      await page.evaluate(() => { const m = window.__mathjong; m.S.modal = 'settings'; m.render(); });
+      await page.locator('button[data-action="ask-title"]').tap();
+      await page.locator('button[data-action="to-title"]').tap();
+      await page.waitForSelector('.title-screen');
+    } else {
+      await page.locator('button[data-action="next"]').tap();
+      await page.waitForSelector('.hand .tile');
+    }
+    assert.equal((await rcState(page)).master, false, `${nav}：出力の連鎖は切り離される`);
+    if (nav === 'next-suspended') { await page.waitForTimeout(1200); await rcTap(page); await rcRunning(page); }
+    await page.waitForTimeout(250); // 絞りの時間と録音の遅れ
+    const b = await rcMark(page);
+    await page.waitForTimeout(1200);
+    assert.ok(await rcPeak(page, b) < RC_EPS, `${nav}：移動の後に古い音が出力されない（ピーク ${await rcPeak(page, b)}）`);
+    assert.ok(await rcPeak(page, a, b) > 0.05, `${nav}：移動前のロン音は出力された`);
+    if (nav !== 'title') {
+      assert.equal(await page.evaluate(() => window.__mathjong.sound.play('discard')), 'played', `${nav}：次の局でも新しい音が鳴る`);
+      await page.waitForTimeout(120);
+      assert.ok(await rcPeak(page, b) > 0.01);
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：次の局・タイトル移動（中断中を含む）で音が止まり、古い音が残らない');
+
+  // (7) 効果音オフ・連続 unlock：オフでは AudioContext を作らない。連打しても AudioContext・リスナー・ノードは増えない。短時間に大量に鳴らしても出力（bus）は溜まらない
+  {
+    const { ctx, page, errors } = await realPage(browser);
+    await page.evaluate(() => { window.__mathjong.S.sound.on = false; });
+    await page.locator('.hand .tile.tap').first().tap();
+    assert.equal((await page.evaluate(() => window.__rec.created)), 0, 'オフでは AudioContext を作らない');
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.play('ron')), 'off');
+    await page.evaluate(() => { window.__mathjong.S.sound.on = true; });
+    for (let i = 0; i < 8; i++) await rcTap(page); // 連続操作
+    await rcRunning(page);
+    const a = await page.evaluate(() => ({ created: window.__rec.created, listeners: window.__rec.stateListeners, gains: window.__rec.gains }));
+    assert.deepEqual([a.created, a.listeners], [1, 1], '連続 unlock でも AudioContext・リスナーは1つ');
+    for (let i = 0; i < 6; i++) await rcTap(page);
+    const b = await page.evaluate(() => ({ created: window.__rec.created, listeners: window.__rec.stateListeners, gains: window.__rec.gains }));
+    assert.deepEqual(b, a, '操作のたびにノードを作らない（unlock はノードを増やさない）');
+    for (let i = 0; i < 30; i++) await page.evaluate((k) => window.__mathjong.sound.play(k), ['discard', 'chi', 'pon'][i % 3]);
+    assert.ok((await rcState(page)).buses <= 30);
+    await page.waitForTimeout(1000);
+    assert.equal((await rcState(page)).buses, 0, '鳴り終わった音の出力は実時間で外れ、溜まらない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2：効果音オフでは AudioContext を作らない・連続 unlock で増えない・鳴り終えた音の出力は溜まらない');
+}
+
+// ---- Ver.0.5-E：カットイン演出・宣言者の表示・席の発光・演出キュー・宣言ボイスの導入準備 ----
+const E_POS = ['自分', '下家', '対面', '上家'];
+const E_NAME = ['あなた', 'おうすけ', 'なつき', 'ゆき'];
+const E_MS = { chi: 1000, pon: 1200, ron: 2200, tsumo: 2000, riichi: 900 };
+const E_MIN = { chi: 700, pon: 800, ron: 2200, tsumo: 2000, riichi: 650 };
+// 演出レイヤーの変化を記録する（表示の瞬間の宣言者・席・発光している席・キューの長さ・ゲームの記録との対応）
+const eObserve = (page) => page.evaluate(() => {
+  const L = document.getElementById('fx-layer');
+  const rec = window.__fxrec = [];
+  new MutationObserver(() => {
+    const m = window.__mathjong; const c = m.S.fx.current; const who = L.querySelector('.fx-who');
+    const glow = [...document.querySelectorAll('.fx-seat, .fx-seat-lite')].map((el) => (el.classList.contains('self') ? 0 : Number((el.className.match(/seat-(\d)/) || [])[1])));
+    rec.push({
+      t: performance.now(), cls: L.className, kind: c ? c.kind : null, serial: m.S.gameSerial,
+      name: who ? who.querySelector('.fx-name').textContent : null, pos: who && who.querySelector('.fx-pos') ? who.querySelector('.fx-pos').textContent : null,
+      dataSeat: who ? Number(who.dataset.seat) : null, evSeat: c ? c.event.seat : null, evInLog: c ? m.S.game.events.includes(c.event) || c.event.type === 'win' && m.S.game.events.some((e) => e.type === 'win' && e.seat === c.event.seat) : null,
+      glow, queue: m.S.fx.queue.length, evTile: c && c.event.tile !== undefined ? String(c.event.tile) : null,
+      meldGlow: [...document.querySelectorAll('.meld.fx-glow')].map((e) => e.dataset.claimed),
+    });
+  }).observe(L, { childList: true });
+});
+// 表示中の演出の要素の位置と不透明度
+const eLook = (page) => page.evaluate(() => {
+  const box = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom, op: Number(getComputedStyle(e).opacity) }; };
+  return { who: box('#fx-layer .fx-who'), word: box('#fx-layer .fx-word'), tiles: box('#fx-layer .fx-tiles, #fx-layer .fx-wintile, #fx-layer .fx-decl'), band: box('#fx-layer .fx-band'),
+    banner: box('#fx-layer .fx-banner'), card: box('#fx-layer .fx-card'), vw: innerWidth, vh: innerHeight, sx: document.documentElement.scrollWidth - innerWidth,
+    flashes: document.querySelectorAll('#fx-layer .fx-flash').length };
+});
+// 鳴いた面子を用意して、その席の演出を出す（表示の確認用。本物の記録がなくても演出だけを出す）
+const eFire = (page, kind, seat) => page.evaluate(([k, s]) => {
+  const { S, fx } = window.__mathjong; const g = S.game;
+  if (k === 'ron' || k === 'tsumo') { g.result = { ...(g.result || {}), tile: g.hands[s][0] }; fx.fire(k, { type: 'win', seat: s, how: k, from: (s + 1) % 4 }); return; }
+  if (k === 'riichi') { fx.fire(k, { type: 'riichi', seat: s, tile: g.hands[s][0] }); return; }
+  g.melds[s].push({ meld: 0, kind: 'formula', call: k, tiles: g.hands[s].slice(0, 3), claimed: g.hands[s][0], from: (s + 3) % 4 });
+  fx.fire(k, { type: k, seat: s, tile: g.hands[s][0] });
+}, [kind, seat]);
+
+async function v05eCutin(browser) {
+  // (1) 宣言者の表示と席の発光：4人 × チー・ポン・ロン・ツモ・リーチ。名前・席（下家／対面／上家）・発光する席が、記録の seat と一致する
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    for (const kind of ['chi', 'pon', 'riichi', 'tsumo', 'ron']) {
+      for (const seat of [0, 1, 2, 3]) {
+        await page.evaluate(() => window.__mathjong.fx.clear());
+        await eFire(page, kind, seat);
+        const st = await page.evaluate(() => {
+          const L = document.getElementById('fx-layer'); const w = L.querySelector('.fx-who');
+          return { cls: L.className, name: w.querySelector('.fx-name').textContent, pos: w.querySelector('.fx-pos') ? w.querySelector('.fx-pos').textContent : null, of: w.querySelector('.fx-of').textContent,
+            word: L.querySelector('.fx-word').textContent, seats: [...document.querySelectorAll('.fx-seat')].map((el) => (el.classList.contains('self') ? 0 : Number(el.className.match(/seat-(\d)/)[1]))),
+            seatKind: [...document.querySelectorAll('.fx-seat')].map((el) => [...el.classList].find((c) => /^fx-seat-[a-z]+$/.test(c) && c !== 'fx-seat-lite')) };
+        });
+        assert.equal(st.cls, `fx-${kind}`);
+        assert.equal(st.name, E_NAME[seat], `${kind}/席${seat}：宣言者の名前`);
+        assert.equal(st.pos, seat === 0 ? null : E_POS[seat], `${kind}/席${seat}：席（AI だけ）`);
+        assert.equal(`${st.name} ${st.of}${st.word}`, `${E_NAME[seat]} の${{ chi: 'チー！', pon: 'ポン！', ron: 'ロン！', tsumo: 'ツモ！', riichi: 'リーチ！' }[kind]}`, '「なつき のロン！」のように読める');
+        assert.deepEqual(st.seats, [seat], `${kind}/席${seat}：発光するのは宣言者の席だけ`);
+        assert.deepEqual(st.seatKind, [`fx-seat-${kind}`], '宣言の色で発光');
+      }
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E：宣言者（あなた／おうすけ・B・C と席）を大きく表示し、宣言者の席だけを宣言の色で発光（5種類 × 4席）');
+
+  // (2) 演出の長さ（本物の宣言）：チー 1.0秒・ポン 1.2秒・ロン 2.2秒・ツモ 2.0秒・リーチ 0.9秒。中央の静止時間に文字・宣言者・牌が読める
+  const hold = async (page, kind) => {
+    // 静止区間の中ほど（登場が終わった後）で、文字・宣言者・牌がはっきり見えて画面内にある
+    await page.waitForTimeout(kind === 'ron' || kind === 'tsumo' ? 650 : Math.round(E_MS[kind] * 0.45));
+    const l = await eLook(page);
+    for (const k of ['who', 'word', 'tiles']) {
+      assert.ok(l[k] && l[k].op >= 0.95, `${kind}：${k} が見える（${JSON.stringify(l[k])}）`);
+      assert.ok(l[k].l >= -1 && l[k].r <= l.vw + 1 && l[k].t >= -1 && l[k].b <= l.vh + 1, `${kind}：${k} が画面内`);
+    }
+    return l;
+  };
+  {
+    // 自分のチー・ポン
+    for (const [kind, hand] of [['chi', ['=1/2', '45', 'sin', '30', '0', '0', '135', '=-√3']], ['pon', ['=1/2', '=1/2', 'sin', '0', '135', '=-√3', 'tan', '150']]]) {
+      const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+      await fxToClaim(page, hand);
+      await page.locator(`button[data-action="${kind}"]`).first().tap();
+      assert.equal((await fxState(page)).cls, `fx-${kind}`);
+      const l = await hold(page, kind);
+      assert.ok(l.band && l.band.op >= 0.95, `${kind}：カットインの帯`);
+      const dur = await fxDuration(page);
+      assert.ok(dur >= E_MS[kind] && dur <= E_MS[kind] + 250, `${kind}：${E_MS[kind]}ms（${dur}ms）`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+    // 自分のリーチ・ツモ・ロン
+    {
+      const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+      await v3Scene(page, presetWall(RI_HAND, RI_DRAWS, [RI_O1, RI_O2, RI_O3]));
+      await riDeclare(page);
+      await hold(page, 'riichi');
+      const dur = await fxDuration(page);
+      assert.ok(dur >= 900 && dur <= 1150, `riichi：900ms（${dur}ms）`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+    {
+      const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+      await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
+      await page.locator('button[data-action="tsumo"]').tap();
+      assert.equal((await fxState(page)).modal, 'result', '結果画面は演出を待たずに開く');
+      await hold(page, 'tsumo');
+      const dur = await fxDuration(page);
+      assert.ok(dur >= 2000 && dur <= 2250, `tsumo：2000ms（${dur}ms）`);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  }
+  console.log('✓ Ver.0.5-E：演出の長さ（チー1.0・ポン1.2・リーチ0.9・ツモ2.0秒）と、静止時間に文字・宣言者・牌が見えて画面内にある');
+
+  // (3) ロン：冒頭は強い演出（閃光1回・光条・揺れ）→ 中央で静止 → 後半は中央の表示を消して最上部の小さな帯に替える（結果画面を長く隠さない）
+  let ronLateMs = null;
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(['=1', 'sin', 'sin', '0', '90', '=-√3', '=√3', '150'], ['45', '=-1/√3', '=-√3/2', '=-1/√2'], [['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], FX_O2, FX_O3]));
+    const id = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'v:1'); });
+    await page.locator(`.hand .tile[data-id="${id}"]`).tap(); await page.locator(`.hand .tile[data-id="${id}"]`).tap();
+    await page.waitForFunction(() => window.__mathjong.S.fx.history.includes('ron'), null, { timeout: 8000 });
+    const t0 = await page.evaluate(() => window.__mathjong.S.fx.current.startedAt);
+    const early = await eLook(page);
+    assert.equal(early.flashes, 1, '閃光は1つ');
+    const flash = await page.evaluate(() => { const s = getComputedStyle(document.querySelector('#fx-layer .fx-flash')); return [s.animationName, s.animationIterationCount, parseFloat(s.animationDuration)]; });
+    assert.deepEqual(flash, ['fx-flash-once', '1', 0.6], '閃光は冒頭の1回だけ（繰り返さない）');
+    assert.equal((await fxState(page)).who, 'おうすけ');
+    assert.equal(await page.locator('.overlay .result').isVisible(), true, '結果画面はすぐ開く');
+    await hold(page, 'ron');
+    // 後半：中央の表示は消え、最上部の小さな帯だけが残る。CSS（2.2秒）では中央は 1.10〜1.28 秒で消え、帯は 1.28〜2.02 秒に不透明。
+    // 決まった時刻に1回だけ見るのではなく、演出の開始から上限 2.0 秒（帯が消え始める前）までに、その状態になったことを確かめる。
+    // 上限を過ぎた観測は、条件を満たしていても失敗（判定は tests/e2e/ron-late.mjs の judgeRonLate、境界は単体テストで検査）。
+    // 失敗時は、その観測の表示（経過時間・中央・帯の不透明度と位置・演出の種類・fx-layer のクラス）を出す。
+    const LATE_LIMIT_MS = RON_LATE_LIMIT_MS;
+    let lateRes, verdict;
+    for (const until = Date.now() + 8000; ;) {
+      lateRes = await page.evaluate((s) => {
+        const look = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return { t: Math.round(b.top), b: Math.round(b.bottom), op: Number(getComputedStyle(e).opacity) }; };
+        const cur = window.__mathjong.S.fx.current;
+        return { elapsed: performance.now() - s, card: look('#fx-layer .fx-card'), banner: look('#fx-layer .fx-banner'), kind: cur && cur.kind, cls: document.getElementById('fx-layer').className };
+      }, t0);
+      verdict = judgeRonLate(lateRes, LATE_LIMIT_MS);
+      if (verdict !== 'wait' || Date.now() > until) break;
+    }
+    lateRes.elapsed = Math.round(lateRes.elapsed * 10) / 10;
+    assert.equal(verdict, 'ok', `${LATE_LIMIT_MS}ms 以内に中央の表示が消えて最上部の小さな帯に替わる（判定 ${verdict}、実際の表示：${JSON.stringify(lateRes)}）`);
+    assert.ok(lateRes.elapsed >= 1000, `中央の表示は静止の後に消える（${lateRes.elapsed}ms）`);
+    ronLateMs = lateRes.elapsed;
+    assert.equal(await page.locator('#fx-layer .fx-banner .fx-name').textContent(), 'おうすけ');
+    // 演出中も結果画面のボタンを押せる（演出はタップを通す）。次の局へ進むと演出を消す
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.hand .tile');
+    const st = await page.evaluate(() => ({ cls: document.getElementById('fx-layer').className, cur: window.__mathjong.S.fx.current, q: window.__mathjong.S.fx.queue.length, glow: document.querySelectorAll('.fx-seat').length }));
+    assert.deepEqual(st, { cls: '', cur: null, q: 0, glow: 0 }, '新しい局へ持ち越さない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log(`✓ Ver.0.5-E：ロンは閃光1回→静止→最上部の小さな帯（結果画面を長く隠さない。帯に替わった時刻 ${ronLateMs}ms／上限 ${RON_LATE_LIMIT_MS}ms）。結果画面はすぐ開き、演出中も次の局へ進める`);
+
+  // (4) 実際の速い対局（AI 待ち時間 0）：AI 同士のチー・ポンを含め、表示した演出の宣言者・席・発光が記録の seat と一致。
+  //     チー・ポン・リーチは最低表示時間を守り（ロン・ツモで置き換えた場合と局の切替を除く）、キューは2以下。宣言の音は表示と同じ順・同じ数
+  // 監査対応：数学Ⅱ・AI 難易度（初級・中級・上級）でも。宣言はすべて「表示」か「明示的な破棄」のどちらか（取りこぼしなし）。鳴きの面子の発光も記録の牌と一致
+  for (const cfg of [
+    { mode: 'math1', ai: 'intermediate', rounds: [7, 19, 22, 25, 26, 27, 28], minCalls: 1 },
+    { mode: 'math2', ai: 'intermediate', rounds: [6, 16, 18, 20, 23], minCalls: 0 },
+    { mode: 'math1', ai: 'beginner', rounds: [7, 19, 22, 25], minCalls: 0 },
+    { mode: 'math1', ai: 'advanced', rounds: [7, 19, 22, 25], minCalls: 0 },
+  ]) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    await ctx.addInitScript(SND_FN, { resume: 'ok' });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?mode=${cfg.mode}&seed=11&ai=${cfg.ai}&speed=test`);
+    await page.waitForSelector('.hand .tile');
+    const rosterNames = await page.evaluate(() => window.__mathjong.S.game.players.map((p) => p.name));
+    await paSettings(page, true, true); // 自分のチー・ポンは自動で見送る（AI 同士の鳴きを増やす）
+    await page.evaluate(() => { const s = window.__mathjong.sound; const orig = s.play; window.__calls = []; s.play = (k, o) => { window.__calls.push(k); return orig(k, o); }; });
+    await eObserve(page);
+    const summary = await page.evaluate(async (rounds) => {
+      const m = window.__mathjong; const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      const calls = { aiCalls: 0, rounds: 0, declared: 0 };
+      for (const round of rounds) { // seed 11 で AI 同士のチー・ポンが起きる局（事前に調べた）
+        m.goRound(round);
+        for (let guard = 0; guard < 4000; guard++) {
+          const g = m.S.game; const p = g.pending();
+          if (!p) break;
+          if (p.seat === 0) {
+            if (p.type === 'turn') g.discard(0, g.drawn !== null && g.drawn !== undefined ? g.drawn : g.hands[0][0]);
+            else g.respond(0, { type: 'pass' });
+            m.step(true);
+          }
+          await sleep(20);
+        }
+        calls.aiCalls += m.S.game.events.filter((e) => (e.type === 'chi' || e.type === 'pon') && e.seat !== 0).length;
+        calls.declared += m.S.game.events.filter((e) => ['chi', 'pon', 'riichi', 'win'].includes(e.type)).length;
+        calls.rounds++;
+        await sleep(2400); // 和了の演出を最後まで
+      }
+      calls.dropped = m.S.fx.dropped;
+      return calls;
+    }, cfg.rounds);
+    const rec = await page.evaluate(() => window.__fxrec);
+    const shows = rec.filter((r) => r.cls && !r.cls.includes('lite'));
+    assert.ok(summary.aiCalls >= cfg.minCalls, `AI 同士のチー・ポンが起きた（${JSON.stringify(summary)}）`);
+    if (cfg.minCalls) assert.ok(shows.some((r) => (r.kind === 'chi' || r.kind === 'pon') && r.dataSeat !== 0), 'AI 同士のチー・ポンの演出が表示された');
+    assert.equal(shows.length + summary.dropped, summary.declared, `${cfg.mode}/${cfg.ai}：宣言はすべて表示か明示的な破棄（表示 ${shows.length}・破棄 ${summary.dropped}・宣言 ${summary.declared}）`);
+    for (const r of shows) {
+      assert.equal(r.dataSeat, r.evSeat, '宣言者はゲームの記録の seat');
+      assert.equal(r.evInLog, true, '表示した演出は、実際の記録に対応する');
+      assert.equal(r.name, rosterNames[r.evSeat]);
+      assert.equal(r.pos, r.evSeat === 0 ? null : E_POS[r.evSeat]);
+      assert.deepEqual(r.glow, [r.evSeat], '発光するのは宣言者の席だけ');
+      assert.ok(r.queue <= 2, 'キューは上限以下');
+      if (r.kind === 'chi' || r.kind === 'pon') assert.deepEqual(r.meldGlow, [r.evTile], '光る面子は、その宣言で鳴いた牌の面子');
+    }
+    // 最低表示時間：次の表示または消去までの時間（同じ局で、ロン・ツモに置き換えられた場合を除く）
+    let checked = 0;
+    for (let i = 0; i < rec.length - 1; i++) {
+      const a = rec[i]; const b = rec[i + 1];
+      if (!a.cls || a.serial !== b.serial) continue;
+      if (b.kind === 'ron' || b.kind === 'tsumo') continue;
+      const kind = a.kind;
+      const need = b.cls ? E_MIN[kind] : E_MS[kind];
+      assert.ok(b.t - a.t >= need - 40, `${kind} の表示時間 ${Math.round(b.t - a.t)}ms ≥ ${need}ms`);
+      checked++;
+    }
+    if (cfg.minCalls) assert.ok(checked >= 3, `表示時間を確認した演出 ${checked}`);
+    // 宣言の音は、表示した演出と同じ順・同じ数（待って出した演出は表示と同時に鳴り、捨てた演出は鳴らない）
+    const callSounds = (await page.evaluate(() => window.__calls)).filter((k) => k !== 'discard');
+    assert.deepEqual(callSounds, shows.map((r) => r.kind), '宣言の効果音と演出が一致');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+    console.log(`  （${cfg.mode}・AI ${cfg.ai}：${summary.rounds}局・宣言 ${summary.declared}回・AI 同士のチー/ポン ${summary.aiCalls}回・表示 ${shows.length}回・破棄 ${summary.dropped}回・最低表示時間の確認 ${checked}回）`);
+  }
+  console.log('✓ Ver.0.5-E：速い実対局で、AI 同士のチー・ポンも宣言者・席・発光が記録と一致。最低表示時間を守り、キューは2以下、宣言の音は表示と一致');
+
+  // (5) 演出キュー（画面）：チー表示中のポンは待って、チーの最低表示時間の後に表示。ロンが来たら待っている演出を捨ててすぐロン。音は表示の時に鳴る
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    await rcUnlock(page).catch(() => {}); // 偽の AudioContext では resume で running になる
+    await page.locator('.hand .tile.tap').first().tap();
+    await eObserve(page);
+    await eFire(page, 'chi', 3);
+    await page.waitForTimeout(100);
+    await eFire(page, 'pon', 2);
+    assert.deepEqual(await page.evaluate(() => [window.__mathjong.S.fx.current.kind, window.__mathjong.S.fx.queue.length]), ['chi', 1], 'ポンは待つ');
+    assert.equal((await sndKinds(page)).filter((k) => k === 'pon').length, 0, 'ポンの音はまだ鳴らない（表示と一緒に鳴らす）');
+    await page.waitForFunction(() => window.__mathjong.S.fx.current && window.__mathjong.S.fx.current.kind === 'pon', null, { timeout: 3000 });
+    const rec = await page.evaluate(() => window.__fxrec.filter((r) => r.cls));
+    assert.ok(rec[1].t - rec[0].t >= 880 - 30 && rec[1].t - rec[0].t <= 880 + 200, `チーは最低表示時間（0.7秒）＋退出（0.18秒）で次へ（${Math.round(rec[1].t - rec[0].t)}ms）`);
+    assert.equal(rec[1].name, 'なつき');
+    assert.equal((await sndKinds(page)).filter((k) => k === 'pon').length, 1, 'ポンの音は表示と同時に1回');
+    await eFire(page, 'chi', 1);
+    await eFire(page, 'riichi', 3);
+    await eFire(page, 'ron', 2);
+    const st = await page.evaluate(() => ({ cur: window.__mathjong.S.fx.current.kind, q: window.__mathjong.S.fx.queue.length, h: [...window.__mathjong.S.fx.history] }));
+    assert.deepEqual(st, { cur: 'ron', q: 0, h: ['chi', 'pon', 'ron'] }, 'ロンはすぐ表示し、待っていたチー・リーチは捨てる');
+    const k = await sndKinds(page);
+    assert.deepEqual(k.filter((x) => x !== 'discard'), ['chi', 'pon', 'ron'], '捨てた演出の音は鳴らない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E：演出キュー（チー表示中のポンは待って最低表示時間の後に表示・音も表示時・ロンで待ちを捨てる）');
+
+  // (6) 簡易表示・reduced motion：帯・閃光・揺れ・牌を出さず、宣言者と文字を十分な時間表示。席は点滅させず枠の色だけ。ロン・ツモは上部に出す
+  for (const how of ['lite', 'reduced']) {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    if (how === 'reduced') await page.emulateMedia({ reducedMotion: 'reduce' });
+    else await fxSetMode(page, 'lite');
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    for (const [kind, seat] of [['pon', 2], ['chi', 3], ['ron', 1]]) {
+      await page.evaluate(() => window.__mathjong.fx.clear());
+      await eFire(page, kind, seat);
+      const st = await page.evaluate(() => ({ cls: document.getElementById('fx-layer').className, extra: document.querySelectorAll('#fx-layer .fx-band, #fx-layer .fx-flash, #fx-layer .fx-rays, #fx-layer .fx-tiles, #fx-layer .fx-wintile, #fx-layer .fx-banner').length,
+        shake: document.querySelectorAll('.fx-shake').length, glowAnim: document.querySelectorAll('.fx-seat').length, outline: [...document.querySelectorAll('.fx-seat-lite')].map((el) => (el.classList.contains('self') ? 0 : Number(el.className.match(/seat-(\d)/)[1]))) }));
+      assert.deepEqual(st, { cls: `fx-${kind} lite`, extra: 0, shake: 0, glowAnim: 0, outline: [seat] }, `${how}/${kind}`);
+      await page.waitForTimeout(Math.round(E_MS[kind] * 0.5));
+      const l = await eLook(page);
+      assert.ok(l.who.op >= 0.95 && l.word.op >= 0.95, `${how}/${kind}：宣言者と文字が見える`);
+      assert.equal(await page.locator('#fx-layer .fx-name').textContent(), E_NAME[seat]);
+      if (kind === 'ron') assert.ok(l.card.t < l.vh * 0.25, `${how}：ロンは上部に出す（${Math.round(l.card.t)}px）`);
+      const dur = await fxDuration(page);
+      assert.ok(dur >= E_MS[kind] * 0.5 - 50, `${how}/${kind}：十分な時間表示`);
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E：簡易表示・reduced motion は宣言者と文字だけ（帯・閃光・揺れ・牌なし）・席は枠の色だけ・ロンは上部・表示時間は通常と同じ');
+
+  // (7) iPhone 相当の縦横画面：文字・宣言者・牌が見切れず、横スクロールなし。演出中も手牌を操作できる
+  for (const [w, h] of [[320, 568], [375, 667], [390, 844], [430, 932], [568, 320], [667, 375], [844, 390], [932, 430]]) {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' }, 'math1', { viewport: { width: w, height: h } });
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    for (const kind of ['chi', 'pon', 'ron', 'tsumo', 'riichi']) {
+      await page.evaluate(() => window.__mathjong.fx.clear());
+      await eFire(page, kind, 2);
+      await page.waitForTimeout(kind === 'ron' || kind === 'tsumo' ? 650 : Math.round(E_MS[kind] * 0.45));
+      const l = await eLook(page);
+      for (const k of ['who', 'word', 'tiles']) assert.ok(l[k].l >= -1 && l[k].r <= w + 1 && l[k].t >= -1 && l[k].b <= h + 1, `${w}x${h} ${kind} ${k} ${JSON.stringify(l[k])}`);
+      assert.ok(l.sx <= 0, `${w}x${h} 横スクロール`);
+      assert.ok(l.who.b - l.who.t >= 22, `${w}x${h} 宣言者の文字が大きい（${Math.round(l.who.b - l.who.t)}px）`);
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/v05e-${kind}-${w}x${h}.png` });
+    }
+    // 演出中のタップ：手牌の牌を選べる
+    await page.evaluate(() => window.__mathjong.fx.clear());
+    await eFire(page, 'pon', 1);
+    await page.locator('.hand .tile.tap').first().tap();
+    assert.equal(await page.locator('.hand .tile.selected').count(), 1, `${w}x${h}：演出中も牌を選べる`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E：320〜932px の縦横画面で文字・宣言者・牌が見切れず、横スクロールなし・演出中も操作できる');
+}
+
+// 宣言ボイス（導入の準備）：テスト用の音声（440Hz の音。人の声ではない）を本物の AudioContext で鳴らして確かめる
+function eWav(seconds = 0.8, hz = 440, rate = 22050) {
+  const n = Math.floor(seconds * rate);
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVE', 8); buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22); buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
+  buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) buf.writeInt16LE(Math.round(Math.sin((2 * Math.PI * hz * i) / rate) * 0.5 * 32767), 44 + i * 2);
+  return buf;
+}
+const E_VOICE_M = { id: 'test', credit: 'テスト用の音（人の声ではありません）', gain: 1, sfxGain: 0.5, files: { chi: 'src/ui/voice-test-chi.m4a', pon: 'src/ui/voice-test-pon.m4a', ron: 'src/ui/voice-test-ron.m4a', tsumo: 'src/ui/voice-test-tsumo.m4a' } };
+async function eVoicePage(browser, { missing = [] } = {}) {
+  const { ctx, page, errors } = await realPage(browser);
+  const wav = eWav();
+  await page.route('**/src/ui/voice-test-*.m4a', (route) => {
+    if (missing.some((m) => route.request().url().includes(m))) return route.fulfill({ status: 404, body: 'not found' });
+    return route.fulfill({ status: 200, contentType: 'audio/wav', body: wav });
+  });
+  await page.evaluate((m) => window.__mathjong.voice.setManifest(m), E_VOICE_M);
+  return { ctx, page, errors };
+}
+const eVoiceLog = (page) => page.evaluate(() => window.__mathjong.voice.log.map((x) => `${x.kind}:${x.status}`));
+
+async function v05eVoice(browser) {
+  // (1) 採用された音声がないとき（現状）：設定に出さず、何も読み込まない
+  {
+    const { ctx, page, errors } = await realPage(browser);
+    const reqs = [];
+    page.on('request', (r) => { if (/voice-/.test(r.url())) reqs.push(r.url()); });
+    await rcUnlock(page);
+    await page.locator('button[data-action="settings"]').tap();
+    assert.equal(await page.locator('select[data-action="voice"]').count(), 0, '宣言ボイスの設定は出さない（音声が未採用）');
+    await page.locator('.modal-actions button[data-action="close"]').tap();
+    await eFire(page, 'pon', 2);
+    assert.deepEqual(await eVoiceLog(page), ['pon:none']);
+    assert.deepEqual(reqs, [], '音声ファイルを読みに行かない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E 声：正式採用された音声がない現状では、設定にも出さず、何も読み込まない（効果音だけ）');
+
+  // (2) テスト用の音声で：演出が実際に始まったときに声が鳴り、宣言の効果音は下げる。待った演出の声は表示のときに鳴る。設定のオン／オフと保存
+  {
+    const { ctx, page, errors } = await eVoicePage(browser);
+    await rcUnlock(page);
+    await page.waitForFunction(() => Object.keys(window.__mathjong.voice.buffers).length === 4, null, { timeout: 5000 });
+    const m0 = await rcMark(page);
+    await eFire(page, 'chi', 3);
+    await page.waitForTimeout(100);
+    await eFire(page, 'pon', 2); // 待つ
+    assert.deepEqual(await eVoiceLog(page), ['chi:played'], 'ポンの声はまだ（演出の表示と一緒）');
+    const s = await page.evaluate(() => window.__mathjong.sound.log.slice(-2).map((x) => `${x.kind}:${x.status}`));
+    assert.deepEqual(s, ['voice:chi:played', 'chi:played']);
+    await page.waitForFunction(() => window.__mathjong.S.fx.current && window.__mathjong.S.fx.current.kind === 'pon', null, { timeout: 3000 });
+    assert.deepEqual(await eVoiceLog(page), ['chi:played', 'pon:played'], 'ポンの声は表示のときに1回');
+    await page.waitForTimeout(300);
+    assert.ok(await rcPeak(page, m0) > 0.05, '声（テスト用の音）が実際に出力された');
+    // 設定：オフにすると鳴らない・保存される
+    await page.evaluate(() => window.__mathjong.fx.clear());
+    await page.locator('button[data-action="settings"]').tap();
+    assert.equal(await page.locator('select[data-action="voice"]').inputValue(), '1', '既定はオン');
+    assert.equal(await page.locator('.voice-credit').textContent(), E_VOICE_M.credit, '利用条件の表記を出す');
+    await page.locator('select[data-action="voice"]').selectOption('0');
+    assert.equal(await page.evaluate(() => localStorage.getItem('mj-voice')), '0');
+    await page.locator('.modal-actions button[data-action="close"]').tap();
+    await eFire(page, 'ron', 1);
+    assert.equal((await eVoiceLog(page)).at(-1), 'ron:off');
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.log.at(-1).kind), 'ron', '効果音は鳴る（音量は通常）');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E 声：演出の開始と同時に声（待った演出は表示時）・効果音を下げる・設定オン／オフと保存・利用条件の表記');
+
+  // (3) 読み込み失敗：その種類は鳴らさず、効果音だけで続く（例外なし）
+  {
+    const { ctx, page, errors } = await eVoicePage(browser, { missing: ['voice-test-ron'] });
+    await rcUnlock(page);
+    await page.waitForFunction(() => Object.keys(window.__mathjong.voice.buffers).length === 3 && window.__mathjong.voice.errors.ron, null, { timeout: 5000 });
+    await eFire(page, 'ron', 1);
+    assert.equal((await eVoiceLog(page)).at(-1), 'ron:notready');
+    assert.equal(await page.evaluate(() => window.__mathjong.sound.log.at(-1).kind + ':' + window.__mathjong.sound.log.at(-1).status), 'ron:played', '効果音は鳴る');
+    assert.deepEqual(errors.filter((e) => !/HTTP 404 .*voice-test-ron/.test(e) && !/404/.test(e)), [], '404 以外のエラーなし');
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-E 声：読み込みに失敗した声は鳴らさず、効果音だけで正常に続く');
+
+  // (4) P2（Ver.0.5-D）の再発防止：声の途中で suspend → 待つ → resume で、古い声も効果音も出力されない。次の局・画面が隠れたときも止まる
+  for (const how of ['suspend', 'next', 'hidden']) {
+    const { ctx, page, errors } = await eVoicePage(browser);
+    await rcUnlock(page);
+    await page.waitForFunction(() => Object.keys(window.__mathjong.voice.buffers).length === 4, null, { timeout: 5000 });
+    const a0 = await rcMark(page);
+    await eFire(page, 'tsumo', 0);
+    await page.waitForTimeout(120);
+    assert.equal((await eVoiceLog(page)).at(-1), 'tsumo:played', `${how}：声が鳴っている最中`);
+    assert.ok(await rcPeak(page, a0) > 0.01, `${how}：中断前は出力された`);
+    if (how === 'suspend') {
+      await page.evaluate(() => window.__mathjong.sound.ctx.suspend());
+      await page.waitForFunction(() => window.__mathjong.sound.ctx.state === 'suspended');
+      await page.waitForTimeout(1500);
+      await rcTap(page);
+      await rcRunning(page);
+    } else if (how === 'next') {
+      await page.evaluate(() => window.__mathjong.startRound());
+    } else {
+      await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });
+    }
+    await page.waitForTimeout(150);
+    const b = await rcMark(page);
+    await page.waitForTimeout(1200);
+    assert.ok(await rcPeak(page, b) < RC_EPS, `${how}：古い声・効果音は出力されない（ピーク ${await rcPeak(page, b)}）`);
+    if (how === 'hidden') await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); });
+    await page.evaluate(() => window.__mathjong.fx.clear());
+    await eFire(page, 'chi', 3);
+    await page.waitForTimeout(300);
+    assert.ok(await rcPeak(page, b) > 0.05, `${how}：その後の新しい声・効果音は出力される`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.5-D P2 の再発なし：声の途中の中断→復帰・次の局・画面が隠れたとき、古い声も効果音も出力されない（本物の AudioContext）');
+}
+
+// ---- Ver.0.5-E 監査 P2-A・P2-B・P2-C・P3-A・P3-B の修正 ----
+// 宣言の記録を（手牌から公開面子を作って）ゲームの記録に足す。演出は本物の fxScan()・soundScan() で判定する（fxFire を直接呼ばない）。
+// 自分の打牌番（AI は動かない）の局面で使う。戻り値：鳴いた牌の id（チー・ポン）
+const eAddEvent = (page, kind, seat, opts = {}) => page.evaluate(([k, s, o]) => {
+  const { S } = window.__mathjong; const g = S.game;
+  if (k === 'discard') { g.events.push({ type: 'discard', seat: s, tile: g.hands[s][0] }); return null; }
+  if (k === 'riichi') { g.events.push({ type: 'riichi', seat: s, tile: g.hands[s][0] }); return g.hands[s][0]; }
+  if (k === 'ron' || k === 'tsumo') { g.result = { ...(g.result || {}), tile: g.hands[s][0] }; g.events.push({ type: 'win', seat: s, how: k, from: (s + 1) % 4 }); return null; }
+  // チー・ポン：手牌の3枚で公開面子を作る（o.noMeld のときは面子を作らず記録だけ＝面子が見つからない場合）
+  const used = new Set(g.melds.flat().flatMap((m) => m.tiles));
+  const ids = g.hands[s].filter((id) => !used.has(id)).slice(o.offset || 0, (o.offset || 0) + 3);
+  const tile = ids[0];
+  if (!o.noMeld) g.melds[s].push({ meld: 0, kind: 'formula', call: k, tiles: ids, claimed: tile, from: (s + 3) % 4 });
+  g.events.push({ type: k, seat: s, from: (s + 3) % 4, tile, meld: 0 });
+  return tile;
+}, [kind, seat, opts]);
+const eScan = (page) => page.evaluate(() => { const m = window.__mathjong; m.render(); m.fx.scan(); m.soundScan(); });
+const eFxNow = (page) => page.evaluate(() => {
+  const m = window.__mathjong; const c = m.S.fx.current; const L = document.getElementById('fx-layer');
+  return { kind: c ? c.kind : null, seat: c ? c.seat : null, queue: m.S.fx.queue.map((q) => q.kind), dropped: m.S.fx.dropped, history: [...m.S.fx.history], cls: L.className,
+    glow: [...document.querySelectorAll('.meld.fx-glow')].map((e) => e.dataset.claimed), calls: m.sound.log.map((x) => x.kind).filter((k) => k !== 'discard'), discards: m.sound.log.filter((x) => x.kind === 'discard').length };
+});
+const eWaitKind = (page, kind) => page.waitForFunction((k) => window.__mathjong.S.fx.current && window.__mathjong.S.fx.current.kind === k, kind, { timeout: 4000 });
+
+async function v05eAuditFix(browser) {
+  // P2-A (1) fxScan 経由：同じ回のチー → ポン、ポン → リーチ。両方とも記録の順に表示し、音は表示の時に1回ずつ
+  for (const [a, b] of [['chi', 'pon'], ['pon', 'riichi'], ['chi', 'riichi']]) {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    await page.locator('.top').first().tap({ position: { x: 4, y: 4 } }); // 再生の許可（偽の AudioContext）
+    await eAddEvent(page, a, 3);
+    await eAddEvent(page, 'discard', 3);
+    await eAddEvent(page, b, b === 'riichi' ? 3 : 2, { offset: 3 });
+    await eScan(page);
+    let st = await eFxNow(page);
+    assert.deepEqual([st.kind, st.queue, st.calls], [a, [b], [a]], `${a}→${b}：先の宣言を表示、後の宣言は待つ（消えない）。音は表示した分だけ`);
+    for (let i = 0; i < 3; i++) await eScan(page); // 再描画・scan を繰り返しても二重に出ない
+    assert.deepEqual((await eFxNow(page)).queue, [b]);
+    await eWaitKind(page, b);
+    st = await eFxNow(page);
+    assert.deepEqual([st.history, st.calls, st.queue, st.dropped], [[a, b], [a, b], [], 0], `${a}→${b}：両方を表示し、音も1回ずつ`);
+    assert.equal(st.discards, 0, '同じ回に宣言があれば打牌音は鳴らさない（宣言の音が代表する）');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 監査 P2-A：fxScan 経由で同じ回のチー→ポン・ポン→リーチ・チー→リーチを両方表示（記録の順・音は表示時に1回ずつ・繰り返しの scan で二重にならない）');
+
+  // P2-A (2) 宣言とロン・ツモが同じ回：和了だけをすぐ表示し、前の通常の宣言は明示的に破棄（表示・音なし）。待っていた演出も破棄
+  for (const win of ['ron', 'tsumo']) {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    await page.locator('.top').first().tap({ position: { x: 4, y: 4 } });
+    await eAddEvent(page, 'chi', 1); await eScan(page); // 表示中
+    await eAddEvent(page, 'pon', 2); await eScan(page); // 待つ
+    await eAddEvent(page, 'riichi', 3);
+    await eAddEvent(page, 'chi', 3, { offset: 3 });
+    await eAddEvent(page, win, 3);
+    await eScan(page);
+    const st = await eFxNow(page);
+    assert.deepEqual([st.kind, st.queue, st.history, st.calls, st.dropped], [win, [], ['chi', win], ['chi', win], 3], `${win}：和了をすぐ表示・待っていたポンと同じ回のリーチ・チーは破棄（音なし）`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 監査 P2-A：宣言とロン・ツモが同じ回なら、和了をすぐ表示し、待ち・同じ回の通常の宣言は明示的に破棄（表示・音なし）');
+
+  // P2-A (3) キューの上限超過：同じ回に4つの宣言 → 1つ表示・2つ待ち・1つ破棄。表示した3つの音だけが鳴る
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    await page.locator('.top').first().tap({ position: { x: 4, y: 4 } });
+    await eAddEvent(page, 'chi', 1); await eAddEvent(page, 'pon', 2); await eAddEvent(page, 'chi', 3); await eAddEvent(page, 'riichi', 1);
+    await eScan(page);
+    let st = await eFxNow(page);
+    assert.deepEqual([st.kind, st.queue, st.dropped], ['chi', ['chi', 'riichi'], 1], '上限2：古い待ち（ポン）から捨てる');
+    await eWaitKind(page, 'riichi');
+    await page.waitForFunction(() => !window.__mathjong.S.fx.current, null, { timeout: 4000 });
+    st = await eFxNow(page);
+    assert.deepEqual([st.history, st.calls], [['chi', 'chi', 'riichi'], ['chi', 'chi', 'riichi']], '表示と音が一対一');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 監査 P2-A：キュー上限の超過は古い待ちから明示的に破棄し、表示と音は一対一');
+
+  // P2-A (4) soundScan との整合：同じ回に打牌だけ → 打牌音1回。打牌と宣言が混在 → 打牌音なし（宣言の音を表示時に）
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    await page.locator('.top').first().tap({ position: { x: 4, y: 4 } });
+    await eAddEvent(page, 'discard', 1); await eAddEvent(page, 'discard', 2); await eScan(page);
+    assert.equal((await eFxNow(page)).discards, 1, '1回の判定で打牌音は最大1回');
+    await eAddEvent(page, 'discard', 3); await eAddEvent(page, 'pon', 1); await eAddEvent(page, 'discard', 1); await eScan(page);
+    const st = await eFxNow(page);
+    assert.deepEqual([st.discards, st.calls], [1, ['pon']]);
+    for (let i = 0; i < 3; i++) await eScan(page);
+    assert.deepEqual([(await eFxNow(page)).discards, (await eFxNow(page)).calls], [1, ['pon']], '繰り返しても二重に鳴らない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 監査 P2-A：soundScan との整合（打牌だけの回は打牌音1回、宣言のある回は宣言の音だけ・二重なし）');
+
+  // P2-C 同じ人が続けて2回鳴く（数学Ⅰ・Ⅱ、自分・AI 全席）：表示中の宣言の面子だけが光る。待っている間に面子が増えても取り違えない。再描画しても同じ面子
+  for (const mode of ['math1', 'math2']) {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' }, mode);
+    const wall = mode === 'math1' ? presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]) : null;
+    if (wall) await v3Scene(page, wall); else await page.waitForSelector('.hand .tile');
+    for (const seat of [0, 1, 2, 3]) {
+      await page.evaluate(() => { const m = window.__mathjong; m.fx.clear(); });
+      const first = await eAddEvent(page, 'pon', seat);
+      await eScan(page);
+      const second = await eAddEvent(page, 'chi', seat, { offset: 3 }); // 演出中に、同じ人の新しい面子が増える
+      await eScan(page);
+      await page.evaluate(() => window.__mathjong.render());
+      let st = await eFxNow(page);
+      assert.deepEqual([st.kind, st.seat, st.queue], ['pon', seat, ['chi']]);
+      assert.deepEqual(st.glow, [String(first)], `${mode} 席${seat}：ポンの面子だけが光る（新しいチーの面子ではない）`);
+      const same = await page.evaluate(([s, t]) => {
+        const sel = `${s === 0 ? '.self' : `.panel.seat-${s}`} .melds .meld[data-claimed="${t}"] .tile`;
+        return { meld: [...document.querySelectorAll(sel)].map((e) => e.getAttribute('aria-label')), fx: [...document.querySelectorAll('#fx-layer .fx-tiles .tile')].map((e) => e.getAttribute('aria-label')) };
+      }, [seat, first]);
+      assert.ok(same.meld.length === 3 && same.meld.join() === same.fx.join(), `${mode} 席${seat}：演出の牌と公開面子の牌が一致（${same.fx.join()}）`);
+      await eWaitKind(page, 'chi');
+      await page.evaluate(() => window.__mathjong.render());
+      st = await eFxNow(page);
+      assert.deepEqual(st.glow, [String(second)], `${mode} 席${seat}：チーの表示が始まったらチーの面子が光る（再描画後も）`);
+      // 面子が見つからない宣言：別の面子を光らせない・牌も出さない
+      await page.evaluate(() => window.__mathjong.fx.clear());
+      await eAddEvent(page, 'chi', seat, { offset: 6, noMeld: true });
+      await eScan(page);
+      st = await eFxNow(page);
+      assert.deepEqual([st.kind, st.glow, await page.locator('#fx-layer .fx-tiles').count()], ['chi', [], 0], `${mode} 席${seat}：対応する面子がなければ何も光らせない`);
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // 本物の鳴き：自分のポンで光る面子は、記録の鳴いた牌の面子
+  {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    await fxToClaim(page, ['=1/2', '=1/2', 'sin', '0', '135', '=-√3', 'tan', '150']);
+    await page.locator('button[data-action="pon"]').first().tap();
+    const r = await page.evaluate(() => { const g = window.__mathjong.S.game; const ev = [...g.events].reverse().find((e) => e.type === 'pon'); return { tile: String(ev.tile), glow: [...document.querySelectorAll('.meld.fx-glow')].map((e) => e.dataset.claimed) }; });
+    assert.deepEqual(r.glow, [r.tile]);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 監査 P2-C：同じ人の連続した鳴き（数学Ⅰ・Ⅱ・自分と AI 全席）で、表示中の宣言の面子だけが光り、演出の牌と一致。再描画後も同じ・面子がなければ光らせない');
+
+  // P3-A 退出：チー表示中にポンが待つ → 最低表示時間（0.7秒）の後に短い退出（0.18秒）→ ポン。退出中も文字は徐々に消え、チーの表示は残らない
+  for (const mode of ['full', 'lite']) {
+    const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
+    if (mode === 'lite') await fxSetMode(page, 'lite');
+    await v3Scene(page, presetWall(TS_HAND, ['=-1/√3'], [FX_O1, FX_O2, FX_O3]));
+    await eAddEvent(page, 'chi', 1); await eAddEvent(page, 'pon', 2);
+    await eScan(page);
+    const t0 = await page.evaluate(() => window.__mathjong.S.fx.current.startedAt);
+    await page.waitForFunction((s) => performance.now() - s > 650, t0);
+    assert.ok(!(await page.evaluate(() => document.getElementById('fx-layer').classList.contains('fx-leaving'))), `${mode}：最低表示時間までは退出しない`);
+    await page.waitForFunction(() => document.getElementById('fx-layer').classList.contains('fx-leaving'), null, { timeout: 1000 });
+    const leaveAt = await page.evaluate(() => window.__mathjong.S.fx.current.leaveAt - window.__mathjong.S.fx.current.startedAt);
+    assert.ok(leaveAt >= 700 && leaveAt <= 760, `${mode}：退出は最低表示時間の後（${Math.round(leaveAt)}ms）`);
+    await page.waitForTimeout(90);
+    const mid = await page.evaluate(() => { const c = document.querySelector('#fx-layer .fx-card'); const s = getComputedStyle(c); return { op: Number(s.opacity), tf: s.transform, kind: window.__mathjong.S.fx.current.kind }; });
+    assert.ok(mid.kind === 'chi' && mid.op > 0.05 && mid.op < 0.95, `${mode}：退出の途中は徐々に消える（不透明度 ${mid.op}）`);
+    if (mode === 'lite') assert.equal(mid.tf, 'none', '簡易表示の退出は動かさない（不透明度だけ）');
+    await eWaitKind(page, 'pon');
+    const st = await page.evaluate(() => ({ cls: document.getElementById('fx-layer').className, word: document.querySelector('#fx-layer .fx-word').textContent, cards: document.querySelectorAll('#fx-layer .fx-card').length, gap: window.__mathjong.S.fx.current.startedAt }));
+    assert.deepEqual([st.cls, st.word, st.cards], [`fx-pon${mode === 'lite' ? ' lite' : ''}`, 'ポン！', 1], `${mode}：チーの表示は残らない`);
+    assert.ok(st.gap - t0 >= 880 - 5 && st.gap - t0 <= 880 + 150, `${mode}：ポンは 0.7＋0.18 秒後（${Math.round(st.gap - t0)}ms）`);
+    // 退出中にロンが来たら、すぐロン（退出を待たない）
+    await page.evaluate(() => window.__mathjong.fx.clear());
+    await eAddEvent(page, 'chi', 3, { offset: 3 }); await eAddEvent(page, 'riichi', 1); await eScan(page);
+    await page.waitForFunction(() => document.getElementById('fx-layer').classList.contains('fx-leaving'), null, { timeout: 1500 });
+    await eAddEvent(page, 'ron', 2); await eScan(page);
+    const r = await page.evaluate(() => ({ kind: window.__mathjong.S.fx.current.kind, leaving: document.getElementById('fx-layer').classList.contains('fx-leaving'), q: window.__mathjong.S.fx.queue.length }));
+    assert.deepEqual(r, { kind: 'ron', leaving: false, q: 0 }, `${mode}：退出中でもロンはすぐ表示`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 監査 P3-A：最低表示時間の後に 0.18 秒の退出（簡易表示は不透明度だけ）→ 次の演出。チーの表示は残らず、退出中のロンはすぐ表示');
+
+  // P3-B ロン・ツモ後半の最上部の帯が、結果画面（見出し・精算・次の局のボタン）と重ならない。ノッチ（safe-area）相当でも重ならない
+  for (const [w, h] of [[320, 568], [375, 667], [390, 844], [430, 932], [568, 320], [667, 375], [844, 390], [932, 430]]) {
+    for (const notch of [0, 30]) {
+      const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' }, 'math1', { viewport: { width: w, height: h } });
+      if (notch) await page.addStyleTag({ content: `:root { --fx-banner-top: max(6px, ${notch}px); }` }); // safe-area-inset-top の代わり
+      await v3Scene(page, presetWall(TS_HAND, ['=1'], [FX_O1, FX_O2, FX_O3]));
+      await page.locator('button[data-action="tsumo"]').tap();
+      await page.waitForFunction(() => { const b = document.querySelector('#fx-layer .fx-banner'); return b && Number(getComputedStyle(b).opacity) > 0.95; }, null, { timeout: 3000 });
+      const r = await page.evaluate(() => {
+        const R = (e) => { const x = e.getBoundingClientRect(); return { l: x.left, t: x.top, r: x.right, b: x.bottom }; };
+        const banner = R(document.querySelector('#fx-layer .fx-banner'));
+        const modal = document.querySelector('.overlay .modal');
+        const parts = { modal: R(modal), h2: R(modal.querySelector('h2')), next: R(modal.querySelector('button[data-action="next"]')) };
+        const settle = modal.querySelector('table'); if (settle) parts.settle = R(settle);
+        return { banner, parts, sx: document.documentElement.scrollWidth - innerWidth, vh: innerHeight };
+      });
+      const hit = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+      assert.ok(r.banner.t >= notch - 1, `${w}x${h} notch${notch}：帯は safe-area の下`);
+      for (const [k, v] of Object.entries(r.parts)) {
+        const visible = v.b > 0 && v.t < r.vh;
+        if (visible) assert.ok(!hit(r.banner, v), `${w}x${h} notch${notch}：帯と ${k} が重ならない（帯 ${JSON.stringify(r.banner)} / ${k} ${JSON.stringify(v)}）`);
+      }
+      assert.ok(r.sx <= 0, `${w}x${h}：横スクロールなし`);
+      if (SHOTS && !notch) await page.screenshot({ path: `${SHOTS}/v05e-banner-${w}x${h}.png` });
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  }
+  console.log('✓ 監査 P3-B：縦横8画面（ノッチ相当を含む）で、ロン・ツモ後半の帯が結果画面の見出し・精算・次の局のボタンと重ならない・横スクロールなし');
+}
+
+// P2-B 効果音と宣言ボイスは独立：4つの組合せ・冷起動・保存して再読込（本物の AudioContext とテスト用の manifest）
+async function v05eAudioIndependent(browser) {
+  const wav = eWav();
+  const open = async (sound, voiceOn, { manifest = true } = {}) => {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    await ctx.addInitScript(REAL_TAP_FN);
+    if (sound !== null) await ctx.addInitScript(([s, v]) => { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('mj-sound', s); localStorage.setItem('mj-voice', v); sessionStorage.setItem('seeded', '1'); } }, [sound, voiceOn]);
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    const fetched = [];
+    await page.route('**/src/ui/voice-test-*.m4a', (route) => { fetched.push(route.request().url()); return route.fulfill({ status: 200, contentType: 'audio/wav', body: wav }); });
+    await page.goto(`${LOCAL}?mode=math1&seed=1&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    if (manifest) await page.evaluate((m) => window.__mathjong.voice.setManifest(m), E_VOICE_M); // 冷起動：まだ一度も操作していない
+    return { ctx, page, errors, fetched };
+  };
+  const play = async (page) => {
+    await page.locator('.hand .tile.tap').first().tap(); // 最初の操作
+    await page.waitForTimeout(400);
+    const m0 = await rcMark(page);
+    await eFire(page, 'ron', 2);
+    await page.waitForTimeout(500);
+    return page.evaluate((m) => ({
+      created: window.__rec.created, state: window.__mathjong.sound.state(), voice: window.__mathjong.voice.log.at(-1), sfx: window.__mathjong.sound.log.filter((x) => !x.kind.startsWith('voice:')).at(-1),
+      peak: window.__rec.blocks.slice(m).reduce((a, x) => Math.max(a, x.peak), 0), buffers: Object.keys(window.__mathjong.voice.buffers).length,
+    }), m0);
+  };
+  for (const [s, v, exp] of [
+    ['1', '1', { created: 1, voice: 'played', sfx: 'played', out: true, fetch: 4 }],
+    ['1', '0', { created: 1, voice: 'off', sfx: 'played', out: true, fetch: 0 }],
+    ['0', '1', { created: 1, voice: 'played', sfx: 'off', out: true, fetch: 4 }],
+    ['0', '0', { created: 0, voice: 'off', sfx: 'off', out: false, fetch: 0 }],
+  ]) {
+    const { ctx, page, errors, fetched } = await open(s, v);
+    const r = await play(page);
+    const tag = `効果音${s === '1' ? 'ON' : 'OFF'}・ボイス${v === '1' ? 'ON' : 'OFF'}`;
+    assert.equal(r.created, exp.created, `${tag}：AudioContext`);
+    assert.equal(r.voice.status, exp.voice, `${tag}：声`);
+    assert.equal(r.sfx ? r.sfx.status : 'off', exp.sfx, `${tag}：効果音`);
+    assert.equal(fetched.length, exp.fetch, `${tag}：音声ファイルの取得`);
+    if (exp.out) assert.ok(r.peak > 0.01, `${tag}：実際に出力された（${r.peak}）`); else assert.ok(r.peak < RC_EPS, `${tag}：何も出力されない`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // 声が未採用（manifest なし）で、効果音OFF・ボイスON：何も作らず、何も取得しない
+  {
+    const { ctx, page, errors, fetched } = await open('0', '1', { manifest: false });
+    const r = await play(page);
+    assert.deepEqual([r.created, r.voice.status, fetched.length], [0, 'none', 0], '未採用のときは AudioContext も取得もなし');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // 保存して再読込（冷起動）：設定画面で効果音OFF・ボイスON にして再読込 → 最初の操作で声だけが鳴る
+  {
+    const { ctx, page, errors, fetched } = await open(null, null);
+    await page.locator('button[data-action="settings"]').tap();
+    await page.locator('select[data-action="sound"]').selectOption('0');
+    assert.equal(await page.locator('select[data-action="voice"]').inputValue(), '1');
+    await page.locator('.modal-actions button[data-action="close"]').tap();
+    assert.deepEqual(await page.evaluate(() => [localStorage.getItem('mj-sound'), localStorage.getItem('mj-voice')]), ['0', null]);
+    await page.reload();
+    await page.waitForSelector('.hand .tile');
+    await page.evaluate((m) => window.__mathjong.voice.setManifest(m), E_VOICE_M);
+    const before = await page.evaluate(() => window.__rec.created);
+    assert.equal(before, 0, '再読込の直後（操作前）は AudioContext なし');
+    const r = await play(page);
+    assert.deepEqual([r.created, r.voice.status, r.sfx ? r.sfx.status : 'off', r.buffers], [1, 'played', 'off', 4], '冷起動：最初の操作で解除・読み込み、声だけが鳴る');
+    assert.ok(r.peak > 0.01);
+    assert.ok(fetched.length >= 4);
+    // 中断・復帰の旧音の破棄は維持：声の途中で suspend → resume で古い声は出ない
+    await page.evaluate(() => window.__mathjong.fx.clear());
+    await eFire(page, 'tsumo', 0);
+    await page.waitForTimeout(100);
+    await page.evaluate(() => window.__mathjong.sound.ctx.suspend());
+    await page.waitForTimeout(1200);
+    await rcTap(page);
+    await rcRunning(page);
+    const b = await rcMark(page);
+    await page.waitForTimeout(1000);
+    assert.ok(await rcPeak(page, b) < RC_EPS, '効果音OFF・ボイスONでも、中断した声は復帰後に鳴らない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 監査 P2-B：効果音と宣言ボイスは独立（4組合せ・未採用時は何もしない・効果音OFF＋ボイスONの冷起動と保存・再読込・中断した声は復帰後に鳴らない）');
+}
+
+// Ver.0.6：9人の名前と難易度・表示の接続、盤面の牌サイズが変わらないことを検査。
+async function v06Characters(browser) {
+  const roster = {
+    beginner: ['かなた','みつき','あおと'],
+    intermediate: ['おうすけ','なつき','ゆき'],
+    advanced: ['ふくやま','かおる','アスマ'],
+  };
+  for (const mode of ['math1', 'math2']) {
+    let tileWidth = null;
+    for (const [level, names] of Object.entries(roster)) {
+      const ctx = await newContext(browser, {
+        viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+      });
+      const page = await ctx.newPage();
+      const errors = watchErrors(page);
+      await page.goto(LOCAL + '?seed=2026&round=1&dealer=0&hand=0&renchan=0&len=4&mode=' + mode + '&ai=' + level + '&speed=test');
+      await page.waitForSelector('.hand .tile');
+      const real = await page.evaluate(() => ({
+        chosen: window.__mathjong.S.matchSettings.seats.join(','),
+        roster: window.__mathjong.S.game.players.slice(1).map((p) => p.name),
+        panel: [1,2,3].map((seat) => document.querySelector('.panel.seat-' + seat + ' .name')?.textContent?.trim()),
+        styles: [1,2,3].map((seat) => document.querySelector('.panel.seat-' + seat + ' .pers')?.textContent?.trim()),
+        width: document.querySelector('.hand .tile')?.getBoundingClientRect().width,
+      }));
+      assert.equal(real.chosen, { beginner: 'kanata,mitsuki,aoto', intermediate: 'ousuke,natsuki,yuki', advanced: 'fukuyama,kaoru,asuma' }[level], '従来の ai の再現 URL は難易度の既定の3人・従来の席の順');
+      assert.deepEqual(real.roster, names, mode + '/' + level + ' player names');
+      assert.deepEqual(real.panel, names, mode + '/' + level + ' panel names');
+      assert.deepEqual(real.styles, [undefined, undefined, undefined], '対局中は肩書きを省略して牌の領域を優先');
+      assert.ok(real.width > 0, 'hand tile visible');
+      if (tileWidth !== null) assert.ok(Math.abs(real.width - tileWidth) < 0.5, 'same tile size for all characters');
+      tileWidth = real.width;
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  }
+  console.log('✓ Ver.0.6：9キャラの難易度別名前・数学ⅠⅡ・牌サイズ不変');
+}
+
+// ---- Ver.0.6：対戦相手の自由選択（9人から3人） ----
+const oppState = (page) => page.evaluate(() => {
+  const { S } = window.__mathjong;
+  const sb = document.querySelector('.select-screen button[data-action="start-match"]');
+  return { screen: S.screen, selected: S.opp.selected.slice(), detail: S.opp.detail, startDisabled: sb ? sb.disabled : null,
+    checked: [...document.querySelectorAll('.opp-card.selected')].map((e) => e.dataset.id), count: (document.querySelector('.opp-count b') || {}).textContent,
+    chips: [...document.querySelectorAll('.opp-chip:not(.empty)')].map((e) => e.firstChild.textContent), sheet: !!document.querySelector('.opp-sheet') };
+});
+async function v06FreeSelect(browser) {
+  const ORDER = ['kanata', 'mitsuki', 'aoto', 'ousuke', 'natsuki', 'yuki', 'fukuyama', 'kaoru', 'asuma'];
+  // (1) スマートフォン（390×844・タッチ）：一覧・2列・チェックと詳細の分離・0〜2人では開始できない・4人目は不可・詳細（下から）
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?speed=test`);
+    await page.waitForSelector('.title-screen');
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    await page.waitForSelector('.select-screen');
+    assert.deepEqual(await page.locator('.opp-card').evaluateAll((es) => es.map((e) => e.dataset.id)), ORDER, '9人を初級→中級→上級の順に連続');
+    assert.deepEqual(await page.locator('.opp-card .opp-name').allInnerTexts(), ['かなた', 'みつき', 'あおと', 'おうすけ', 'なつき', 'ゆき', 'ふくやま', 'かおる', 'アスマ']);
+    assert.deepEqual(await page.locator('.opp-card .opp-level').allInnerTexts(), ['初級', '初級', '初級', '中級', '中級', '中級', '上級', '上級', '上級']);
+    for (const t of await page.locator('.opp-card .opp-trait').allInnerTexts()) assert.ok(t.length >= 4, `性格の一言 ${t}`);
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.opp-grid')).gridTemplateColumns.split(' ').length), 2, 'スマートフォンは2列');
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 0, '横スクロールなし');
+    let st = await oppState(page);
+    assert.deepEqual([st.selected, st.count, st.startDisabled], [[], '0', true], '初期は0人・開始できない');
+    // チェック欄のタップは選択だけ（詳細は開かない）。チェック欄は 44px 以上
+    const cb = await page.locator('.opp-check[data-id="aoto"]').boundingBox();
+    assert.ok(cb.width >= 44 && cb.height >= 44, `チェック欄の大きさ ${cb.width}×${cb.height}`);
+    for (const [id, n] of [['aoto', 1], ['kaoru', 2]]) {
+      await page.locator(`.opp-check[data-id="${id}"]`).tap();
+      st = await oppState(page);
+      assert.deepEqual([st.selected.length, st.detail, st.sheet, st.startDisabled], [n, null, false, true], `${n}人：詳細は開かず、まだ開始できない`);
+      // 0〜2人で「対局開始」を押しても始まらない
+      await page.locator('.select-screen button[data-action="start-match"]').evaluate((e) => { e.disabled = false; e.click(); });
+      assert.equal((await oppState(page)).screen, 'select', `${n}人では対局を始めない（無効化を外して押しても）`);
+    }
+    await page.locator('.opp-check[data-id="ousuke"]').tap();
+    st = await oppState(page);
+    assert.deepEqual([st.selected, st.startDisabled, st.checked.sort(), st.count, st.chips], [['aoto', 'kaoru', 'ousuke'], false, ['aoto', 'kaoru', 'ousuke'], '3', ['あおと', 'かおる', 'おうすけ']], '3人そろうと開始できる・選択済みは枠で区別・3人を確認できる');
+    // 4人目は追加できない（お知らせを出す）
+    await page.locator('.opp-check[data-id="yuki"]').tap({ force: true }); // aria-disabled でも実機ではタップできる
+    st = await oppState(page);
+    assert.deepEqual(st.selected, ['aoto', 'kaoru', 'ousuke'], '4人目は追加しない');
+    assert.match(await page.locator('.opp-notice').innerText(), /3人まで/);
+    assert.equal(await page.locator('.opp-check[data-id="yuki"]').getAttribute('aria-disabled'), 'true');
+    // カード本体のタップで詳細（下から開くパネル）。年齢・難易度・性格・打ち筋。×で閉じる。選択は維持
+    await page.locator('.opp-card[data-id="natsuki"] .opp-trait').tap();
+    await page.waitForSelector('.opp-sheet');
+    const det = await page.locator('.opp-sheet').innerText();
+    for (const re of [/なつき/, /20歳/, /中級/, /性格/, /打ち筋/, /門前/]) assert.match(det, re);
+    const sh = await page.locator('.opp-sheet').boundingBox();
+    assert.ok(Math.abs(sh.y + sh.height - 844) <= 1 && sh.width >= 389, `スマートフォンは下から開く ${JSON.stringify(sh)}`);
+    assert.equal(await page.locator('.opp-sheet button[data-action="opp-toggle"]').isDisabled(), true, '3人選択中は詳細からも追加できない');
+    await page.locator('.opp-close').tap();
+    st = await oppState(page);
+    assert.deepEqual([st.sheet, st.selected], [false, ['aoto', 'kaoru', 'ousuke']], '×で閉じる・選択は維持');
+    // パネルの中のタップでは閉じない。パネルの外のタップで閉じる
+    await page.locator('.opp-card[data-id="kanata"] .opp-name').tap();
+    await page.locator('.opp-d-list').tap();
+    assert.equal((await oppState(page)).sheet, true, 'パネルの中では閉じない');
+    await page.mouse.click(195, 30);
+    assert.equal((await oppState(page)).sheet, false, 'パネルの外で閉じる');
+    // おまかせ：3人を抽選して置き換え（対局は始めない）。何度でも引き直せる。1人だけ入れ替えられる
+    const draws = new Set();
+    for (let i = 0; i < 12; i++) {
+      await page.locator('button[data-action="opp-random"]').tap();
+      st = await oppState(page);
+      assert.equal(st.screen, 'select', 'おまかせでは対局を始めない');
+      assert.equal(new Set(st.selected).size, 3);
+      assert.deepEqual(st.selected, ORDER.filter((id) => st.selected.includes(id)));
+      draws.add(st.selected.join(','));
+    }
+    assert.ok(draws.size >= 3, `引き直すと変わる ${[...draws].join(' / ')}`);
+    const drawn = st.selected.slice();
+    const out = drawn[1], inn = ORDER.find((id) => !drawn.includes(id));
+    await page.locator(`.opp-check[data-id="${out}"]`).tap();
+    await page.locator(`.opp-check[data-id="${inn}"]`).tap();
+    st = await oppState(page);
+    assert.deepEqual(st.selected.slice().sort(), [drawn[0], drawn[2], inn].sort(), '1人だけ入れ替え');
+    // タイトルへ戻っても、モード・局数を変えても選択は残る。再読み込みで0人に戻る
+    await page.locator('.select-screen button[data-action="to-title"]').tap();
+    await page.waitForSelector('.title-screen');
+    await page.locator('label.setting.radio', { hasText: '数学Ⅰ' }).tap();
+    await page.locator('label.setting.radio', { hasText: '8局戦' }).tap();
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    assert.deepEqual((await oppState(page)).selected.slice().sort(), [drawn[0], drawn[2], inn].sort(), 'タイトル・モード・局数を変えても保持');
+    assert.match(await page.locator('.select-setting').innerText(), /数学Ⅰ ／ 8局戦/);
+    assert.equal(await page.evaluate(() => Object.keys(localStorage).filter((k) => /opp|char|select/i.test(k)).length), 0, '選択は保存しない');
+    await page.reload();
+    await page.waitForSelector('.title-screen');
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    assert.deepEqual((await oppState(page)).selected, [], '再読み込みで0人');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (2) PC（1280×860・マウス）：3列・詳細は中央のポップアップ
+  {
+    const ctx = await newContext(browser, { viewport: { width: 1280, height: 860 } });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?speed=test`);
+    await page.locator('button[data-action="choose-opponents"]').click();
+    await page.waitForSelector('.select-screen');
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.opp-grid')).gridTemplateColumns.split(' ').length), 3, 'PC は3列');
+    await page.locator('.opp-card[data-id="fukuyama"] .opp-name').click();
+    await page.waitForSelector('.opp-sheet');
+    const sh = await page.locator('.opp-sheet').boundingBox();
+    assert.ok(Math.abs(sh.x + sh.width / 2 - 640) <= 1 && Math.abs(sh.y + sh.height / 2 - 430) <= 2 && sh.width <= 480, `PC は中央のポップアップ ${JSON.stringify(sh)}`);
+    assert.match(await page.locator('.opp-sheet').innerText(), /28歳/);
+    await page.locator('.opp-sheet button[data-action="opp-toggle"]').click();
+    assert.deepEqual((await oppState(page)).selected, ['fukuyama'], '詳細から選べる');
+    await page.mouse.click(20, 20);
+    assert.equal((await oppState(page)).sheet, false);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (3) 座席：人間は席0。3人を席1〜3へランダムに（6通りがすべて出る）。試合中は固定。対局の名前は席どおり
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?speed=slow`);
+    await chooseAndStart(page, ['mitsuki', 'natsuki', 'fukuyama']);
+    const perms = await page.evaluate(() => {
+      const { S, startMatch } = window.__mathjong;
+      const seen = {};
+      for (let i = 0; i < 120; i++) { startMatch({ settings: { mode: S.matchSettings.mode, length: S.matchSettings.length, chars: S.matchSettings.chars } }); const k = S.matchSettings.seats.join(','); seen[k] = (seen[k] || 0) + 1; }
+      clearTimeout(S.timer);
+      return seen;
+    });
+    assert.equal(Object.keys(perms).length, 6, `座席の6通りがすべて出る ${JSON.stringify(perms)}`);
+    for (const k of Object.keys(perms)) assert.deepEqual(k.split(',').sort(), ['fukuyama', 'mitsuki', 'natsuki']);
+    const names = await page.evaluate(() => ({ seats: window.__mathjong.S.matchSettings.seats, players: window.__mathjong.S.game.players.map((p) => p.name), kinds: window.__mathjong.S.game.players.map((p) => p.kind) }));
+    assert.deepEqual(names.kinds, ['human', 'ai', 'ai', 'ai']);
+    assert.equal(names.players[0], 'あなた');
+    // 次の局へ進んでも座席は変わらない
+    const before = names.seats.join(',');
+    await forceDraw(page);
+    await page.waitForSelector('button[data-action="next"]');
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.hand .tile');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.matchSettings.seats.join(',')), before, '試合の途中では座席を変えない');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (4) 一連の操作：数学Ⅰ・Ⅱ × 4局・8局で開始 → 最終結果 →「相手を変更」（直前の3人が選択済み）→ 1人入れ替えて開始 →「同じ3人と再戦」→ タイトル
+  for (const [mode, len, chars] of [['math1', 4, ['kanata', 'yuki', 'asuma']], ['math2', 8, ['aoto', 'ousuke', 'kaoru']], ['math1', 8, ['mitsuki', 'natsuki', 'fukuyama']], ['math2', 4, ['kanata', 'aoto', 'asuma']]]) {
+    const ctx = await newContext(browser, { viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?speed=slow`);
+    await page.locator('label.setting.radio', { hasText: mode === 'math1' ? '数学Ⅰ' : '数学Ⅱ' }).tap();
+    await page.locator('label.setting.radio', { hasText: `${len}局戦` }).tap();
+    await chooseAndStart(page, chars);
+    let st = await matchState(page);
+    assert.deepEqual([st.mode, st.length, st.chars, st.label], [mode, len, chars, '東1局'], `${mode}・${len}局戦`);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game.tileType.length), mode === 'math1' ? 124 : 168);
+    await page.evaluate(() => { const { S, render } = window.__mathjong; S.match.over = true; S.modal = 'final'; render(); });
+    await page.locator('.final button[data-action="change-opponents"]').tap();
+    await page.waitForSelector('.select-screen');
+    assert.deepEqual((await oppState(page)).selected, chars, '直前の3人が選択済み');
+    const inn = ORDER.find((id) => !chars.includes(id));
+    await page.locator(`.opp-check[data-id="${chars[0]}"]`).tap();
+    await page.locator(`.opp-check[data-id="${inn}"]`).tap();
+    await page.locator('.select-screen button[data-action="start-match"]').tap();
+    await page.waitForSelector('.hand .tile');
+    st = await matchState(page);
+    assert.deepEqual([st.chars, st.scores, st.label], [[chars[1], chars[2], inn], [100, 100, 100, 100], '東1局'], '1人だけ入れ替えて新しい試合');
+    const seed1 = await page.evaluate(() => window.__mathjong.S.seedBase);
+    await page.evaluate(() => { const { S, render } = window.__mathjong; S.match.over = true; S.modal = 'final'; render(); });
+    await page.locator('.final button[data-action="again"]').tap();
+    await page.waitForSelector('.hand .tile');
+    st = await matchState(page);
+    assert.deepEqual([st.chars, st.mode, st.length, st.scores, st.played], [[chars[1], chars[2], inn], mode, len, [100, 100, 100, 100], 0], '同じ3人・同じモードと局数・得点を初期化');
+    assert.notEqual(await page.evaluate(() => window.__mathjong.S.seedBase), seed1, '山を初期化（新しい seed）');
+    await page.evaluate(() => { const { S, render } = window.__mathjong; S.match.over = true; S.modal = 'final'; render(); });
+    await page.locator('.final button[data-action="to-title"]').tap();
+    await page.waitForSelector('.title-screen');
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    assert.deepEqual((await oppState(page)).selected, [chars[1], chars[2], inn], 'タイトルへ戻っても3人を保持');
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 0);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.6：対戦相手の自由選択（9人・2列/3列・チェックと詳細の分離・0〜2人不可・4人目不可・詳細（下から/中央）・おまかせ・1人入れ替え・保持/再読み込みで0人・座席6通り・途中固定・相手を変更・同じ3人と再戦・数学ⅠⅡ×4/8局）');
+}
+
 const server = await startServer(0, { base: BASE, host: '127.0.0.1' });
 PORT = server.address().port;
 LOCAL = `http://localhost:${PORT}${BASE}`;
@@ -3553,7 +6178,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass };
+    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
   } else {
@@ -3587,6 +6212,20 @@ try {
   await v04End(browser);
   await v04bLevels(browser);
   await v04bPonAutoPass(browser);
+  await v05Riichi(browser);
+  await v05bEffects(browser);
+  await v05bFxModeFixed(browser);
+  await v05cTsumo(browser);
+  await v05cTitleLogo(browser);
+  await v05dRiichiFx(browser);
+  await v05dSound(browser);
+  await v05dSoundSuspend(browser);
+  await v05eCutin(browser);
+  await v05eVoice(browser);
+  await v05eAuditFix(browser);
+  await v05eAudioIndependent(browser);
+  await v06Characters(browser);
+  await v06FreeSelect(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
