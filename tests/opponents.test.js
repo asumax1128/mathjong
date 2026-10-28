@@ -15,11 +15,11 @@ import { CHARACTER_ROSTER } from '../src/engine/characters.js';
 const IDS = OPPONENTS.map((o) => o.id);
 const OLD_ORDER = ['kanata', 'mitsuki', 'aoto', 'ousuke', 'natsuki', 'yuki', 'fukuyama', 'kaoru', 'asuma'];
 
-const ORDER = [...OLD_ORDER, 'yujin', 'tara', 'nocchi'];
+const ORDER = ['kanata', 'mitsuki', 'aoto', 'yujin', 'ousuke', 'natsuki', 'yuki', 'tara', 'fukuyama', 'kaoru', 'asuma', 'nocchi'];
 
 test('一覧：12人を初級→中級→上級の順に連続。名前・年齢・難易度は AI の名簿と一致し、紹介文（性格・打ち筋・一言）がある', () => {
   assert.deepEqual(IDS, ORDER);
-  const roster = Object.fromEntries(Object.entries(CHARACTER_ROSTER).flatMap(([lv, xs]) => xs.map((c) => [c.id, { ...c, lv }])));
+  const roster = Object.fromEntries(Object.entries(CHARACTER_ROSTER).flatMap(([lv, xs]) => xs.map((c) => [c.id, { ...c, lv: c.level || lv }])));
   for (const o of OPPONENTS) {
     assert.equal(o.name, roster[o.id].name);
     assert.equal(o.age, roster[o.id].age);
@@ -27,6 +27,10 @@ test('一覧：12人を初級→中級→上級の順に連続。名前・年齢
     assert.equal(o.levelLabel, { beginner: '初級', intermediate: '中級', advanced: '上級', additional: '個性型' }[o.level]);
     for (const k of ['trait', 'personality', 'style']) assert.ok(typeof o[k] === 'string' && o[k].length >= 4, `${o.id} の ${k}`);
   }
+  assert.deepEqual(OPPONENTS.filter(o => o.level === 'beginner').map(o=>o.id), ORDER.slice(0,4));
+  assert.deepEqual(OPPONENTS.filter(o => o.level === 'intermediate').map(o=>o.id), ORDER.slice(4,8));
+  assert.deepEqual(OPPONENTS.filter(o => o.level === 'advanced').map(o=>o.id), ORDER.slice(8,12));
+  assert.deepEqual(['yujin','tara','nocchi'].map(id => [opponentById(id).age, opponentById(id).levelLabel]), [[26,'初級'],[25,'中級'],[28,'上級']]);
   assert.equal(PICK_COUNT, 3);
   assert.equal(opponentById('kaoru').name, 'かおる');
   assert.equal(opponentById('kanata').trait, '冷静に待ちを見る');
