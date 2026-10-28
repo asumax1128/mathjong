@@ -65,15 +65,15 @@
 - 公開smoke testの既知不整合：`tools/public-smoke.mjs:59` が旧名称「ふくやま」を期待する。正式表示は「シャカ」、内部IDは `fukuyama` のまま。mainのコードとローカル再現で不一致を確認。
 - テスト修正ブランチ：`fix/public-smoke-shaka-name`、HEAD `fdcfcd4b3acf57511f873cf59183a5747383d541`。main `ce65903` から作成し、期待文字列1か所だけを修正。ゲームコード・内部IDは無変更。ローカルHTTPでは旧テスト失敗→修正後smoke成功（対局開始まで、資源エラーなし）、対戦相手単体10件成功。
 - 文書更新ブランチ：`docs/beginner-room-pr21-release`（本更新）。テスト修正を含めず、同じmainから独立した文書専用変更。
-- 記録時点で両ブランチのDraft PR作成は未完了。GitHub APIとPagesへの接続が現在のCodex環境で拒否されるため。通信反映後、それぞれ別のDraft PRを作成し、番号・HEAD・CIを再確認する。オーナー承認前にmainへ統合しない。
+- **Draft PR作成済み**：公開smokeテストの期待値修正は[PR #22](https://github.com/asumax1128/mathjong/pull/22)（`fix/public-smoke-shaka-name`、HEAD `fdcfcd4b3acf57511f873cf59183a5747383d541`）。文書のみの更新は[PR #23](https://github.com/asumax1128/mathjong/pull/23)（`docs/beginner-room-pr21-release`、本更新）。両PRはDraft・未マージ。Codex側のGitHub API制限を受け、ChatGPTディレクターがGitHub接続から作成した。次の作業は新規公開smokeの実行と結果確認であり、PR作成ではない。オーナー承認前にmainへ統合しない。
 - 通信設定案には `api.github.com` と `asumax1128.github.io` を追加済みだが、実行環境の許可には未反映。GitHubのHTML閲覧とGitは利用可能。API接続・実公開URLの検証とは区別する。
 - 公開URLでの修正版smokeはプロキシの接続拒否で未完了。初心者の部屋の公開ブラウザ操作・配信JSのmainとの一致も、この環境からは未確認。公開障害や配信版不一致と断定しない。
-- 通信復旧後の公開smokeは `gh workflow run public-site-smoke.yml --repo asumax1128/mathjong --ref fix/public-smoke-shaka-name` で修正ブランチを指定する。既存の失敗runを再実行するだけでは、旧mainの期待値を使って再び失敗する可能性がある。新規runのHEADと結果を確認し、公開URL成功・ローカル成功・Pagesデプロイ成功を別々に記録する。
+- **公開smokeの新規runは未確認**（2026-10-28時点）。GitHub Actionsの「Public site smoke test」から `Run workflow` を選び、`fix/public-smoke-shaka-name` を指定する。または実行可能なGitHub接続で `gh workflow run public-site-smoke.yml --repo asumax1128/mathjong --ref fix/public-smoke-shaka-name`。旧mainの失敗runの単純な再実行は不可。新規runのHEAD・URL・結果を記録し、公開URL成功・ローカル成功・Pagesデプロイ成功を区別する。このsmokeは主に通常対局の入口確認であり、初心者の部屋1〜6段階の操作やiPhone実機受入を代替しない。
 
 ## 5. オーナー決定の開発優先順位
 
 1. **GitHub引き継ぎ基盤の最新化（最優先）**。PR #11標準5ファイルをVer.0.6へ更新してmainマージ済み。新チャットでの独立復元テストは未実施。
-2. **初心者の部屋**。全6段階がPR #20/#21でmainに反映されPagesデプロイ成功。次は公開smokeの期待値修正を別Draft PRで確認し、公開ブラウザ検証と第4〜6段階のiPhone Safari実機受入を行う（[docs/36](36-beginner-room-lessons4to6.md)）。
+2. **初心者の部屋**。全6段階がPR #20/#21でmainに反映されPagesデプロイ成功。公開smoke期待値修正の[PR #22](https://github.com/asumax1128/mathjong/pull/22)はDraftで作成済み。次は修正ブランチを指定した新規smoke実行・公開ブラウザ検証と第4〜6段階のiPhone Safari実機受入（[docs/36](36-beginner-room-lessons4to6.md)）。
 3. **戦績・対戦記録**。個人の通算・相手別などの記録、保存仕様は未確定。
 4. **新キャラクター3人追加**。9→12人、能力・関係性・バランスは後日設計。
 5. **デフォルメイラスト追加**。一覧はデフォルメ、詳細は通常頭身の将来構想。今回は未制作。
