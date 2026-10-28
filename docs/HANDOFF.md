@@ -1,5 +1,7 @@
 # 数雀｜現行開発引き継ぎ（Single Source of Truth）
 
+> **2026-10-28の包括承認（D16）**：既存仕様内は安全条件を満たせばCodexが追加承認なしで実装・Ready・正規mainマージ・既存Pages公開まで進める。重大なルール変更・破壊的データ変更・重大なセキュリティ変更は相談。CI・保護・通信制限を迂回しない。PR #19は自動マージ対象外。
+
 > 2026-10-28 JST時点のスナップショット。最新GitHubのmain・PRと必ず照合する。
 > このファイルはPR #11でmainへマージ済み。最新GitHubのPR状態を再確認する。
 
@@ -65,15 +67,17 @@
 - 公開smoke testの既知不整合：`tools/public-smoke.mjs:59` が旧名称「ふくやま」を期待する。正式表示は「シャカ」、内部IDは `fukuyama` のまま。mainのコードとローカル再現で不一致を確認。
 - テスト修正ブランチ：`fix/public-smoke-shaka-name`、HEAD `fdcfcd4b3acf57511f873cf59183a5747383d541`。main `ce65903` から作成し、期待文字列1か所だけを修正。ゲームコード・内部IDは無変更。ローカルHTTPでは旧テスト失敗→修正後smoke成功（対局開始まで、資源エラーなし）、対戦相手単体10件成功。
 - 文書更新ブランチ：`docs/beginner-room-pr21-release`（本更新）。テスト修正を含めず、同じmainから独立した文書専用変更。
-- **Draft PR作成済み**：公開smokeテストの期待値修正は[PR #22](https://github.com/asumax1128/mathjong/pull/22)（`fix/public-smoke-shaka-name`、HEAD `fdcfcd4b3acf57511f873cf59183a5747383d541`）。文書のみの更新は[PR #23](https://github.com/asumax1128/mathjong/pull/23)（`docs/beginner-room-pr21-release`、本更新）。両PRはDraft・未マージ。Codex側のGitHub API制限を受け、ChatGPTディレクターがGitHub接続から作成した。次の作業は新規公開smokeの実行と結果確認であり、PR作成ではない。オーナー承認前にmainへ統合しない。
+- **PR #22/#23はDraft・未マージ**（記録時点）。PR #22は `fix/public-smoke-shaka-name`、HEAD `fdcfcd4b3acf57511f873cf59183a5747383d541`。PR #23は文書更新。最新HEADとmainは毎回GitHubで再取得する。新方針で自律マージは承認されたが、正規APIへの接続・保護条件確認ができずReady化とマージは未実行。復旧後はPR #22を先に処理し、更新mainとの差分・CIを再確認してPR #23を処理する。
 - 通信設定案には `api.github.com` と `asumax1128.github.io` を追加済みだが、実行環境の許可には未反映。GitHubのHTML閲覧とGitは利用可能。API接続・実公開URLの検証とは区別する。
-- 公開URLでの修正版smokeはプロキシの接続拒否で未完了。初心者の部屋の公開ブラウザ操作・配信JSのmainとの一致も、この環境からは未確認。公開障害や配信版不一致と断定しない。
-- **公開smokeの新規runは未確認**（2026-10-28時点）。GitHub Actionsの「Public site smoke test」から `Run workflow` を選び、`fix/public-smoke-shaka-name` を指定する。または実行可能なGitHub接続で `gh workflow run public-site-smoke.yml --repo asumax1128/mathjong --ref fix/public-smoke-shaka-name`。旧mainの失敗runの単純な再実行は不可。新規runのHEAD・URL・結果を記録し、公開URL成功・ローカル成功・Pagesデプロイ成功を区別する。このsmokeは主に通常対局の入口確認であり、初心者の部屋1〜6段階の操作やiPhone実機受入を代替しない。
+- Codexからの直接接続はプロキシ拒否で未完了だが、GitHub Actionsの修正ブランチでの公開入口smokeは成功した。全6段階の実公開操作、配信JSとmainのハッシュ一致、iPhone Safari実機受入は別途必要。
+- **修正ブランチの公開smokeは3件Success**：[40689929481](https://github.com/asumax1128/mathjong/actions/runs/40689929481)、[40689890309](https://github.com/asumax1128/mathjong/actions/runs/40689890309)、[40689790935](https://github.com/asumax1128/mathjong/actions/runs/40689790935)。いずれも `fix/public-smoke-shaka-name`、完全HEAD `fdcfcd4b3acf57511f873cf59183a5747383d541`。2026-10-28 21:40〜21:41 JST。Actions画面のブランチ・SHAリンク・Successと実行HEADのテスト仕様を照合した。390px・数学Ⅰ・タイトル→選択→通常対局開始が中心で、全6段階・実機受入・配信JS同一性の検査ではない。旧mainのFailureは履歴として残す。
+
+- **公開教材テスト追加**：`test/public-beginner-room-smoke`。既存E2Eへ `--public-url` を追加し、サーバー起動・ローカル転送・テストフックに頼らず第1〜6段階を検査。4画面幅、5-C、卒業、保存再開、通常対局開始までを再利用し、専用read-only workflowを用意。新規PR作成・実際のPagesでの実行はAPI接続待ち。ローカルHTTPの成功を公開成功と混同しない。 実装時のローカル検証は単体371件成功、全体E2E約749秒成功、直接HTTPモード2回連続成功、旧5-Cへの故障注入で失敗検出。[検査範囲と実行方法](https://github.com/asumax1128/mathjong/blob/test/public-beginner-room-smoke/docs/37-public-beginner-room-smoke.md)。ゲーム本体には変更なし。
 
 ## 5. オーナー決定の開発優先順位
 
 1. **GitHub引き継ぎ基盤の最新化（最優先）**。PR #11標準5ファイルをVer.0.6へ更新してmainマージ済み。新チャットでの独立復元テストは未実施。
-2. **初心者の部屋**。全6段階がPR #20/#21でmainに反映されPagesデプロイ成功。公開smoke期待値修正の[PR #22](https://github.com/asumax1128/mathjong/pull/22)はDraftで作成済み。次は修正ブランチを指定した新規smoke実行・公開ブラウザ検証と第4〜6段階のiPhone Safari実機受入（[docs/36](36-beginner-room-lessons4to6.md)）。
+2. **初心者の部屋**。全6段階がPR #20/#21でmain反映・Pages成功。PR #22の公開入口smokeは3件成功。PR #22/#23の正規マージ、全段階公開テスト追加・実行、第4〜6段階のiPhone Safari受入を優先。新3キャラは安定化後、時間・資源に余裕があれば調査・3案設計・再現可能なシミュレーションへ進む。既存ルールは変えない。
 3. **戦績・対戦記録**。個人の通算・相手別などの記録、保存仕様は未確定。
 4. **新キャラクター3人追加**。9→12人、能力・関係性・バランスは後日設計。
 5. **デフォルメイラスト追加**。一覧はデフォルメ、詳細は通常頭身の将来構想。今回は未制作。
@@ -89,7 +93,7 @@
 
 ## 7. 役割と運用
 
-オーナーが仕様・公開・main統合の最終決裁とiPhone実機テストを担当。ChatGPTはディレクター。Claude Codeが実装・テスト、Codexが独立監査。原則：**現在のmain → 専用ブランチ → Draft PR → 独立監査・修正 → オーナーのマージ許可 → 既存Pages上書き → iPhone Safari実機確認**。新サイトは作らない。
+オーナーが重大な仕様変更とiPhone実機受入を担当。Claude復帰までCodexは一時的な開発・品質・リリースを担当する。**最新main→専用ブランチ→テスト・差分再確認→安全条件確認→自律Ready/正規マージ→既存Pagesデプロイ・公開検査→iPhone実機受入**。実装者自身の検証を別担当者の独立監査と称さない。新サイトを作らず、CI・保護・通信制限を迂回しない。
 
 更新すべきたびにGitHub状態を読み直し、`HANDOFF/DECISIONS/ROADMAP/WORKFLOW/CHAT_START`と版別docs・READMEを整合させる。歴史資料は消さず、現行との区別を冒頭に記す。
 

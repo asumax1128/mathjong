@@ -37,6 +37,8 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 
 ## 資料の目次
 
+版別資料には実装当時の「開発中」「Draft」「監査待ち」の説明が残る。現在のmain・PR状態は[現状引き継ぎ](docs/HANDOFF.md)と[決定記録](docs/DECISIONS.md)を優先し、古い状態を現在値として扱わない。
+
 | 資料 | 内容 |
 | --- | --- |
 | [ゲームルール](docs/01-game-rules.md) | 操作、チー、ロン、和了、未決定事項 |
@@ -70,7 +72,7 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 | [Ver.0.6 開発完了記録](docs/31-ver0.6-completion.md) | 9人のキャラクターAI の開発完了時点のまとめ：文書の一覧、監査の経過（FAIL → CONDITIONAL PASS ×2）、変更していないもの、残存課題（記録時点。その後 PR #17 はマージ・公開、docs/32） |
 | [Ver.0.6 自由選択と公開](docs/32-ver0.6-free-select-release.md) | 9人から3人を自由に選ぶ対戦相手の選択（2列/3列・詳細・おまかせ・座席の抽選・同じ3人と再戦・相手を変更）、main へのマージと既存の GitHub Pages の更新、**2026-10-28 正式完成**（iPhone 実機テスト 30/30 合格）、継続課題と引き継ぎ |
 | [初心者の部屋 第1〜3段階](docs/34-beginner-room-part1.md) | 数学Ⅰで3枚の数式・3面子・ツモと打牌を練習（PR #20・mainマージ・iPhone 7/7合格） |
-| [初心者の部屋 第4〜6段階](docs/36-beginner-room-lessons4to6.md) | チー・ポン・リーチ・ロン・ツモ・卒業試験と進捗保存（PR #21 mainマージ・Pagesデプロイ成功。公開smokeは旧名称期待値で失敗、第4〜6段階のiPhone実機受入は未実施） |
+| [初心者の部屋 第4〜6段階](docs/36-beginner-room-lessons4to6.md) | チー・ポン・リーチ・ロン・ツモ・卒業試験と進捗保存（PR #21 main反映・Pages成功。PR #22修正ブランチの公開入口smokeは3件成功。全段階の公開検査と実機受入は別途確認） |
 | [iPhone 実機テスト手順](docs/12-iphone-test-guide.md) | テストURL、Pages 設定、固定seed、報告方法 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |
