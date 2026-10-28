@@ -1,11 +1,14 @@
-name: Beginner room 1-3 checks (no deploy)
+name: Beginner room 1-6 checks (no deploy)
 on:
   pull_request:
     paths:
       - 'src/ui/beginner-room.js'
+      - 'src/ui/beginner-practice.js'
+      - 'src/ui/beginner-progress.js'
       - 'src/ui/app.js'
       - 'src/ui/styles.css'
       - 'tests/beginner-room.test.js'
+      - 'tests/beginner-practice.test.js'
       - 'tests/e2e/play.mjs'
       - '.github/workflows/beginner-room.yml'
   workflow_dispatch:
@@ -23,8 +26,11 @@ jobs:
       - name: Syntax checks
         run: |
           node --check src/ui/beginner-room.js
+          node --check src/ui/beginner-practice.js
+          node --check src/ui/beginner-progress.js
           node --check src/ui/app.js
           node --check tests/beginner-room.test.js
+          node --check tests/beginner-practice.test.js
           node --check tests/e2e/play.mjs
       - name: Unit tests
         run: npm test
@@ -33,4 +39,4 @@ jobs:
           npm install --no-save playwright@1.56.1
           npx playwright install --with-deps chromium
       - name: Beginner room browser regression
-        run: node tests/e2e/play.mjs --only v07BeginnerRoom,v06FreeSelect
+        run: node tests/e2e/play.mjs --only v07BeginnerRoom,v07BeginnerRoom2,v06FreeSelect

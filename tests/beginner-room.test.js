@@ -51,8 +51,10 @@ test('第3段階：9枚から-1牌を捨てると=1待ちになる', () => {
   pickRoomTile(s, rules, 1); assert.equal(checkRoom(s, rules), false);
   pickRoomTile(s, rules, 5); assert.equal(checkRoom(s, rules), true);
   assert.equal(s.done, true);
-  assert.equal(nextRoom(s), false);
-  assert.match(roomHTML(s, rules), /練習完了/);
+  assert.match(roomHTML(s, rules), /第4段階へ進む/);
+  assert.equal(nextRoom(s, rules), true, '第3段階の後は第4段階へ進む');
+  assert.equal(s.stage, 3);
+  assert.equal(s.practice.lessonId, '4A');
 });
 
 test('選択上限と初心者画面の導線', () => {

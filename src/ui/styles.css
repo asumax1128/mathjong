@@ -778,3 +778,53 @@ table.values td.undef { color: #999; font-size: 12px; }
 .br-actions button { min-height: 46px; }
 .br-footer { text-align: center; margin: 0; }
 @media (max-width: 350px) { .br-bank { gap: 6px; } .br-panel { padding: 10px; } }
+
+/* 初心者の部屋 4〜6段階（練習の卓）・段階の一覧：通常対局の牌・テーブルのスタイルには触れない */
+.bp { display: flex; flex-direction: column; gap: 10px; }
+.bp-task { margin: 0; font-size: 16px; }
+.bp-task b { display: inline-block; margin-right: 6px; padding: 1px 8px; border-radius: 10px; background: var(--gold); color: var(--felt); font-size: 13px; }
+.bp-lead { margin: 0; }
+.bp-table { display: flex; flex-direction: column; gap: 6px; background: rgba(0,0,0,.16); border-radius: 8px; padding: 8px; }
+.bp-seat { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.bp-seat + .bp-seat { border-top: 1px solid var(--felt-line); padding-top: 6px; }
+.bp-seat.me .bp-name { color: var(--gold); }
+.bp-name { font-size: 12px; color: var(--ink-dim); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.bp-badge { font-size: 11px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--gold); color: var(--gold); }
+.bp-badge.r { background: #6b3f8f; border-color: #c9a6ff; color: #fff; }
+.bp-river { display: flex; flex-wrap: wrap; gap: 2px; min-height: 30px; align-items: center; }
+.bp-river .tile.bp-last { outline: 2px solid var(--gold); outline-offset: 1px; }
+.bp-river .tile.bp-riichi-tile { transform: rotate(90deg); margin: 0 4px; }
+.bp-empty { font-size: 12px; color: var(--ink-dim); }
+.bp-melds { display: flex; flex-wrap: wrap; gap: 6px; font-size: 13px; }
+.bp-meld { background: rgba(255,255,255,.06); border-radius: 6px; padding: 2px 6px; }
+.bp-meta, .bp-calls { margin: 0; font-size: 12px; color: var(--ink-dim); }
+.bp-status { margin: 0; font-weight: 700; color: var(--gold); }
+.bp-hand { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.bp-hand .br-pick { min-height: 58px; padding: 4px 2px; }
+.bp-hand .br-pick:disabled { cursor: default; opacity: 1; }
+.bp-hand .br-pick.locked { opacity: 0.4; }
+.bp-actions:empty { display: none; }
+.bp-hand .br-pick.drawn { border-style: dashed; border-color: #8fd0ff; }
+.bp-hand .br-pick.drawn.on { border-style: solid; border-color: var(--gold); }
+.bp-actions button { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; }
+.bp-actions .bp-decl .formula { font-size: 15px; }
+.bp-warn { border-left-color: #ff9d6b; }
+.bp-result { background: #1c4033; border: 1px solid var(--gold); border-radius: 8px; padding: 10px 12px; }
+.bp-win { margin: 0 0 6px; font-weight: 700; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.bp-yaku { margin: 0 0 6px; padding-left: 20px; }
+.bp-points { margin: 0 0 6px; }
+.bp-settle { width: 100%; border-collapse: collapse; font-size: 14px; }
+.bp-settle caption { text-align: left; font-size: 12px; color: var(--ink-dim); padding-bottom: 4px; }
+.bp-settle th, .bp-settle td { padding: 3px 4px; border-top: 1px solid var(--felt-line); text-align: right; }
+.bp-settle th { text-align: left; font-weight: 400; }
+.bp-settle tr.me { color: var(--gold); font-weight: 700; }
+.br-graduate { margin-top: 12px; text-align: center; background: #365a40; border: 2px solid var(--gold); border-radius: 10px; padding: 12px; }
+.br-grad-title { margin: 0 0 6px; font-size: 22px; font-weight: 700; color: var(--gold); }
+.br-stages { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.br-stage { width: 100%; min-height: 52px; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 8px; align-items: center; text-align: left; }
+.br-stage-no { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--felt-line); display: flex; align-items: center; justify-content: center; }
+.br-stage.clear .br-stage-no { background: var(--gold); color: var(--felt); border-color: var(--gold); font-weight: 700; }
+.br-stage-name { font-weight: 700; }
+.br-stage-state { font-size: 12px; color: var(--ink-dim); }
+.br-stage:disabled { opacity: 0.45; }
+@media (max-width: 350px) { .bp-hand { gap: 4px; } .bp-hand .br-pick { min-height: 54px; } .bp-table { padding: 6px; } .br-progress { gap: 8px; } }
