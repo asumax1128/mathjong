@@ -1,10 +1,10 @@
 # 数雀｜現行の決定・承認ログ
 
-> **最新確認：2026-10-29 / 数雀 Ver.0.6.1 公開済み**。GitHub main `6d254a56b92a3c041d1e1ffe5c2716a887179c57`。PR #24（ゆうじん・たら・のっち／12人選択）は HEAD `67f282a8d84a21647f901b834fd5414b32ddf256` でCI3件Success後に正式merged。既存Pagesの[デプロイ 40772371683](https://github.com/asumax1128/mathjong/actions/runs/40772371683)と[公開smoke 40772469585](https://github.com/asumax1128/mathjong/actions/runs/40772469585)もSuccess。公開URLは https://asumax1128.github.io/mathjong/ のまま。既存9名、ゲームルール、保存形式、エンジン版0.5.0-aは不変。
+> **現行確認（2026-10-29）**：Ver.0.6.1（新3名を含む12人版）はオーナーの**iPhone Safari実機8/8項目合格**で正式受入。PR #24は `6d254a56b92a3c041d1e1ffe5c2716a887179c57` にmerged、Pagesと公開通常対局smokeがSuccess。既存9名・保存形式・ルール不変。8項目の記録は[docs/41](41-ver0.6.1-release-acceptance.md)。
 
-> **直近の未完了作業**：PR #25（公開初心者教材E2E）はbaseを `main` に変更済み、HEAD `59d4cec098659ce19484d2b9467cf63a39215fc9`、差分は公開E2E関連5ファイルのみ。初心者教材CIはSuccessだがAI benchmarkはこの文書更新の確認時点で実行中。必須CIのSuccessを確認後、競合・HEADを再点検し、条件が整えば包括承認D16に従ってmainへマージする。新ワークフローの実サイトE2E成功は未確認。PR #19はDraftのまま変更しない。
+> **公開E2Eまで完了**：PR #25は必須CI2件Success後、`a686f69fd0c764737526833062b6f4da157894c9` にmerged。[Pages 40779025504](https://github.com/asumax1128/mathjong/actions/runs/40779025504)、[通常smoke 40779073757](https://github.com/asumax1128/mathjong/actions/runs/40779073757)、[初心者の部屋1〜6公開E2E 40779073906](https://github.com/asumax1128/mathjong/actions/runs/40779073906)がSuccess。実機受入とChromium自動検査は別。
 
-> **iPhone Safari受入は別**：Ver.0.6の30/30、初心者の部屋1〜3の7/7は既存の成功記録。Ver.0.6.1の新3名・12人版および初心者の部屋4〜6のiPhone Safari実機検証は未実施。公開自動テストの成功を実機合格と記録しない。以下の古いスナップショット/PR状態に関する記述より、本欄と現在のGitHubを優先する。
+> **次の変更**：オーナーは新3名の年齢・表示難易度を「ゆうじん26歳初級／たら25歳中級／のっち28歳上級」と決定し、選択画面を初級4→中級4→上級4人に並び替えるよう指示。Ver.0.6.2の[PR #27](https://github.com/asumax1128/mathjong/pull/27)で実装。**この記録の時点ではPR #27のCI/マージ・Pages公開/実機受入は未完了**。[仕様docs/42](42-ver0.6.2-trio-profiles.md)。AI動作・係数は変更しない。PR #19はDraft・変更しない。
 
 > 2026-10-28更新。状態確認は最新GitHubを優先。旧docs/05は2026-10-24時点の**歴史的な企画**である。
 
@@ -56,3 +56,11 @@
 ## D18：Ver.0.6.1のGitHub統合・公開（2026-10-29）
 
 PR #24はD16/D17の条件に従い、3件のCI Success、HEAD・競合・差分確認後にmainへ正式マージ（マージSHA `6d254a56b92a3c041d1e1ffe5c2716a887179c57`）。Pagesデプロイrun 40772371683と公開smoke run 40772469585がSuccess。**iPhone Safariの実機受入は未実施**。PR #25は公開E2E追加の後続工程で、必須CI完了・安全条件を待って処理する。PR #19のDraftは維持。
+
+## D19：新3名の年齢・表示難易度と一覧順（2026-10-29）
+
+オーナーが『のっち→28歳、上級／たら→25歳、中級／ゆうじん→26歳、初級、キャラ画面並び替え』を指示。表示版0.6.2として初級4人・中級4人・上級4人を順に並べる（各難易度の既存3人の末尾に新1人）。AI実装や係数・保存・ルールに変更を加えない。PR #27のCI/公開は別途検証。Ver.0.6.1の実機8/8合格はこの変更の実機承認ではない。
+
+## D20：Ver.0.6.1実機8/8と公開教材E2E成功の記録（2026-10-29）
+
+D18はPR #24公開直後の中間状態。**後続の実態**：オーナーによるiPhone Safari8/8合格。PR #25は `a686f69fd0c764737526833062b6f4da157894c9` へ正規マージ。Pages run 40779025504、通常smoke 40779073757、初心者教材公開E2E 40779073906がすべてSuccess。詳細はdocs/41。古いD17の年齢・難易度「未確定」はその時点の履歴で、D19が後続のオーナー決定。
