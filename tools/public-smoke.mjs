@@ -1,6 +1,6 @@
 // 公開サイトの動作確認（Ver.0.6）：既存の GitHub Pages の URL を実際に開き、新しい版が配信されていることと、
 // タイトル → 対戦相手の選択（3人）→ 対局開始 まで操作できることを確かめる。サイトの内容は変更しない（読むだけ）。
-//   node tools/public-smoke.mjs --url https://asumax1128.github.io/mathjong/ --version 0.6.1 [--wait 600] [--shots dir]
+//   node tools/public-smoke.mjs --url https://asumax1128.github.io/mathjong/ --version 0.6.2 [--wait 600] [--shots dir]
 // 公開サイトではテスト用の機能（window.__mathjong・speed=test）は無効なので、画面の表示（DOM）だけで確認する。
 // 反映待ち：指定の版が配信されるまで、最大 --wait 秒まで繰り返し読み込む（キャッシュを避けるため毎回クエリを変える）。
 import { createRequire } from 'node:module';
@@ -11,7 +11,7 @@ const { chromium } = require('playwright');
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
 const URL0 = opt('--url', 'https://asumax1128.github.io/mathjong/');
-const VERSION = opt('--version', '0.6.1');
+const VERSION = opt('--version', '0.6.2');
 const WAIT = Number(opt('--wait', 600));
 const SHOTS = opt('--shots', null);
 
@@ -57,8 +57,15 @@ try {
   await page.locator('button[data-action="choose-opponents"]').tap();
   await page.waitForSelector('.select-screen');
   const names = await page.locator('.opp-card .opp-name').allInnerTexts();
-  assert.deepEqual(names, ['かなた', 'みつき', 'あおと', 'おうすけ', 'なつき', 'ゆき', 'シャカ', 'かおる', 'アスマ', 'ゆうじん', 'たら', 'のっち']);
+  assert.deepEqual(names, ['かなた', 'みつき', 'あおと', 'ゆうじん', 'おうすけ', 'なつき', 'ゆき', 'たら', 'シャカ', 'かおる', 'アスマ', 'のっち']);
   assert.equal(await page.locator('.opp-placeholder').count(), 3, '追加3人は仮表示');
+  assert.deepEqual(await page.locator('.opp-card .opp-level').allInnerTexts(), [...Array(4).fill('初級'), ...Array(4).fill('中級'), ...Array(4).fill('上級')], '難易度ごとに4人');
+  for (const [id, age, level] of [['yujin',26,'初級'],['tara',25,'中級'],['nocchi',28,'上級']]) {
+    await page.locator(`.opp-card[data-id="${id}"] .opp-name`).tap();
+    const info = await page.locator('.opp-sheet').innerText();
+    assert.match(info, new RegExp(`${age}歳[\\s\\S]*${level}`), `${id} の年齢・難易度`);
+    await page.locator('.opp-close').tap();
+  }
   assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.opp-grid')).gridTemplateColumns.split(' ').length), 2, '2列');
   assert.equal(await page.locator('.select-screen button[data-action="start-match"]').isDisabled(), true, '0人では開始できない');
   for (const id of ['yujin', 'tara', 'nocchi']) await page.locator(`.opp-check[data-id="${id}"]`).tap();
