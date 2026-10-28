@@ -1,5 +1,8 @@
 # MATHJONG — Codex独立監査ガイド
 
+> **現行（2026-10-28）：Ver.0.6正式完成**。9人のキャラクターAI＋3人自由選択がPR #17でmainマージ済み。iPhone Safari実機30/30項目合格。新チャットの標準入口は[CHAT_START](docs/CHAT_START.md)、現状は[HANDOFF](docs/HANDOFF.md)。これらの文書はPR #11（Draft・未マージ）に収録予定。2026-10-24以前の仕様・Ver.0.4-Bまでの記述を現在時制で誤用しない。
+
+
 このファイルは `asumax1128/mathjong` で作業するCodexに向けたガイドライン。
 
 ## 役割分担

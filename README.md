@@ -4,6 +4,10 @@
 
 > **開発中／2026-10-24 時点のスナップショット**。仕様には正式に方向性が決まったものと、比較実験中の仮設定が混在します。とくに **360°の採否は未決定** です。
 
+## 現行開発引き継ぎ（Ver.0.6正式完成）
+
+最新の状態をGitHubから復元するには、[新チャット入口](docs/CHAT_START.md) → [HANDOFF](docs/HANDOFF.md) → [DECISIONS](docs/DECISIONS.md) → [ROADMAP](docs/ROADMAP.md) → [WORKFLOW](docs/WORKFLOW.md) を参照。これらはPR #11で整備する文書のため、**マージ前はPR #11のブランチを参照**。正式完成・実機合格の一次記録は[docs/32](docs/32-ver0.6-free-select-release.md)。
+
 ## 遊ぶ（Ver.0.1 試作版）
 
 人間1人＋AI3人で1局ずつ遊べる Web 版を実装しました（依存ライブラリ・ビルド不要）。
