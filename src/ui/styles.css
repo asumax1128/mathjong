@@ -748,3 +748,33 @@ table.values td.undef { color: #999; font-size: 12px; }
 /* 演出の画面揺れ（盤面を ±5px 動かす）で、一瞬ページが横にはみ出して横スクロールできてしまわないよう、はみ出しを切る。
    clip はスクロールの枠を作らないので、画面下に貼り付く操作バー（sticky）や重ねて表示する画面（fixed）には影響しない。 */
 #app { overflow-x: clip; }
+
+
+/* 初心者の部屋 1〜3段階：通常対局の牌・テーブルのスタイルには触れない */
+.title-screen .br-open { min-height: 48px; background: var(--felt-2); border: 1px solid var(--gold); color: var(--ink); font-weight: 700; }
+.beginner-room { max-width: 640px; margin: 0 auto; padding: 16px 14px calc(22px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; }
+.beginner-room h1 { margin: 0; text-align: center; font-size: 24px; color: var(--gold); }
+.br-sub { margin: 0; text-align: center; font-size: 14px; color: var(--ink-dim); }
+.br-progress { display: flex; justify-content: center; gap: 12px; }
+.br-progress span { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--felt-line); display: flex; align-items: center; justify-content: center; color: var(--ink-dim); }
+.br-progress span.current { color: var(--felt); background: var(--gold); border-color: var(--gold); font-weight: 700; }
+.br-progress span.past { color: var(--gold); border-color: var(--gold); }
+.br-panel { background: var(--felt-2); padding: 14px; border: 1px solid var(--felt-line); border-radius: 12px; }
+.br-panel h2 { margin: 0 0 8px; font-size: 20px; }
+.br-panel p { line-height: 1.6; }
+.br-note, .br-footer { font-size: 13px; color: var(--ink-dim); line-height: 1.6; }
+.br-bank { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 16px 0 10px; }
+.br-pick { display: flex; justify-content: center; align-items: center; min-width: 0; min-height: 66px; border: 2px solid var(--felt-line); border-radius: 10px; background: #17392c; padding: 6px; cursor: pointer; }
+.br-pick.on { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold); background: #365a40; }
+.br-pick.used { opacity: 0.28; }
+.br-pick .tile { pointer-events: none; }
+.br-pick:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+.br-count { text-align: center; color: var(--gold); font-weight: 700; margin: 8px 0; }
+.br-feedback { background: #1c4033; border-left: 3px solid var(--gold); padding: 10px 12px; border-radius: 4px; }
+.br-hint { background: #254a3a; padding: 10px 12px; border-radius: 5px; }
+.br-groups { background: rgba(0,0,0,.16); border-radius: 8px; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.br-group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.br-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.br-actions button { min-height: 46px; }
+.br-footer { text-align: center; margin: 0; }
+@media (max-width: 350px) { .br-bank { gap: 6px; } .br-panel { padding: 10px; } }
