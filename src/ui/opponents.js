@@ -1,10 +1,10 @@
-// 対戦相手の自由選択（Ver.0.6）：9人から重複なしで3人を選ぶ。画面から独立した純粋関数（tests/opponents.test.js で検査）。
-// 一覧の並び（OPPONENTS）は初級・中級・上級の順。人数が増えても（将来12人）同じ関数で動く（人数を前提にしない）。
+// 対戦相手の自由選択（Ver.0.6）：12人から重複なしで3人を選ぶ。画面から独立した純粋関数（tests/opponents.test.js で検査）。
+// 一覧の並び（OPPONENTS）は初級・中級・上級の順。人数が増えても同じ関数で動く（人数を前提にしない）。
 // 選択は画面の記憶の中だけで持ち、保存しない（再読み込みで0人に戻る）。
-import { CHARACTER_ROSTER } from '../engine/character-ai.js';
+import { CHARACTER_ROSTER } from '../engine/characters.js';
 
 export const PICK_COUNT = 3;
-export const LEVEL_LABELS = { beginner: '初級', intermediate: '中級', advanced: '上級' };
+export const LEVEL_LABELS = { beginner: '初級', intermediate: '中級', advanced: '上級', additional: '個性型' };
 
 // 紹介文：正式なキャラクター設定（名前・年齢・難易度、docs/25）と、実装済み AI の実際の打ち方（docs/28・docs/29）に合わせる。
 // trait：一覧に出す性格の一言。personality：性格。style：打ち筋。
@@ -54,11 +54,29 @@ const PROFILES = {
     personality: '勝負師。大きな手のためなら危険も恐れない。',
     style: '高得点の役を最優先する。大きな手が見えると、危険な牌でも押して勝負する。',
   },
+  yujin: {
+    trait: '鳴かずに刻子を育てる',
+    personality: 'こつこつ同じ牌を集める、粘り強いタイプ。',
+    style: 'チー・ポンをせず、刻子がそろう形を目指す。数式が完成したときも、ロン・ツモを見逃さない。',
+    placeholder: 'ゆ',
+  },
+  tara: {
+    trait: '待ちを育てて勝負',
+    personality: 'すぐには決めず、好機を待つ慎重なタイプ。',
+    style: '待ちの残り枚数を重視する。弱い待ちは最大2巡までリーチを保留するが、他家のリーチや山の残りが少ないときは保留しない。',
+    placeholder: 'た',
+  },
+  nocchi: {
+    trait: '相手の動きに適応',
+    personality: '相手の癖を観察し、柔軟に守り方を変えるタイプ。',
+    style: '公開された鳴きやリーチの傾向を、この試合の過去局から見て攻守を調整する。他家の手牌や山の順番は見ない。',
+    placeholder: 'の',
+  },
 };
 
 // 一覧（初級→中級→上級の順に連続）。id・name・age は AI の名簿（CHARACTER_ROSTER）から取る。
 export const OPPONENTS = Object.freeze(
-  ['beginner', 'intermediate', 'advanced'].flatMap((level) => CHARACTER_ROSTER[level].map((c) => Object.freeze({
+  ['beginner', 'intermediate', 'advanced', 'additional'].flatMap((level) => CHARACTER_ROSTER[level].map((c) => Object.freeze({
     id: c.id, name: c.name, age: c.age, level, levelLabel: LEVEL_LABELS[level], personalityKey: c.personality, styleLabel: c.styleLabel,
     ...PROFILES[c.id],
   }))),
@@ -81,7 +99,7 @@ export function canStartWith(selected, max = PICK_COUNT) {
   return Array.isArray(selected) && selected.length === max && new Set(selected).size === max && selected.every(isOpponentId);
 }
 
-// おまかせ：名簿から異なる k 人を一様に選ぶ（部分的な Fisher–Yates。どの k 人の組も同じ確率。9人・3人なら 84 通り）。
+// おまかせ：名簿から異なる k 人を一様に選ぶ（部分的な Fisher–Yates。どの k 人の組も同じ確率。12人・3人なら 220 通り）。
 // rand：[0,1) の乱数（画面では Math.random。AI の判断の乱数とは別）。並びは一覧の順に整える。
 export function drawOpponents(rand, k = PICK_COUNT, ids = OPPONENTS.map((o) => o.id)) {
   const a = ids.slice();

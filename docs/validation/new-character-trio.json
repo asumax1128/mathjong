@@ -1,0 +1,259 @@
+{
+  "baseMain": "ce659038eadc7b7838dd6659808a088a49d29a76",
+  "experimentHead": "e8695b5ac260c80db3869775703f9a8734ac48e5",
+  "branch": "feature/new-character-trio-integration",
+  "uiVersion": "0.6.1",
+  "engineVersion": "0.5.0-a",
+  "coreFilesUnchanged": {
+    "src/engine/character-ai.js": "9a5924ed499c1830b3f649d5dbeb78e67b4b210b6eb09cd19768b7a4ae4c536d",
+    "src/engine/character-ai-prototype.js": "9e96e6ead030bbaa31b44679135b74a6aa3208cfd764961212776685cdccec32",
+    "src/engine/ai.js": "cecbe61073eb01b70abdcde3820067db4bf83db40872238e6feb1f8285d1f76f",
+    "src/engine/ai-levels.js": "c1118ef2f34cc46a1aeebaec608060ad6428f2f10d164b88101aa8a80c4c1686",
+    "src/engine/rules.js": "36ec353dc0b7369e6bef77d40df8c590a9b6f1033bc7d2b0b314d3bcabb3f465",
+    "src/engine/game.js": "00829ff686841fcc537e5f0abf849523533c1226b5011147c3378f4bc94cb937",
+    "src/engine/match.js": "65dd13304384b95d4793ecedd0a91fad6f57d91926fab4305f31c7f199fed61d",
+    "src/engine/config.js": "ffc005f58cabe76d737f8e79ebc2621ecd9d9d5f3d55538ef2471d4ea07352fd",
+    "src/engine/rng.js": "2853b3d8cbb54f77fd0ce3b336dcac8bce9ee327c16b885068de5cac6690b98a",
+    "src/engine/exact.js": "4bce24453c95636a09d47fd971722775a9b14511f677f8524b49d47f5f5dc1dc"
+  },
+  "unitTests": {
+    "passed": 376,
+    "failed": 0,
+    "skipped": 0
+  },
+  "fixture": {
+    "path": "tests/fixtures/trio-adopted-matches.json.gz",
+    "matches": 28,
+    "sha256": "df6dc5519dff94a184a879fa6599fadc88d569c30f217a45e4698c99d6379bb3"
+  },
+  "focusedBrowser": {
+    "browser": "system Chromium 154.0.8037.57",
+    "passed": true,
+    "realUiMatches": [
+      {
+        "mode": "math1",
+        "length": 4,
+        "played": 5,
+        "firstTurns": {
+          "yujin": {
+            "id": "yujin",
+            "seat": 1,
+            "mode": "math1",
+            "ms": 1.800000011920929,
+            "kind": "turn"
+          },
+          "tara": {
+            "id": "tara",
+            "seat": 2,
+            "mode": "math1",
+            "ms": 121.20000000298023,
+            "kind": "turn"
+          },
+          "nocchi": {
+            "id": "nocchi",
+            "seat": 3,
+            "mode": "math1",
+            "ms": 21.200000002980232,
+            "kind": "turn"
+          }
+        },
+        "maxMs": 121.20000000298023,
+        "retainedSamples": 98
+      },
+      {
+        "mode": "math1",
+        "length": 8,
+        "played": 12,
+        "firstTurns": {
+          "yujin": {
+            "id": "yujin",
+            "seat": 1,
+            "mode": "math1",
+            "ms": 1.2999999970197678,
+            "kind": "turn"
+          },
+          "tara": {
+            "id": "tara",
+            "seat": 2,
+            "mode": "math1",
+            "ms": 86.29999999701977,
+            "kind": "turn"
+          },
+          "nocchi": {
+            "id": "nocchi",
+            "seat": 3,
+            "mode": "math1",
+            "ms": 12.5,
+            "kind": "turn"
+          }
+        },
+        "maxMs": 86.29999999701977,
+        "retainedSamples": 256
+      },
+      {
+        "mode": "math2",
+        "length": 4,
+        "played": 7,
+        "firstTurns": {
+          "yujin": {
+            "id": "yujin",
+            "seat": 1,
+            "mode": "math2",
+            "ms": 1.2000000029802322,
+            "kind": "turn"
+          },
+          "tara": {
+            "id": "tara",
+            "seat": 2,
+            "mode": "math2",
+            "ms": 30.899999991059303,
+            "kind": "turn"
+          },
+          "nocchi": {
+            "id": "nocchi",
+            "seat": 3,
+            "mode": "math2",
+            "ms": 57.5,
+            "kind": "turn"
+          }
+        },
+        "maxMs": 227.70000000298023,
+        "retainedSamples": 176
+      },
+      {
+        "mode": "math2",
+        "length": 8,
+        "played": 12,
+        "firstTurns": {
+          "yujin": {
+            "id": "yujin",
+            "seat": 1,
+            "mode": "math2",
+            "ms": 1.300000011920929,
+            "kind": "turn"
+          },
+          "tara": {
+            "id": "tara",
+            "seat": 2,
+            "mode": "math2",
+            "ms": 20.700000002980232,
+            "kind": "turn"
+          },
+          "nocchi": {
+            "id": "nocchi",
+            "seat": 3,
+            "mode": "math2",
+            "ms": 43.3999999910593,
+            "kind": "turn"
+          }
+        },
+        "maxMs": 182.1000000089407,
+        "retainedSamples": 256
+      }
+    ],
+    "layoutViewports": [
+      [
+        320,
+        568
+      ],
+      [
+        375,
+        667
+      ],
+      [
+        390,
+        844
+      ],
+      [
+        430,
+        932
+      ],
+      [
+        844,
+        390
+      ]
+    ]
+  },
+  "fullE2E": "running",
+  "existingSimulation": {
+    "engine": "0.5.0-a",
+    "games": 250,
+    "seed0": 1,
+    "deck": 168,
+    "melds": 82,
+    "lineup": [
+      "speed",
+      "value",
+      "closed",
+      "speed"
+    ],
+    "seconds": 112.765,
+    "pons": 0,
+    "shapes": {
+      "formula3": 233,
+      "formula2": 15,
+      "formula1": 2
+    },
+    "chis": 29,
+    "win": 250,
+    "draw": 0,
+    "ron": 194,
+    "tsumo": 56,
+    "byPers": {
+      "closed": 72,
+      "speed": 140,
+      "value": 38
+    },
+    "yaku": {
+      "三関制覇": 112,
+      "三象限巡り": 55,
+      "リーチ": 241,
+      "同関一色": 18,
+      "第4象限一色": 4,
+      "第3象限一色": 2,
+      "象限三角揃い": 3,
+      "余角対": 2
+    },
+    "chiWins": 9,
+    "discards": 5575,
+    "points": {
+      "closed": 222,
+      "speed": 427,
+      "value": 134
+    },
+    "meanDiscards": 22.3,
+    "personalitySeats": {
+      "speed": 2,
+      "value": 1,
+      "closed": 1
+    }
+  },
+  "publicSmoke": {
+    "localProductionEquivalent": "passed; hooks disabled; 12 people, new trio selected, AI advanced, 30JS/1CSS/1PNG with no errors",
+    "actualPages": "not executed; runtime policy does not include host"
+  },
+  "github": {
+    "pr22": {
+      "head": "fdcfcd4b3acf57511f873cf59183a5747383d541",
+      "state": "Draft/open",
+      "smokeSuccessRuns": [
+        40689929481,
+        40689890309,
+        40689790935
+      ]
+    },
+    "pr23": {
+      "head": "7bf00cfdc80c9da0d707ed4aa136bf621f28696f",
+      "state": "Draft/open"
+    },
+    "pr19": {
+      "head": "de8fc02d092b4c5884a4615fdba695bf21013b89",
+      "state": "Draft/open; excluded"
+    },
+    "featurePR": null,
+    "remoteCI": "unconfirmed",
+    "merge": "not performed"
+  },
+  "safari": "WebKit binary unavailable; iPhone Safari untested",
+  "validationType": "implementer verification and reference comparison; not a separate independent reviewer"
+}

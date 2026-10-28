@@ -4,6 +4,10 @@ on:
     paths:
       - 'src/engine/character-ai-prototype.js'
       - 'src/engine/character-ai.js'
+      - 'src/engine/characters.js'
+      - 'src/engine/character-ai-trio.js'
+      - 'tests/character-trio-integration.test.js'
+      - 'tests/fixtures/trio-adopted-matches.json.gz'
       - 'tools/simulate-characters.mjs'
       - 'tools/simulate-characters-all.mjs'
       - 'tests/character-ai-prototype.test.js'
@@ -41,6 +45,8 @@ jobs:
         run: |
           node --check src/engine/character-ai-prototype.js
           node --check src/engine/character-ai.js
+          node --check src/engine/characters.js
+          node --check src/engine/character-ai-trio.js
           node --check tools/simulate-characters.mjs
           node --check tools/simulate-characters-all.mjs
           node --check tests/character-ai-prototype.test.js
@@ -79,7 +85,7 @@ jobs:
           npm install --no-save playwright@1.56.1
           npx playwright install --with-deps chromium
       - name: Character-specific browser regression
-        run: node tests/e2e/play.mjs --only v06Characters,v06FreeSelect,v04bLevels,v04Match,v05eCutin,chiAutoPass
+        run: node tests/e2e/play.mjs --only v06Characters,v06FreeSelect,v06TrioIntegration,v04bLevels,v04Match,v05eCutin,chiAutoPass
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -3,7 +3,7 @@ import { createRules } from '../engine/rules.js';
 import { makeConfig, MODES, DEFAULT_MODE, ENGINE_VERSION } from '../engine/config.js';
 import { Game } from '../engine/game.js';
 import { decide, applyAction, PERSONALITIES } from '../engine/ai.js';
-import { decideCharacter, rosterForLevel, CHARACTER_ROSTER } from '../engine/character-ai.js';
+import { decideCharacter, rosterForLevel, CHARACTER_ROSTER, newPublicHistory, recordPublicRound } from '../engine/characters.js';
 import { OPPONENTS, PICK_COUNT, LEVEL_LABELS, opponentById, toggleOpponent, canStartWith, drawOpponents, assignSeats } from './opponents.js';
 import { matchInfo } from '../engine/ai-levels.js';
 import { createRng } from '../engine/rng.js';
@@ -27,7 +27,7 @@ import { VOICE_KEY, parseVoiceSetting, createVoicePlayer } from './voice.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
-const APP_VERSION = '0.6.0-a';
+const APP_VERSION = '0.6.1';
 document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`;
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -125,6 +125,8 @@ S.input = { accepted: 0, ignored: 0, failed: 0 };
 // AI の判断回数（難易度ごと）。表示・判断には使わない（E2E で採用された難易度の確認に使う）
 S.aiDecisions = {};
 S.aiDecisionsBySeat = [{}, {}, {}, {}];
+S.publicAiHistory = newPublicHistory(); // 試合内の公開行動のみ。保存・別試合への持越しはしない。
+if (IS_LOCAL) { S.aiDecisionTiming = []; S.aiFirstDecisionTiming = {}; S.aiDecisionMaxMs = 0; } // 上限付きのローカル検証データ。判断には使用しない。
 
 const app = document.getElementById('app');
 const T = (idx) => rules.types[idx];
@@ -237,8 +239,16 @@ function step(changed = false) {
     if (g !== S.game) return;
     if (drag && drag.isDragging()) { S.stepDeferred = true; return; }
     // AI 難易度は試合の開始時に確定した値（試合の途中で変えない）。試合の公開情報（持ち点・親番）は上級だけが使う。
+    const decisionStart = IS_LOCAL ? performance.now() : 0;
     const action = decideCharacter(g, p.seat, PLAYERS[p.seat].id, S.aiRng,
-      matchInfo(S.match), PLAYERS.map((x) => x.id || 'human'));
+      { ...matchInfo(S.match), publicHistory: S.publicAiHistory }, PLAYERS.map((x) => x.id || 'human'));
+    if (IS_LOCAL) {
+      const sample = { id: PLAYERS[p.seat].id, seat: p.seat, mode: rules.config.mode, ms: performance.now() - decisionStart, kind: p.type };
+      S.aiDecisionTiming.push(sample);
+      S.aiDecisionMaxMs = Math.max(S.aiDecisionMaxMs, sample.ms);
+      if (p.type === 'turn' && !Object.hasOwn(S.aiFirstDecisionTiming, sample.id)) S.aiFirstDecisionTiming[sample.id] = sample;
+      if (S.aiDecisionTiming.length > 256) S.aiDecisionTiming.shift();
+    }
     const cid = PLAYERS[p.seat].id; // 判断したキャラクター（表示している名前と同じ席の項目）。難易度別・キャラ別に数える（確認用）
     S.aiDecisions[LEVEL_BY_ID[cid]] = (S.aiDecisions[LEVEL_BY_ID[cid]] || 0) + 1;
     S.aiDecisionsBySeat[p.seat][cid] = (S.aiDecisionsBySeat[p.seat][cid] || 0) + 1;
@@ -253,6 +263,7 @@ function finishRound() {
   if (!S.scored) {
     // 試合の状態に反映（親子の精算・連荘／親交代・終了判定）。1局につき1回だけ。
     S.scored = true;
+    S.publicAiHistory = recordPublicRound(S.publicAiHistory, g.events, g.riichi);
     S.prevScores = S.match.scores.slice();
     S.lastRound = { label: handLabel(S.match), renchan: S.match.renchan, dealer: S.dealer };
     // 通し局数が MAX_ROUND に達したら試合を終える（出力する round・renchan を再現 URL の範囲内に保つ。
@@ -906,6 +917,7 @@ function selectHTML() {
     return `<div class="opp-card${on ? ' selected' : ''}" data-action="opp-detail" data-id="${o.id}" role="button" tabindex="0" aria-label="${o.name}の詳細">
       <button class="opp-check" data-action="opp-toggle" data-id="${o.id}" aria-pressed="${on}" aria-label="${o.name}を${on ? '外す' : '選ぶ'}"${blocked ? ' aria-disabled="true"' : ''}><span class="opp-box" aria-hidden="true">${on ? '✓' : ''}</span></button>
       <div class="opp-name">${o.name}</div>
+      ${o.placeholder ? `<div class="opp-placeholder" aria-label="${o.name}の仮表示"><span aria-hidden="true">${o.placeholder}</span><small>仮表示</small></div>` : ''}
       <div class="opp-meta"><span class="opp-level lv-${o.level}">${o.levelLabel}</span></div>
       <div class="opp-trait">${o.trait}</div>
     </div>`;
@@ -915,7 +927,7 @@ function selectHTML() {
   const ready = canStartWith(sel);
   return `<main class="select-screen">
     <h1 class="select-title">対戦相手を選ぶ</h1>
-    <p class="select-lead">9人から3人を選んでください。カードをタップすると詳しい紹介を見られます。</p>
+    <p class="select-lead">${OPPONENTS.length}人から3人を選んでください。カードをタップすると詳しい紹介を見られます。</p>
     <div class="opp-status" aria-live="polite"><span class="opp-count">選択 <b>${sel.length}</b>/${PICK_COUNT}人</span>
       <span class="opp-chips">${chips}${empty}</span></div>
     ${S.opp.notice ? `<p class="note opp-notice">${S.opp.notice}</p>` : ''}
@@ -939,9 +951,10 @@ function oppDetailHTML(id) {
   return `<div class="opp-overlay" data-action="opp-backdrop"><div class="opp-sheet" role="dialog" aria-modal="true" aria-label="${o.name}の紹介">
     <button class="opp-close" data-action="opp-detail-close" aria-label="閉じる">×</button>
     <h2 class="opp-d-name">${o.name}</h2>
+    ${o.placeholder ? `<p class="opp-art-note">仮表示・正式なキャラクター画像は準備中です。</p>` : ''}
     <dl class="opp-d-list">
-      <dt>年齢</dt><dd>${o.age}歳</dd>
-      <dt>難易度</dt><dd><span class="opp-level lv-${o.level}">${o.levelLabel}</span></dd>
+      ${o.age === null ? '' : `<dt>年齢</dt><dd>${o.age}歳</dd>`}
+      <dt>${o.level === 'additional' ? '分類' : '難易度'}</dt><dd><span class="opp-level lv-${o.level}">${o.levelLabel}</span>${o.level === 'additional' ? '（難易度は未設定）' : ''}</dd>
       <dt>性格</dt><dd>${o.personality}</dd>
       <dt>打ち筋</dt><dd>${o.style}</dd>
     </dl>
@@ -1535,6 +1548,7 @@ function leaveGame(screen) {
   S.confirmTitle = false;
   S.modal = null;
   S.game = null;
+  S.publicAiHistory = newPublicHistory();
   S.screen = screen;
   render();
 }
@@ -1553,6 +1567,8 @@ function startMatch({ fromUrl = false, settings = null } = {}) {
   S.matchSettings = { mode: cfg.mode, length: cfg.length, chars: chars.slice(), seats: seats.slice() };
   PLAYERS = playersFor(seats); // 試合開始時にキャラクター3人と座席を確定
   S.aiDecisionsBySeat = [{}, {}, {}, {}];
+  S.publicAiHistory = newPublicHistory();
+  if (IS_LOCAL) { S.aiDecisionTiming = []; S.aiFirstDecisionTiming = {}; S.aiDecisionMaxMs = 0; }
   S.mode = cfg.mode;
   rules = rulesForMode(S.mode);
   S.screen = 'game';
