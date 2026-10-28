@@ -1,0 +1,169 @@
+// 実験専用。既存9人・画面・ルールには接続しない。係数は初期案で、強さは未確定。
+import { decide, chooseCall, handValue, viewCounts, unseenCounts, riichiDecision } from '../../src/engine/ai.js';
+import { advHandValue, dangerTable, WIN_COEF } from '../../src/engine/ai-levels.js';
+import { dangerTableV06 } from '../../src/engine/character-ai.js';
+
+export const NEW_CHARACTERS = Object.freeze({
+  yujin: { name: 'ゆうじん', level: 'beginner', style: '門前刻子', tripletWeight: 4, formulaWeight: 0.25 },
+  tara: { name: 'たら', level: 'intermediate', style: '待ち育成', minLive: 6, maxDelay: 2, minWall: 24 },
+  nocchi: { name: 'のっち', level: 'advanced', style: '公開行動への適応', defense: 1.5, ownBase: 2.5, opponentBase: 3 },
+});
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const pickBest = (xs, score, rng) => {
+  const values = xs.map(score), best = Math.max(...values);
+  return rng.pick(xs.filter((_, i) => values[i] >= best - 1e-10));
+};
+
+// 新AIに生のGameを渡さない。公開記録と自分の情報だけ。別席のview/宣言候補取得も拒否。
+export function publicGame(game, seat) {
+  const own = (s) => { if (s !== seat) throw new Error('other private seat requested'); };
+  const methods = {
+    pending: () => { const p = game.pending(); if (p) own(p.seat); return p; },
+    viewFor: (s) => { own(s); return game.viewFor(s); },
+    riichiOptions: (s) => { own(s); return game.riichiOptions(s); },
+    typeOf: (id) => game.typeOf(id), waitsOf: (...a) => game.waitsOf(...a), countsOf: (...a) => game.countsOf(...a),
+  };
+  const getters = {
+    rules: () => game.rules, riichi: () => game.riichi.map(x => x && { ...x }),
+    riichiEnabled: () => game.riichiEnabled,
+    drawn: () => game.pending()?.seat === seat ? game.drawn : null,
+    melds: () => game.melds.map(ms => ms.map(m => ({ ...m, tiles: m.tiles.slice() }))),
+    players: () => game.players.map(p => ({ kind: p.kind, name: p.name })),
+    events: () => game.events.filter(e => e.type !== 'draw').map(e => ({ ...e })),
+  };
+  return new Proxy({}, { get(_, key) {
+    if (Object.hasOwn(methods, key)) return methods[key];
+    if (Object.hasOwn(getters, key)) return getters[key]();
+    throw new Error('non-public Game access: ' + String(key));
+  } });
+}
+
+// 3刻子の完成までの不足枚数。関数牌の同種6/9枚も扱い、物理枚数・公開残数を超えない。
+export function tripletMissing(rules, counts, unseen) {
+  let dp = [0, Infinity, Infinity, Infinity];
+  for (const t of rules.types) {
+    const next = dp.slice();
+    for (let have = 0; have < 3; have++) for (let groups = 1; groups <= 3 - have; groups++) {
+      const need = groups * 3;
+      const miss = Math.max(0, need - counts[t.idx]);
+      if (need > t.copies || miss > unseen[t.idx]) continue;
+      next[have + groups] = Math.min(next[have + groups], dp[have] + miss);
+    }
+    dp = next;
+  }
+  return dp[3];
+}
+function formulaPotential(rules, counts) {
+  let v = 0;
+  for (const m of rules.melds) if (m.kind === 'formula') {
+    const have = m.tiles.filter(t => counts[t] > 0).length;
+    v += have === 3 ? 3 : have === 2 ? 1 : 0;
+  }
+  return v;
+}
+// 実験候補：同じ不足枚数なら、公開残数から補充しやすい刻子構成を優先する。
+// 確率の積は異なる種類間の依存を近似するため、勝率予測ではなく同点用の指標。
+export function tripletSupply(rules, counts, unseen, wallCount) {
+  const total = unseen.reduce((s, n) => s + n, 0);
+  const draws = Math.min(total, 12, Math.max(1, Math.ceil(wallCount / 4)));
+  const choose = (n, k) => { if (k < 0 || k > n) return 0; let v = 1; for (let i = 1; i <= Math.min(k, n - k); i++) v *= (n - i + 1) / i; return v; };
+  const tail = (good, need) => {
+    if (!need) return 0;
+    let p = 0; for (let k = need; k <= Math.min(draws, good); k++) p += choose(good, k) * choose(total - good, draws - k) / choose(total, draws);
+    return Math.log(Math.max(p, 1e-100));
+  };
+  let dp = [{ miss: 0, supply: 0 }, null, null, null];
+  for (const t of rules.types) {
+    const next = dp.slice();
+    for (let have = 0; have < 3; have++) if (dp[have]) for (let groups = 1; groups <= 3 - have; groups++) {
+      const need = groups * 3, missing = Math.max(0, need - counts[t.idx]);
+      if (need > t.copies || missing > unseen[t.idx]) continue;
+      const x = { miss: dp[have].miss + missing, supply: dp[have].supply + tail(unseen[t.idx], missing) }, old = next[have + groups];
+      if (!old || x.miss < old.miss || x.miss === old.miss && x.supply > old.supply) next[have + groups] = x;
+    }
+    dp = next;
+  }
+  return dp[3] || { miss: Infinity, supply: -Infinity };
+}
+const taraReady = new WeakMap();
+export function liveWaits(game, seat, tile) {
+  const view = game.viewFor(seat), counts = viewCounts(game.rules, view);
+  counts[game.typeOf(tile)]--;
+  const waits = game.waitsOf(counts, view.melds[seat].map(m => m.meld));
+  const unseen = unseenCounts(game.rules, view);
+  return { types: waits.length, live: waits.reduce((n, t) => n + Math.max(0, unseen[t]), 0) };
+}
+export function opponentWeights(history = []) {
+  return Array.from({ length: 4 }, (_, s) => {
+    const h = history[s] || { rounds: 0, calls: 0, earlyRiichi: 0 };
+    const calls = (h.calls + 1) / (h.rounds + 4);
+    const early = (h.earlyRiichi + 1) / (h.rounds + 4);
+    return clamp(1 + 0.45 * (calls - 0.25) + 0.25 * (early - 0.25), 0.8, 1.35);
+  });
+}
+function nocchiDiscard(game, seat, rng, info) {
+  const rules = game.rules, view = game.viewFor(seat);
+  const counts = viewCounts(rules, view), unseen = unseenCounts(rules, view);
+  const ex = view.melds[seat].map(m => m.meld), types = [...new Set(view.hand.map(h => h.type))];
+  const weights = opponentWeights(info?.experimental?.nocchi?.adaptive === false ? [] : info?.publicHistory);
+  const vals = types.map(t => { counts[t]--; const v = advHandValue(rules, counts, ex, unseen, 'speed', view.wallCount); counts[t]++; return v; });
+  const best = Math.max(...vals), bi = vals.indexOf(best);
+  counts[types[bi]]--; const base = handValue(rules, counts, ex, unseen, 'speed'); counts[types[bi]]++;
+  const wc = WIN_COEF[rules.config.mode];
+  const pWin = 1 / (1 + Math.exp(-clamp(wc[0] + wc[1] * Math.log(base + 1e-9) + wc[2] * view.wallCount + wc[3] * ex.length, -50, 50)));
+  const danger = dangerTableV06(game, rules, view, unseen, seat) || dangerTable(rules, view, unseen);
+  const P = NEW_CHARACTERS.nocchi;
+  const gain = (view.dealer === seat ? 6 : 4) * P.ownBase;
+  const chosen = pickBest(types, (t) => {
+    const risk = danger.reduce((n, d, o) => n + (o === seat ? 0 : d[t] * weights[o] * (o === view.dealer ? 6 : 4) * P.opponentBase), 0);
+    return pWin * gain * (best > 0 ? vals[types.indexOf(t)] / best : 0) - P.defense * risk;
+  }, rng);
+  return view.hand.find(h => h.type === chosen).id;
+}
+
+export function decideNewCharacter(game, seat, id, rng, info = null) {
+  if (!NEW_CHARACTERS[id]) throw new Error('unknown experimental character: ' + id);
+  const p = game.pending();
+  if (!p || p.seat !== seat) throw new Error('invalid pending');
+  if (p.type === 'turn' && p.canTsumo) return { type: 'tsumo' };
+  if (p.type === 'claim' && p.ron) return { type: 'ron' };
+  if (game.riichi[seat]) return p.type === 'turn' ? { type: 'discard', tile: game.drawn } : { type: 'pass' };
+  const rules = game.rules, view = game.viewFor(seat);
+  if (p.type === 'claim') {
+    if (id === 'yujin') return { type: 'pass' };
+    return chooseCall(rules, view, game.typeOf(p.tile), p.chi, p.pon || null, 'speed') || { type: 'pass' };
+  }
+  if (id === 'yujin') {
+    const counts = viewCounts(rules, view), unseen = unseenCounts(rules, view);
+    const types = [...new Set(view.hand.map(h => h.type))], P = NEW_CHARACTERS.yujin;
+    let t;
+    if (info?.experimental?.yujin?.policy === 'supply') {
+      const choices = types.map(type => { counts[type]--; const score = tripletSupply(rules, counts, unseen, view.wallCount); counts[type]++; return { type, ...score }; });
+      const minimum = Math.min(...choices.map(x => x.miss));
+      if (Number.isFinite(minimum)) t = pickBest(choices.filter(x => x.miss === minimum), x => x.supply, rng).type;
+    }
+    if (t === undefined) t = pickBest(types, (t) => {
+      counts[t]--;
+      const miss = tripletMissing(rules, counts, unseen);
+      const val = -P.tripletWeight * (Number.isFinite(miss) ? miss : 10) + P.formulaWeight * formulaPotential(rules, counts);
+      counts[t]++; return val;
+    }, rng);
+    const tile = view.hand.find(h => h.type === t).id;
+    return { type: 'discard', tile, riichi: riichiDecision(game, seat, tile, 'beginner') };
+  }
+  if (id === 'tara') {
+    const opts = game.riichiOptions(seat), P = { ...NEW_CHARACTERS.tara, ...info?.experimental?.tara };
+    if (opts.length) {
+      const candidates = opts.map(o => ({ tile: o.ids[0], ...liveWaits(game, seat, o.ids[0]) }));
+      const best = pickBest(candidates, o => o.live + o.types * 0.01, rng);
+      if (!taraReady.has(game)) taraReady.set(game, view.rivers[seat].length);
+      const waited = view.rivers[seat].length - taraReady.get(game);
+      const hold = best.live < P.minLive && waited < P.maxDelay && view.wallCount > P.minWall && !game.riichi.some(Boolean);
+      return { type: 'discard', tile: best.tile, riichi: best.live > 0 && !hold };
+    }
+    taraReady.delete(game);
+    return decide(game, seat, 'speed', rng, 'intermediate', info);
+  }
+  const tile = nocchiDiscard(game, seat, rng, info);
+  return { type: 'discard', tile, riichi: riichiDecision(game, seat, tile, 'advanced') };
+}

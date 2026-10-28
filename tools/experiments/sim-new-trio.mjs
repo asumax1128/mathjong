@@ -24,9 +24,9 @@ export const CASES = [
 ].map(([id, lineup]) => ({ id, lineup }));
 const mix = (...xs) => xs.reduce((h, x) => (Math.imul(h ^ (x >>> 0), 0x9e3779b1) + 0x7f4a7c15) >>> 0, 0x12345678);
 const hash = s => { let h = 0x811c9dc5; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 0x01000193) >>> 0; return h; };
-export function jobsFor({ groups = 4, seed = 206102801, only = '', modes = ['math1', 'math2'], lengths = [4, 8] } = {}) {
+export function jobsFor({ groups = 4, seed = 206102801, only = '', modes = ['math1', 'math2'], lengths = [4, 8], cases = CASES } = {}) {
   const out = [];
-  for (const c of CASES.filter(c => !only || only.split(',').includes(c.id))) for (const mode of modes) for (const length of lengths) {
+  for (const c of cases.filter(c => !only || only.split(',').includes(c.id))) for (const mode of modes) for (const length of lengths) {
     for (let group = 0; group < groups; group++) for (let rot = 0; rot < (c.id.startsWith('self-') ? 1 : 4); rot++) {
       // 同じ組の4席回転は同じ山seed。4試合を独立標本として数えない。
       const seedBase = mix(seed, hash(c.id), hash(mode), length, group);
@@ -54,7 +54,7 @@ export function simulate(job) {
     const facades = seats.map((_, s) => publicGame(game, s));
     const rng = createRng((gameSeed ^ 0x5bd1e995) >>> 0);
     const info = { scores: match.scores.slice(), hand: match.hand, length, dealer: dealerOf(match), renchan: match.renchan,
-      publicHistory: history.map(h => ({ ...h })) };
+      publicHistory: history.map(h => ({ ...h })), experimental: job.experimental || null };
     let actions = 0;
     while (game.pending()) {
       const p = game.pending(), s = p.seat, id = seats[s], st = stats[s];
@@ -72,7 +72,7 @@ export function simulate(job) {
           if (!a.riichi && wait.live > 0) st.heldRiichi++;
         }
         if (a.riichi) { st.riichi++; const wait = liveWaits(facades[s], s, a.tile); st.declaredLive += wait.live; st.declaredCount++; }
-        if (id === 'nocchi') for (const [o, w] of opponentWeights(info.publicHistory).entries()) if (o !== s) {
+        if (id === 'nocchi') for (const [o, w] of opponentWeights(info.experimental?.nocchi?.adaptive === false ? [] : info.publicHistory).entries()) if (o !== s) {
           st.weightSum += w; st.weightN++; st.weightMin = Math.min(st.weightMin, w); st.weightMax = Math.max(st.weightMax, w);
         }
       }

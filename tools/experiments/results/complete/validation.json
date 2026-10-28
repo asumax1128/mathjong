@@ -1,0 +1,112 @@
+{
+  "unitTests": {
+    "pass": 391,
+    "fail": 0,
+    "skip": 0
+  },
+  "seedOverlap": {
+    "rootSeeds": 0,
+    "roundSeeds": 0
+  },
+  "replay": {
+    "matches": 8,
+    "games": 61,
+    "decisions": 1941,
+    "nocchiHistoryComparisons": 237,
+    "differentDiscard": 1,
+    "differentRiichi": 0,
+    "meaning": "同一状態・同一乱数位置で公開履歴の重みだけを中立化。強さへの寄与の検定ではない。"
+  },
+  "controls": {
+    "matches": 12,
+    "rounds": 104,
+    "modes": [
+      "math1",
+      "math2"
+    ],
+    "lengths": [
+      4,
+      8
+    ],
+    "opponents": "既存9人。各層の対照3卓、group0/rot0。元のsim-v06.playMatchを直接実行し、最終点・順位持分・行動集計を照合。"
+  },
+  "benchmark": {
+    "node": "v24.19.0",
+    "unit": "milliseconds",
+    "concurrency": 1,
+    "meaning": "Node単一プロセス。32個の異なる配牌、非和了の最初の手番。Safari/実ゲームの最大遅延の保証ではない。",
+    "cacheNote": "各モードでnocchi→tara→yujinの順。nocchiのfirstMsはモードの共通評価キャッシュ作成を含む。tara/yujinのfirstMsは共通キャッシュが既に温まっており、全キャラの冷起動比較ではない。",
+    "conditions": [
+      {
+        "mode": "math2",
+        "id": "nocchi",
+        "rulesMs": 1.6703480000000042,
+        "firstMs": 307.705036,
+        "warmMeanMs": 30.85517435483872,
+        "warmMedianMs": 26.946638000000007,
+        "warmP95Ms": 46.05758500000002,
+        "warmMaxMs": 71.6477329999999
+      },
+      {
+        "mode": "math2",
+        "id": "tara",
+        "rulesMs": 1.6703480000000042,
+        "firstMs": 0.756937999999991,
+        "warmMeanMs": 23.35378603225808,
+        "warmMedianMs": 23.72712300000012,
+        "warmP95Ms": 30.904318999999987,
+        "warmMaxMs": 33.30565999999999
+      },
+      {
+        "mode": "math2",
+        "id": "yujin",
+        "rulesMs": 1.6703480000000042,
+        "firstMs": 1.1140790000001743,
+        "warmMeanMs": 0.16024216129028812,
+        "warmMedianMs": 0.17257699999981924,
+        "warmP95Ms": 0.23075299999982235,
+        "warmMaxMs": 0.25593099999969127
+      },
+      {
+        "mode": "math1",
+        "id": "nocchi",
+        "rulesMs": 0.48646499999995285,
+        "firstMs": 53.553852000000006,
+        "warmMeanMs": 6.156940645161314,
+        "warmMedianMs": 5.718397999999979,
+        "warmP95Ms": 7.509255999999823,
+        "warmMaxMs": 15.47650300000032
+      },
+      {
+        "mode": "math1",
+        "id": "tara",
+        "rulesMs": 0.48646499999995285,
+        "firstMs": 6.299642999999833,
+        "warmMeanMs": 5.554936903225802,
+        "warmMedianMs": 5.613491000000067,
+        "warmP95Ms": 7.20622400000002,
+        "warmMaxMs": 7.583865999999944
+      },
+      {
+        "mode": "math1",
+        "id": "yujin",
+        "rulesMs": 0.48646499999995285,
+        "firstMs": 0.06926300000031915,
+        "warmMeanMs": 0.0823329677419356,
+        "warmMedianMs": 0.07161700000006022,
+        "warmP95Ms": 0.18739899999991394,
+        "warmMaxMs": 0.33941600000025574
+      }
+    ]
+  },
+  "counts": {
+    "tuningMatches": 128,
+    "evaluationMatches": 1984,
+    "totalMatches": 2112,
+    "tuningRounds": 994,
+    "evaluationRounds": 16878,
+    "tuningDecisions": 43785
+  },
+  "recordedSourcesHashMatch": true,
+  "originalSelectionAndAllJobsMatchAfterRoundingFix": true
+}

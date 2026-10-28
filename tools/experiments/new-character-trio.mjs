@@ -61,6 +61,30 @@ function formulaPotential(rules, counts) {
   }
   return v;
 }
+// 実験候補：同じ不足枚数なら、公開残数から補充しやすい刻子構成を優先する。
+// 確率の積は異なる種類間の依存を近似するため、勝率予測ではなく同点用の指標。
+export function tripletSupply(rules, counts, unseen, wallCount) {
+  const total = unseen.reduce((s, n) => s + n, 0);
+  const draws = Math.min(total, 12, Math.max(1, Math.ceil(wallCount / 4)));
+  const choose = (n, k) => { if (k < 0 || k > n) return 0; let v = 1; for (let i = 1; i <= Math.min(k, n - k); i++) v *= (n - i + 1) / i; return v; };
+  const tail = (good, need) => {
+    if (!need) return 0;
+    let p = 0; for (let k = need; k <= Math.min(draws, good); k++) p += choose(good, k) * choose(total - good, draws - k) / choose(total, draws);
+    return Math.log(Math.max(p, 1e-100));
+  };
+  let dp = [{ miss: 0, supply: 0 }, null, null, null];
+  for (const t of rules.types) {
+    const next = dp.slice();
+    for (let have = 0; have < 3; have++) if (dp[have]) for (let groups = 1; groups <= 3 - have; groups++) {
+      const need = groups * 3, missing = Math.max(0, need - counts[t.idx]);
+      if (need > t.copies || missing > unseen[t.idx]) continue;
+      const x = { miss: dp[have].miss + missing, supply: dp[have].supply + tail(unseen[t.idx], missing) }, old = next[have + groups];
+      if (!old || x.miss < old.miss || x.miss === old.miss && x.supply > old.supply) next[have + groups] = x;
+    }
+    dp = next;
+  }
+  return dp[3] || { miss: Infinity, supply: -Infinity };
+}
 const taraReady = new WeakMap();
 export function liveWaits(game, seat, tile) {
   const view = game.viewFor(seat), counts = viewCounts(game.rules, view);
@@ -81,7 +105,7 @@ function nocchiDiscard(game, seat, rng, info) {
   const rules = game.rules, view = game.viewFor(seat);
   const counts = viewCounts(rules, view), unseen = unseenCounts(rules, view);
   const ex = view.melds[seat].map(m => m.meld), types = [...new Set(view.hand.map(h => h.type))];
-  const weights = opponentWeights(info?.publicHistory);
+  const weights = opponentWeights(info?.experimental?.nocchi?.adaptive === false ? [] : info?.publicHistory);
   const vals = types.map(t => { counts[t]--; const v = advHandValue(rules, counts, ex, unseen, 'speed', view.wallCount); counts[t]++; return v; });
   const best = Math.max(...vals), bi = vals.indexOf(best);
   counts[types[bi]]--; const base = handValue(rules, counts, ex, unseen, 'speed'); counts[types[bi]]++;
@@ -112,7 +136,13 @@ export function decideNewCharacter(game, seat, id, rng, info = null) {
   if (id === 'yujin') {
     const counts = viewCounts(rules, view), unseen = unseenCounts(rules, view);
     const types = [...new Set(view.hand.map(h => h.type))], P = NEW_CHARACTERS.yujin;
-    const t = pickBest(types, (t) => {
+    let t;
+    if (info?.experimental?.yujin?.policy === 'supply') {
+      const choices = types.map(type => { counts[type]--; const score = tripletSupply(rules, counts, unseen, view.wallCount); counts[type]++; return { type, ...score }; });
+      const minimum = Math.min(...choices.map(x => x.miss));
+      if (Number.isFinite(minimum)) t = pickBest(choices.filter(x => x.miss === minimum), x => x.supply, rng).type;
+    }
+    if (t === undefined) t = pickBest(types, (t) => {
       counts[t]--;
       const miss = tripletMissing(rules, counts, unseen);
       const val = -P.tripletWeight * (Number.isFinite(miss) ? miss : 10) + P.formulaWeight * formulaPotential(rules, counts);
@@ -122,7 +152,7 @@ export function decideNewCharacter(game, seat, id, rng, info = null) {
     return { type: 'discard', tile, riichi: riichiDecision(game, seat, tile, 'beginner') };
   }
   if (id === 'tara') {
-    const opts = game.riichiOptions(seat), P = NEW_CHARACTERS.tara;
+    const opts = game.riichiOptions(seat), P = { ...NEW_CHARACTERS.tara, ...info?.experimental?.tara };
     if (opts.length) {
       const candidates = opts.map(o => ({ tile: o.ids[0], ...liveWaits(game, seat, o.ids[0]) }));
       const best = pickBest(candidates, o => o.live + o.types * 0.01, rng);

@@ -13,7 +13,7 @@ import { createMatch, dealerOf, applyRoundResult } from '../../src/engine/match.
 
 const src = process.argv[2], bytes = readFileSync(src);
 const rows = (src.endsWith('.gz') ? gunzipSync(bytes) : bytes).toString('utf8').trim().split('\n').map(x => JSON.parse(x));
-const selected = rows.filter(x => ['mixed', 'nocchi-high'].includes(x.caseId) && x.group === 0 && x.rot === 0);
+const selected = rows.filter(x => (!x.variant || x.variant === 'final') && ['mixed', 'nocchi-high'].includes(x.caseId) && x.group === 0 && x.rot === 0);
 let games = 0, decisions = 0, comparisons = 0, changed = 0, riichiComparison = 0;
 for (const row of selected) {
   const rules = createRules(makeConfig({ mode: row.mode }));
@@ -26,7 +26,7 @@ for (const row of selected) {
     const next = () => { cursor++; return root.next(); };
     const rng = { next, int: n => Math.floor(next() * n), pick: xs => xs[Math.floor(next() * xs.length)] };
     const clone = () => { const r = createRng(seed); for (let i = 0; i < cursor; i++) r.next(); return r; };
-    const info = { scores: m.scores.slice(), hand: m.hand, length: m.length, dealer: dealerOf(m), renchan: m.renchan, publicHistory: history.map(h => ({ ...h })) };
+    const info = { scores: m.scores.slice(), hand: m.hand, length: m.length, dealer: dealerOf(m), renchan: m.renchan, publicHistory: history.map(h => ({ ...h })), experimental: row.experimental || null };
     while (g.pending()) {
       const p = g.pending(), s = p.seat, id = row.seats[s];
       if (id === 'nocchi' && p.type === 'turn' && !p.canTsumo && !g.riichi[s] && m.played > 0) {

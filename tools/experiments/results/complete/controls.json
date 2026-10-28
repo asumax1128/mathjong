@@ -1,0 +1,13 @@
+{
+  "matches": 12,
+  "rounds": 104,
+  "modes": [
+    "math1",
+    "math2"
+  ],
+  "lengths": [
+    4,
+    8
+  ],
+  "opponents": "既存9人。各層の対照3卓、group0/rot0。元のsim-v06.playMatchを直接実行し、最終点・順位持分・行動集計を照合。"
+}

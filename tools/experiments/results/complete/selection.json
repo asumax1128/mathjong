@@ -1,0 +1,20 @@
+{
+  "selected": "initial",
+  "initial": {
+    "matches": 64,
+    "rank": 2.59375,
+    "tripletPerRound": 0.016597510373443983,
+    "rounds": 482,
+    "wins": 116,
+    "sanankou": 8
+  },
+  "supply": {
+    "matches": 64,
+    "rank": 2.9375,
+    "tripletPerRound": 0.029296875,
+    "rounds": 512,
+    "wins": 60,
+    "sanankou": 15
+  },
+  "rule": "刻子役の参加局あたり成立率が0.5ポイント以上増加し、平均順位の悪化が0.25以内ならsupply。調整試験のみで固定し、本評価後は選び直さない。"
+}

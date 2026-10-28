@@ -1,0 +1,24 @@
+{
+  "plan": {
+    "tuningSeed": 206102901,
+    "evaluationSeed": 206102902,
+    "tuningGroups": 4,
+    "peerGroups": 8,
+    "mixedGroups": 16,
+    "selfGroups": 8,
+    "controlGroups": 2,
+    "workers": 4,
+    "rankDegradationLimit": 0.25,
+    "tripletIncreaseRequired": 0.005
+  },
+  "sources": {
+    "new-character-trio.mjs": "97b804192336535c9d5a488233fc7375d63858eaadeaa98967c88208909e07a2",
+    "sim-new-trio.mjs": "2dbe0642cd3ba191c1af02ccab4c58404c916c73028ff60d0244bfea9f781c72",
+    "trio-complete-plan.mjs": "1f02df2b9226aced809028795502cf02e0f485aa3ad6bad62e7d8eb0e25dff99",
+    "trio-complete-worker.mjs": "a04e2efd9b9a70752e9765616072e6cfe20cedc7abd908dd1b1d323848ee7a75",
+    "run-trio-complete.mjs": "f8af55787cb3cebe39828e871ac13e7e311d6178f5de06fead774cc66fb5c368"
+  },
+  "node": "v24.19.0",
+  "prior": "5b694ab18bd31ca9a472d40e26ec046a1e88fc95",
+  "plannedNewMatches": 2112
+}
