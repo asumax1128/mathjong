@@ -5281,6 +5281,7 @@ async function v05eCutin(browser) {
   console.log('✓ Ver.0.5-E：演出の長さ（チー1.0・ポン1.2・リーチ0.9・ツモ2.0秒）と、静止時間に文字・宣言者・牌が見えて画面内にある');
 
   // (3) ロン：冒頭は強い演出（閃光1回・光条・揺れ）→ 中央で静止 → 後半は中央の表示を消して最上部の小さな帯に替える（結果画面を長く隠さない）
+  let ronLateMs = null;
   {
     const { ctx, page, errors } = await sndPage(browser, { resume: 'ok' });
     await v3Scene(page, presetWall(['=1', 'sin', 'sin', '0', '90', '=-√3', '=√3', '150'], ['45', '=-1/√3', '=-√3/2', '=-1/√2'], [['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], FX_O2, FX_O3]));
@@ -5295,11 +5296,22 @@ async function v05eCutin(browser) {
     assert.equal((await fxState(page)).who, 'おうすけ');
     assert.equal(await page.locator('.overlay .result').isVisible(), true, '結果画面はすぐ開く');
     await hold(page, 'ron');
-    // 後半（約1.3秒以降）：中央の表示は消え、最上部の小さな帯だけが残る
-    await page.waitForFunction((s) => performance.now() - s > 1400, t0);
-    const late = await eLook(page);
-    assert.ok(late.card.op < 0.05, `後半は中央の表示を消す（不透明度 ${late.card.op}）`);
-    assert.ok(late.banner.op > 0.95 && late.banner.t >= 0 && late.banner.b <= 70, `最上部の小さな帯（${JSON.stringify(late.banner)}）`);
+    // 後半：中央の表示は消え、最上部の小さな帯だけが残る。CSS（2.2秒）では中央は 1.10〜1.28 秒で消え、帯は 1.28〜2.02 秒に不透明。
+    // 決まった時刻に1回だけ見るのではなく、演出の開始から上限 2.0 秒（帯が消え始める前）までに、その状態になったことを確かめる。
+    // 上限を過ぎても条件を満たさなければ、その時点の表示（経過時間・中央・帯の不透明度と位置・演出の種類）を出して失敗にする。
+    const LATE_LIMIT_MS = 2000;
+    const lateRes = await (await page.waitForFunction(([s, limit]) => {
+      const look = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return { t: Math.round(b.top), b: Math.round(b.bottom), op: Number(getComputedStyle(e).opacity) }; };
+      const card = look('#fx-layer .fx-card'), banner = look('#fx-layer .fx-banner');
+      const elapsed = Math.round(performance.now() - s);
+      const ok = !!card && !!banner && card.op < 0.05 && banner.op > 0.95 && banner.t >= 0 && banner.b <= 70;
+      if (ok) return { ok, elapsed, card, banner };
+      if (elapsed > limit) return { ok, elapsed, card, banner, kind: window.__mathjong.S.fx.current && window.__mathjong.S.fx.current.kind, cls: document.getElementById('fx-layer').className };
+      return false;
+    }, [t0, LATE_LIMIT_MS], { timeout: 6000 })).jsonValue();
+    assert.ok(lateRes.ok, `${LATE_LIMIT_MS}ms 以内に中央の表示が消えて最上部の小さな帯に替わる（実際の表示：${JSON.stringify(lateRes)}）`);
+    assert.ok(lateRes.elapsed >= 1000, `中央の表示は静止の後に消える（${lateRes.elapsed}ms）`);
+    ronLateMs = lateRes.elapsed;
     assert.equal(await page.locator('#fx-layer .fx-banner .fx-name').textContent(), 'おうすけ');
     // 演出中も結果画面のボタンを押せる（演出はタップを通す）。次の局へ進むと演出を消す
     await page.locator('button[data-action="next"]').tap();
@@ -5309,7 +5321,7 @@ async function v05eCutin(browser) {
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  console.log('✓ Ver.0.5-E：ロンは閃光1回→静止→最上部の小さな帯（結果画面を長く隠さない）。結果画面はすぐ開き、演出中も次の局へ進める');
+  console.log(`✓ Ver.0.5-E：ロンは閃光1回→静止→最上部の小さな帯（結果画面を長く隠さない。帯に替わった時刻 ${ronLateMs}ms／上限 2000ms）。結果画面はすぐ開き、演出中も次の局へ進める`);
 
   // (4) 実際の速い対局（AI 待ち時間 0）：AI 同士のチー・ポンを含め、表示した演出の宣言者・席・発光が記録の seat と一致。
   //     チー・ポン・リーチは最低表示時間を守り（ロン・ツモで置き換えた場合と局の切替を除く）、キューは2以下。宣言の音は表示と同じ順・同じ数

@@ -121,7 +121,11 @@ export function aucOf(scores, labels) {
 
 // 確率帯ごとの予測の平均・実測の割合
 const BINS = [0, 0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0000001];
+// 定義できない指標は null：行が 0 件なら ronRate・auc・brier・brierBaseline は null・bins は空。
+// 正例だけ・負例だけのときは auc だけ null（Brier・基準率・確率帯は計算する）。
+const fix = (x, k) => (x === null ? null : +x.toFixed(k));
 export function evaluate(rows, coef) {
+  if (!rows.length) return { rows: 0, ronRate: null, auc: null, brier: null, brierBaseline: null, bins: [] };
   const d = coef.length;
   const p = rows.map((r) => predict(r, coef));
   const y = rows.map((r) => r[d]);
@@ -134,7 +138,7 @@ export function evaluate(rows, coef) {
     if (!sel.length) continue;
     bins.push({ range: `${BINS[k]}–${Math.min(1, BINS[k + 1])}`, n: sel.length, predicted: +(sel.reduce((s, i) => s + p[i], 0) / sel.length).toFixed(4), observed: +(sel.reduce((s, i) => s + y[i], 0) / sel.length).toFixed(4) });
   }
-  return { rows: rows.length, ronRate: +base.toFixed(4), auc: +aucOf(p, y).toFixed(4), brier: +brier.toFixed(5), brierBaseline: +brierRef.toFixed(5), bins };
+  return { rows: rows.length, ronRate: fix(base, 4), auc: fix(aucOf(p, y), 4), brier: fix(brier, 5), brierBaseline: fix(brierRef, 5), bins };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

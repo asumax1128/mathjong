@@ -175,3 +175,43 @@ test('P3-3：評価（Brier・確率帯）は行の順序に依存せず、確�
   assert.equal(a.bins.reduce((s, x) => s + x.n, 0), rows.length);
   assert.ok(a.brier >= 0 && a.brier <= 1);
 });
+
+test('P3（再監査）：evaluate の境界：空データ・正例だけ・負例だけでも例外にならず、定義できない指標は null', () => {
+  const coef = [-2, 0.8, -0.3];
+  assert.deepEqual(evaluate([], coef), { rows: 0, ronRate: null, auc: null, brier: null, brierBaseline: null, bins: [] });
+  const feats = [[1, 0, 0], [1, 2, 1], [1, -3, 2], [1, 4, 0]];
+  for (const y of [1, 0]) {
+    const r = evaluate(feats.map((f) => [...f, y]), coef);
+    assert.equal(r.rows, 4);
+    assert.equal(r.auc, null, '正例か負例だけでは AUC は定義できない');
+    assert.equal(r.ronRate, y);
+    assert.equal(r.brierBaseline, 0, '基準率だけの予測は全件正解');
+    const p = feats.map((f) => 1 / (1 + Math.exp(-(coef[0] + coef[1] * f[1] + coef[2] * f[2]))));
+    assert.equal(r.brier, +(p.reduce((s, x) => s + (x - y) ** 2, 0) / 4).toFixed(5), 'Brier は計算する');
+    assert.equal(r.bins.reduce((s, b) => s + b.n, 0), 4);
+    for (const b of r.bins) assert.equal(b.observed, y);
+  }
+  // 1件だけ
+  const one = evaluate([[1, 0, 0, 1]], coef);
+  assert.equal(one.auc, null);
+  assert.equal(one.rows, 1);
+});
+
+test('P3（再監査）：通常データの AUC・Brier・確率帯は修正前（eb9a43b）と同じ値', () => {
+  const coef = [-2, 0.8, -0.3];
+  const rows = [];
+  let x = 7;
+  const next = () => (x = (Math.imul(x, 1103515245) + 12345) >>> 0);
+  for (let i = 0; i < 300; i++) { const a = (next() % 9) - 3; const b = next() % 4; rows.push([1, a, b, (next() % 100) < 10 + a * 6 ? 1 : 0]); }
+  // 修正前の evaluate() で求めた値（同じデータ）
+  assert.deepEqual(evaluate(rows, coef), {
+    rows: 300, ronRate: 0.1467, auc: 0.7326, brier: 0.16899, brierBaseline: 0.12516,
+    bins: [
+      { range: '0.003–0.01', n: 30, predicted: 0.0066, observed: 0 },
+      { range: '0.01–0.03', n: 36, predicted: 0.0181, observed: 0 },
+      { range: '0.03–0.1', n: 52, predicted: 0.057, observed: 0.0769 },
+      { range: '0.1–0.3', n: 79, predicted: 0.1781, observed: 0.1646 },
+      { range: '0.3–1', n: 103, predicted: 0.6238, observed: 0.2621 },
+    ],
+  });
+});
