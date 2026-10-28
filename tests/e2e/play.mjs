@@ -1,9 +1,10 @@
 // ブラウザでの実プレイテスト（Playwright）。画面のボタン・牌をタップして複数局を最後まで遊ぶ。
 // 使い方: node tests/e2e/play.mjs [--rounds 6] [--shots <dir>]
+// 公開URL: --public-url https://asumax1128.github.io/mathjong/ --only v07BeginnerRoom,v07BeginnerRoom2
 // 必要: playwright（Chromium）。リポジトリ自体には依存を追加しない。
 // 環境に依存しないよう、次のようにしている：
-// - サーバーは 127.0.0.1 の空きポート（OS が割当て）で起動し、終了時に必ず停止する。
-// - Chromium は --no-proxy-server で起動（HTTP(S)_PROXY 等の環境変数のプロキシを使わない）。
+// - 通常モードは127.0.0.1の空きポートで配信し、終了時に停止。公開モードはサーバーを起動しない。
+// - 通常モードは --no-proxy-server、公開モードは環境のHTTP(S)プロキシ設定を尊重する。
 // - 公開サイト相当のホスト（mathjong.test）は DNS を使わず、ブラウザ内のリクエスト横取り（route）で
 //   ローカルサーバーへ転送する。
 import { createRequire } from 'node:module';
@@ -12,11 +13,13 @@ import assert from 'node:assert/strict';
 import { startServer } from '../../tools/serve.mjs';
 import { RECIPES } from '../../src/ui/sound.js';
 import { RON_LATE_LIMIT_MS, judgeRonLate } from './ron-late.mjs';
+import { publicTarget } from './public-target.mjs';
 
 const require = createRequire(import.meta.url);
-const { chromium } = require('playwright');
 
 const args = process.argv.slice(2);
+const EXTERNAL = publicTarget(args);
+const { chromium } = require('playwright');
 const opt = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
 const ROUNDS = Number(opt('--rounds', 6));
 const SHOTS = opt('--shots', null);
@@ -24,12 +27,12 @@ const SHOTS = opt('--shots', null);
 // 新しいヘッドレスモードは横スワイプで「戻る」ナビゲーションが起きるなど、実ブラウザに近い挙動をする。
 const CHANNEL = opt('--channel', null);
 // GitHub Pages と同じサブパスで配信して相対パスを検証する
-const BASE = '/mathjong/';
+const BASE = EXTERNAL ? EXTERNAL.base : '/mathjong/';
 let PORT;
 let LOCAL;
 // 公開サイト相当（localhost 以外のホスト名）。テスト用フックが無効になることを確認する。
 const PUBLIC_HOST = 'mathjong.test';
-const PUBLIC = `http://${PUBLIC_HOST}${BASE}`;
+const PUBLIC = EXTERNAL ? EXTERNAL.url : `http://${PUBLIC_HOST}${BASE}`;
 
 // mathjong.test へのリクエストをローカルサーバーへ転送（ステータス・ヘッダーはそのまま）
 function forwardToLocal(route) {
@@ -47,8 +50,13 @@ function forwardToLocal(route) {
 
 async function newContext(browser, opts) {
   const ctx = await browser.newContext(opts);
-  await ctx.route((u) => u.hostname === PUBLIC_HOST, forwardToLocal);
+  if (!EXTERNAL) await ctx.route((u) => u.hostname === PUBLIC_HOST, forwardToLocal);
   return ctx;
+}
+
+async function openBeginnerPage(page) {
+  const response = await page.goto(PUBLIC);
+  if (EXTERNAL) assert.equal(response && response.status(), 200, `教材ページの取得に失敗：${PUBLIC}`);
 }
 
 // ページのエラー・HTTP 4xx/5xx・サブパス外への要求（/favicon.ico など）を記録
@@ -6279,9 +6287,10 @@ async function v07BeginnerRoom(browser) {
     const ctx = await newContext(browser, { viewport: { width, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    await page.goto(PUBLIC);
+    await openBeginnerPage(page);
     await page.locator('button[data-action="br-open"]').tap();
     await page.waitForSelector('.beginner-room');
+    if (EXTERNAL) assert.equal(await page.evaluate(() => typeof window.__mathjong), 'undefined', '公開モードはテストフックを使わない');
     assert.match(await page.locator('.br-sub').innerText(), /数学Ⅰ/);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'チュートリアルに横スクロールなし');
     const tile = async (i) => page.locator('.br-pick[data-idx="' + i + '"]').tap();
@@ -6330,7 +6339,7 @@ async function v07BeginnerRoom2(browser) {
     const ctx = await newContext(browser, { viewport: { width, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
     const errors = watchErrors(page);
-    await page.goto(PUBLIC);
+    await openBeginnerPage(page);
     await page.locator('button[data-action="br-open"]').tap();
     await page.waitForSelector('.beginner-room');
     const tap = (action) => page.locator(`button[data-action="${action}"]`).first().tap();
@@ -6464,15 +6473,21 @@ async function v07BeginnerRoom2(browser) {
     const scores = await page.locator('.bp-settle td:nth-child(3)').allInnerTexts();
     assert.equal(scores.reduce((a, x) => a + parseInt(x, 10), 0), 400, '精算後の合計400点');
     await noHScroll(page, `${width}px 修了`);
-    // 「実際の対局に挑戦する」→ 通常の対戦相手の選択（9人）
+    // 「実際の対局に挑戦する」→ 通常の対戦相手の選択（12人）
     await tap('br-challenge');
     await page.waitForSelector('.opp-card');
     assert.equal(await page.locator('.opp-card').count(), 12);
     // 進み具合：6段階すべてクリアで保存、通常の設定キーは変えない
     const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('mj-beginner-room-v1')));
     assert.deepEqual(saved.cleared, [true, true, true, true, true, true]);
+    // 卒業から選択画面へ戻るだけでなく、通常対局を実際に開始できる。
+    for (const id of ['kanata', 'yuki', 'asuma']) await page.locator(`.opp-check[data-id="${id}"]`).tap();
+    await page.locator('.select-screen button[data-action="start-match"]').tap();
+    await page.waitForSelector('.hand .tile');
+    await noHScroll(page, `${width}px 卒業後の通常対局`);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/beginner-normal-${width}.png`, fullPage: true });
     // クリアした段階はもう一度遊べる
-    await page.goto(PUBLIC);
+    await openBeginnerPage(page);
     await page.locator('button[data-action="br-open"]').tap();
     await page.locator('.br-stage[data-stage="3"]').tap();
     await lesson('4A');
@@ -6486,7 +6501,7 @@ async function v07BeginnerRoom2(browser) {
   });
   const page = await ctx.newPage();
   const errors = watchErrors(page);
-  await page.goto(PUBLIC);
+  await openBeginnerPage(page);
   await page.locator('button[data-action="br-open"]').tap();
   for (const i of [3, 4, 1]) await page.locator(`.br-pick[data-idx="${i}"]`).tap();
   await page.locator('button[data-action="br-check"]').tap();
@@ -6499,21 +6514,27 @@ async function v07BeginnerRoom2(browser) {
   console.log('✓ 初心者の部屋 第4〜6段階：チー・ポン・役の制限・リーチ・ロン・ツモ・卒業試験、再開・一覧・やり直し・保存不可、320/375/390/430px');
 }
 
-const server = await startServer(0, { base: BASE, host: '127.0.0.1' });
-PORT = server.address().port;
-LOCAL = `http://localhost:${PORT}${BASE}`;
+// 公開モードではサーバーも転送先も作らない。接続失敗をローカル成功で隠さない。
+const server = EXTERNAL ? null : await startServer(0, { base: BASE, host: '127.0.0.1' });
+if (server) {
+  PORT = server.address().port;
+  LOCAL = `http://localhost:${PORT}${BASE}`;
+}
 let browser;
 const stats = { rounds: 0, wins: [0, 0, 0, 0], draws: 0, tsumo: 0, ron: 0, ronDeclined: 0, chi: 0, chiPassed: 0, chiOverriddenByRon: 0, discards: 0, yaku: {} };
 const t0 = Date.now();
 try {
-  browser = await chromium.launch({ args: ['--no-proxy-server'], ...(CHANNEL ? { channel: CHANNEL } : {}) });
+  const proxy = EXTERNAL && (process.env.HTTPS_PROXY || process.env.HTTP_PROXY);
+  browser = await chromium.launch({ ...(!EXTERNAL ? { args: ['--no-proxy-server'] } : proxy ? { proxy: { server: proxy } } : {}), ...(CHANNEL ? { channel: CHANNEL } : {}) });
   console.log(`ブラウザ：${CHANNEL ? `channel=${CHANNEL}` : 'headless shell（既定）'} ${browser.version()}`);
+  if (EXTERNAL) console.log(`直接HTTP検査：${PUBLIC}（ローカル転送なし）`);
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
     const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2 };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
+    if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
   } else {
   await scenario(browser, 'tsumo', presetWall(['sin', '30', '=1/2', 'cos', '180', '=-1', 'tan', '45'], ['=1']), (text) => {
     assert.match(text, /あなた の和了 ツモ/);
@@ -6585,5 +6606,5 @@ try {
   process.exitCode = 1;
 } finally {
   if (browser) await browser.close();
-  await new Promise((r) => server.close(r));
+  if (server) await new Promise((r) => server.close(r));
 }

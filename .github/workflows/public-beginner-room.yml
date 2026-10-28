@@ -1,0 +1,29 @@
+name: Public beginner room 1-6 (read-only)
+on:
+  # 公開済みのUIだけを検査する。未公開のPRを本番に要求せず、PR回帰はローカルE2Eで実行。
+  page_build:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  beginner-room:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install browser
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Play stages 1-6 on the existing public URL
+        run: |
+          mkdir -p /tmp/public-beginner-shots
+          node tests/e2e/play.mjs --public-url https://asumax1128.github.io/mathjong/ --only v07BeginnerRoom,v07BeginnerRoom2 --shots /tmp/public-beginner-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: public-beginner-shots
+          path: /tmp/public-beginner-shots
