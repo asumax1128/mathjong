@@ -15,11 +15,12 @@ node tests/e2e/play.mjs       # ブラウザ実操作テスト（Playwright が�
 node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 ```
 
-**公開URL：https://asumax1128.github.io/mathjong/**（GitHub Pages、`main` ブランチのルートから自動公開）。**Ver.0.6.0-a**（9人のキャラクターAIから対戦相手3人を自由に選ぶ）を 2026-10-28 に main へマージして公開した。公開の記録と iPhone 実機テストのチェックリストは [Ver.0.6 自由選択と公開](docs/32-ver0.6-free-select-release.md)。設定手順は [iPhone 実機テスト手順](docs/12-iphone-test-guide.md)。
+**公開URL：https://asumax1128.github.io/mathjong/**（GitHub Pages、`main` ブランチのルートから自動公開）。
+**現行の正式版：Ver.0.6.0-a**（画面 0.6.0-a・エンジン 0.5.0-a）。**2026-10-28 正式完成**（オーナーの iPhone Safari 実機テスト 30/30 項目合格）。9人のキャラクターAIから対戦相手3人を自由に選んで遊べる。記録・継続課題・引き継ぎは [Ver.0.6 自由選択と公開](docs/32-ver0.6-free-select-release.md)（7章が引き継ぎ）。設定手順は [iPhone 実機テスト手順](docs/12-iphone-test-guide.md)。
 公開前に iPhone で試す場合は、同じ Wi-Fi の PC で `node tools/serve.mjs 8080 --lan` を実行し、表示される `http://<PCのIP>:8080/` を開きます（`--lan` を付けたときだけ LAN に公開。テスト後は Ctrl+C で停止）。`--base /mathjong/` を付けると Pages と同じサブパスを再現できます。
 実装仕様・暫定ルール・テスト結果は [Ver.0.1 実装記録](docs/10-ver0.1-implementation.md)。
-現在の画面は **Ver.0.2.1**（エンジン v0.1.0）：役ガイド・役候補ヒント（0.2-A）、手牌の長押し並び替え（0.2-D）、設定の「チーのオートパス」（0.2-B、初期値 OFF）。詳細は [Ver.0.2 開発仕様](docs/13-ver0.2-spec.md)。
-開発中の **Ver.0.3-A**（ブランチ `feature/v0.3-a-rules-pon`、未公開）：9枚制のまま、数学Ⅰ（度数法・124枚）／数学Ⅱ（弧度法・168枚）の2モード、刻子・ポン（ロン＞ポン＞チー）、新役（対々和・三暗刻・正弦/余弦/正接一色）。詳細は [Ver.0.3-A 実装記録](docs/14-ver0.3-a.md)。`node tools/simulate.mjs --legacy` で Ver.0.2.1 までの規則。
+（過去の記録）Ver.0.2.1（エンジン v0.1.0）：役ガイド・役候補ヒント（0.2-A）、手牌の長押し並び替え（0.2-D）、設定の「チーのオートパス」（0.2-B、初期値 OFF）。詳細は [Ver.0.2 開発仕様](docs/13-ver0.2-spec.md)。
+（過去の記録）Ver.0.3-A：9枚制のまま、数学Ⅰ（度数法・124枚）／数学Ⅱ（弧度法・168枚）の2モード、刻子・ポン（ロン＞ポン＞チー）、新役（対々和・三暗刻・正弦/余弦/正接一色）。詳細は [Ver.0.3-A 実装記録](docs/14-ver0.3-a.md)。`node tools/simulate.mjs --legacy` で Ver.0.2.1 までの規則。
 
 ## ゲームの核
 
@@ -62,8 +63,8 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 | [Ver.0.6 最終調整・品質検証](docs/28-ver0.6-b-final-tuning.md) | 並列シミュレーター、上級3人の公開情報での改善、調整用／最終評価用 seed、95%CI、個性の指標、未解決の課題 |
 | [Ver.0.6 監査指摘の修正](docs/29-ver0.6-c-audit-fixes.md) | Codex 監査 FAIL への対応：人間のロン見送りを安全牌にしない（P2-1）、ケースID基準の seed と厳密な対比較、同点の順位の持分、AUC の同点処理と独立評価、E2E の打牌待ち |
 | [Ver.0.6 残存 P3 の最終修正](docs/30-ver0.6-d-residual-p3.md) | 再監査 CONDITIONAL PASS への対応：AUC が定義できないときの評価（null）、ロン後半の演出の E2E を上限時間内の状態の確認に変更。残存 P3 の記録 |
-| [Ver.0.6 開発完了記録](docs/31-ver0.6-completion.md) | 9人のキャラクターAI の開発完了時点のまとめ：文書の一覧、監査の経過（FAIL → CONDITIONAL PASS ×2）、変更していないもの、残存課題。PR #17 は Draft のまま |
-| [Ver.0.6 自由選択と公開](docs/32-ver0.6-free-select-release.md) | 9人から3人を自由に選ぶ対戦相手の選択（2列/3列・詳細・おまかせ・座席の抽選・同じ3人と再戦・相手を変更）、main へのマージと既存の GitHub Pages の更新、iPhone 実機テストのチェックリスト |
+| [Ver.0.6 開発完了記録](docs/31-ver0.6-completion.md) | 9人のキャラクターAI の開発完了時点のまとめ：文書の一覧、監査の経過（FAIL → CONDITIONAL PASS ×2）、変更していないもの、残存課題（記録時点。その後 PR #17 はマージ・公開、docs/32） |
+| [Ver.0.6 自由選択と公開](docs/32-ver0.6-free-select-release.md) | 9人から3人を自由に選ぶ対戦相手の選択（2列/3列・詳細・おまかせ・座席の抽選・同じ3人と再戦・相手を変更）、main へのマージと既存の GitHub Pages の更新、**2026-10-28 正式完成**（iPhone 実機テスト 30/30 合格）、継続課題と引き継ぎ |
 | [iPhone 実機テスト手順](docs/12-iphone-test-guide.md) | テストURL、Pages 設定、固定seed、報告方法 |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |

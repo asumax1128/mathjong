@@ -4,7 +4,7 @@
 
 ## 1. テストURL
 
-> **公開状況：公開確認済み（2026-10-28、main `484150e`・Ver.0.6.0-a）。** GitHub Pages（main ブランチのルート）で公開中。Ver.0.6 の確認の記録と iPhone 実機テストのチェックリストは [docs/32](32-ver0.6-free-select-release.md)。（2026-10-24 時点では未公開だった）
+> **公開状況：公開中・Ver.0.6.0-a 正式版（2026-10-28 正式完成、main `484150e`）。** GitHub Pages（main ブランチのルート）で公開中。2026-10-28 にオーナーが iPhone Safari で実機テスト 30/30 項目合格を確認した。記録と確認項目は [docs/32](32-ver0.6-free-select-release.md)。（2026-10-24 時点では未公開だった）
 
 **公開予定URL：https://asumax1128.github.io/mathjong/**
 
