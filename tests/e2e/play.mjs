@@ -2169,7 +2169,7 @@ async function chiAutoPass(browser) {
     assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.6.2');
     assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.6.2');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.6\.1 ・ エンジン v0\.5\.0-a/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.6\.2 ・ エンジン v0\.5\.0-a/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
