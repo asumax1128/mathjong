@@ -1,0 +1,19 @@
+{
+  "config": {
+    "groups": 4,
+    "seed": 206102801,
+    "only": "",
+    "modes": [
+      "math1",
+      "math2"
+    ],
+    "lengths": [
+      4,
+      8
+    ]
+  },
+  "matches": 496,
+  "workers": 4,
+  "seconds": 410.249378123,
+  "node": "v24.19.0"
+}

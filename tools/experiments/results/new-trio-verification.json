@@ -1,0 +1,9 @@
+{
+  "matches": 8,
+  "games": 72,
+  "decisions": 2509,
+  "nocchiHistoryComparisons": 353,
+  "differentDiscard": 4,
+  "differentRiichi": 0,
+  "meaning": "同一状態・同一乱数位置で公開履歴の重みだけを中立化。強さへの寄与の検定ではない。"
+}

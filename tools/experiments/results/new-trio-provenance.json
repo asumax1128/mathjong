@@ -1,0 +1,33 @@
+{
+  "base": "ce659038eadc7b7838dd6659808a088a49d29a76",
+  "branch": "experiment/new-character-trio",
+  "dateJST": "2026-10-28",
+  "groups": 4,
+  "seed": 206102801,
+  "prototype": "initial-v1",
+  "files": {
+    "tools/experiments/new-character-trio.mjs": "d41cf3aa01ccece4c807487c259806e558995f3b3b30a9176038bde5e5afa9bf",
+    "tools/experiments/sim-new-trio.mjs": "7e1c46fd5589da585a0fcd45d8fbe3011c6047492e558c415fa31ead4741d528",
+    "tools/experiments/summarize-new-trio.mjs": "4ccd13e0aba4eb4d7355a845fc091b3de20d76970398d1e875c3b9a62218fc23",
+    "tools/experiments/verify-new-trio.mjs": "f2fe9db114aceaf826186c57feba5eaf97f239f34c7d5eb0b0666ac3d6545d3d",
+    "tests/new-character-trio.test.js": "47fed73701fdae554eda9846e3cc5f65ba8db3c5661e3d7b509405c3a1f2b2eb",
+    "tools/experiments/results/new-trio-initial.jsonl.gz": "6a4141b700405bc79db6a6ea3b346e1a5e348dc709e72a06a76f6626c1cb3767",
+    "tools/experiments/results/new-trio-summary.json": "d52757749c54ccf617562d1d2dd987ffa9d75907325fd76043c7f753dd495d2e",
+    "tools/experiments/results/new-trio-verification.json": "37cc39e5967c905a30c2e2d13752b869efa500f1b6b1f7ed00bbdb642f7ce58f"
+  },
+  "unitTests": {
+    "pass": 381,
+    "fail": 0,
+    "skip": 0
+  },
+  "verification": {
+    "matches": 8,
+    "games": 72,
+    "decisions": 2509,
+    "nocchiHistoryComparisons": 353,
+    "differentDiscard": 4,
+    "differentRiichi": 0,
+    "meaning": "同一状態・同一乱数位置で公開履歴の重みだけを中立化。強さへの寄与の検定ではない。"
+  },
+  "productionChanged": false
+}
