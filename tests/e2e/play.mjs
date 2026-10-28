@@ -2166,10 +2166,10 @@ async function chiAutoPass(browser) {
   // (12) バージョン表示：ヘッダー・ページタイトル・再現情報
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.6.2');
-    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.6.2');
+    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.6.3');
+    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.6.3');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.6\.2 ・ エンジン v0\.5\.0-a/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.6\.3 ・ エンジン v0\.5\.0-a/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -5962,12 +5962,13 @@ async function v06TrioIntegration(browser) {
     assert.equal(await page.evaluate(() => typeof window.__mathjong), 'undefined');
     await page.locator('button[data-action="choose-opponents"]').tap();
     assert.equal(await page.locator('.opp-card').count(),12);
-    assert.equal(await page.locator('.opp-placeholder').count(),3);
+    assert.equal(await page.locator('.opp-placeholder').count(),0,'一覧に仮画像・仮表示を作らない');
+    assert.equal(await page.locator('.opp-card img, .opp-card picture').count(),0,'スマホ一覧にキャラクター画像のDOMを作らない');
     assert.ok((await page.locator('.select-lead').innerText()).includes('12人'));
     for (const id of ids) {
       const card=page.locator(`.opp-card[data-id="${id}"]`);
       await card.locator('.opp-name').tap();
-      assert.match(await page.locator('.opp-sheet').innerText(), /仮表示/);
+      assert.doesNotMatch(await page.locator('.opp-sheet').innerText(), /仮表示|画像は準備中/,'詳細にも不要な仮表示を出さない');
       assert.match(await page.locator('.opp-sheet').innerText(), new RegExp({yujin:'26歳[\\s\\S]*初級',tara:'25歳[\\s\\S]*中級',nocchi:'28歳[\\s\\S]*上級'}[id]));
       assert.equal(await page.locator('.opp-sheet img').count(),0,'既存の人物画像を流用しない');
       await page.locator('.opp-close').tap();
@@ -5990,7 +5991,7 @@ async function v06TrioIntegration(browser) {
     assert.equal(await page.locator('.opp-card.selected').count(),0,'選択は保存しない従来仕様');
     assert.deepEqual(errors,[]);await ctx.close();
   }
-  console.log('✓ 追加3人：公開相当・320/375/390/430pxと横画面・仮表示・詳細・実タップ・保存互換');
+  console.log('✓ 追加3人：公開相当・320/375/390/430pxと横画面・テキストのみの一覧・詳細・実タップ・保存互換');
   // 実エンジンとUIで4つの設定を完走。手動席は合法なツモ切りと和了を選ぶ。
   const measurements=[];
   for(const mode of ['math1','math2'])for(const length of [4,8]) {
@@ -6113,6 +6114,7 @@ async function v06FreeSelect(browser) {
     assert.deepEqual(await page.locator('.opp-card').evaluateAll((es) => es.map((e) => e.dataset.id)), ORDER, '12人を初級4→中級4→上級4の順に連続');
     assert.deepEqual(await page.locator('.opp-card .opp-name').allInnerTexts(), ['かなた', 'みつき', 'あおと', 'ゆうじん', 'おうすけ', 'なつき', 'ゆき', 'たら', 'シャカ', 'かおる', 'アスマ', 'のっち']);
     assert.deepEqual(await page.locator('.opp-card .opp-level').allInnerTexts(), ['初級', '初級', '初級', '初級', '中級', '中級', '中級', '中級', '上級', '上級', '上級', '上級']);
+    assert.equal(await page.locator('.opp-grid img, .opp-grid picture, .opp-placeholder').count(),0,'選択一覧には画像・仮表示を置かない');
     for (const t of await page.locator('.opp-card .opp-trait').allInnerTexts()) assert.ok(t.length >= 4, `性格の一言 ${t}`);
     assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.opp-grid')).gridTemplateColumns.split(' ').length), 2, 'スマートフォンは2列');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 0, '横スクロールなし');
