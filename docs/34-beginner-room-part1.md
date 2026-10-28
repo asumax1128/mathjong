@@ -1,6 +1,8 @@
 # 数雀「初心者の部屋」実装第1弾：ステージ1〜3
 
-> 状態：開発版。通常の数雀Ver.0.6は正式完成済み。
+> 状態：第1〜3段階を2026-10-28にmainへマージ済み。オーナーによるiPhone Safari実機確認は未実施。
+> PR #20：https://github.com/asumax1128/mathjong/pull/20
+> マージコミット：b9cd0bee078fd823529d7b19e905aab07cb5006a
 > 初期設計案：PR #19（docs/33-beginner-hall-proposal.md）
 > この版は第1〜3段階の体験学習だけを実装し、第4〜6段階の実装・公開はまだ行わない。
 
@@ -21,4 +23,6 @@
 - 実行方法：npm test、node tests/e2e/play.mjs --only v07BeginnerRoom、node tests/e2e/play.mjs --only v06FreeSelect,v07BeginnerRoom。
 - 実行/成功が確認できていないテストについて、合格と記録しない。
 - オーナーが既存GitHub Pagesの同じURLでiPhone Safari実機テストする。新サイトは作らない。
-- テスト合格・レビュー後、オーナーのマージ指示に基づき公開する。
+- CI（Beginner room 1-3 checks） https://github.com/asumax1128/mathjong/actions/runs/40655422458 **成功**：構文・npm test・初心者の部屋のブラウザ操作・既存Ver.0.6自由選択の回帰を確認。
+- Character AI experiment（PR #20） https://github.com/asumax1128/mathjong/actions/runs/40655422411 はマージ判定時点では実行中。未完了を合格とは記録しない。
+- PR #20をmainにマージ済み。既存Pagesへの反映とiPhone Safari実機操作は別に確認する。
