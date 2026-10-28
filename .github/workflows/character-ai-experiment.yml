@@ -20,6 +20,10 @@ on:
       - 'tests/e2e/ron-late.mjs'
       - 'tests/e2e-ron-late.test.js'
       - 'src/ui/app.js'
+      - 'src/ui/opponents.js'
+      - 'src/ui/replay.js'
+      - 'src/ui/styles.css'
+      - 'tests/opponents.test.js'
       - '.github/workflows/character-ai-experiment.yml'
   workflow_dispatch:
 jobs:
@@ -47,6 +51,8 @@ jobs:
           node --check tools/calibrate-v06.mjs
           node --check tests/character-ai-v06-human-pass.test.js
           node --check tests/sim-v06-tools.test.js
+          node --check src/ui/opponents.js
+          node --check tests/opponents.test.js
       - name: All unit tests
         run: npm test
       - name: Mathematics I baseline versus candidate (all nine)
@@ -73,7 +79,7 @@ jobs:
           npm install --no-save playwright@1.56.1
           npx playwright install --with-deps chromium
       - name: Character-specific browser regression
-        run: node tests/e2e/play.mjs --only v06Characters,v04bLevels,v05eCutin,chiAutoPass
+        run: node tests/e2e/play.mjs --only v06Characters,v06FreeSelect,v04bLevels,v04Match,v05eCutin,chiAutoPass
       - uses: actions/upload-artifact@v4
         if: always()
         with:

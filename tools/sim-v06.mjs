@@ -11,6 +11,8 @@
 //   ref    : 基準の打ち手（Ver.0.5-E の中級AI 速攻・役重視・門前、上級AI 速攻）1人 vs 各難易度のキャラ3人
 //            （人間から見た難易度：基準の打ち手の平均順位が、初級 < 中級 < 上級 の順に悪くなるか）
 //   all    : cross + same + legacy
+//   mixed  : 自由選択（Ver.0.6）の全組み合わせ：9人から3人の 84 通り × 基準の打ち手（Ver.0.5-E 中級・速攻、人の席の代わり）1人。
+//            --human challenger と合わせると、基準の打ち手の席を人間の席として扱う
 // 1グループ＝4試合（全員が4つの席を1回ずつ回る。親の開始席も回る）。seed はグループ・席・局ごとに決まり、同じ引数なら同じ結果。
 // 対局の seed は「ケースの一意ID（形式・相手の難易度・席の並び）」から作る（--seed-scheme case-id、既定）。ケースの配列番号には
 // 依存しないので、--only や --exp で絞り込んでも、同じケースの対局条件（seed・席の並び）は変わらない。
@@ -60,6 +62,13 @@ export function buildCases(exp) {
     const tables = exp === 'ref' ? LEVELS.map((l) => [l, IDS[l]]) : LEVELS.map((l) => [`v05-${l}`, legacyIds(l)]);
     for (const [l, opp] of tables) for (const r of ['L:intermediate:speed', 'L:intermediate:value', 'L:intermediate:closed', 'L:advanced:speed']) {
       cases.push({ kind: 'ref', challenger: r, level: l, lineup: [r, ...opp] });
+    }
+  }
+  if (exp === 'mixed') {
+    const all = LEVELS.flatMap((l) => IDS[l]);
+    for (let a = 0; a < all.length; a++) for (let b = a + 1; b < all.length; b++) for (let c = b + 1; c < all.length; c++) {
+      const trio = [all[a], all[b], all[c]];
+      cases.push({ kind: 'mixed', challenger: 'L:intermediate:speed', level: trio.join('+'), lineup: ['L:intermediate:speed', ...trio] });
     }
   }
   if (exp === 'legacy' || exp === 'all') {
