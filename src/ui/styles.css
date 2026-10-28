@@ -292,10 +292,7 @@ button.danger { background: #b42318; color: #fff; border-color: #b42318; }
 .opp-level.lv-intermediate { background: #2f5f9a; color: #fff; }
 .opp-level.lv-advanced { background: #9a3a2f; color: #fff; }
 .opp-level.lv-additional { background: #62527d; color: #fff; }
-.opp-placeholder { display: flex; align-items: center; gap: 6px; margin: 6px 0; color: var(--ink-dim); pointer-events: none; }
-.opp-placeholder span { display: grid; place-items: center; width: 32px; height: 36px; border: 1px dashed currentColor; border-radius: 7px; font-size: 21px; color: var(--gold); }
-.opp-placeholder small { font-size: 10px; }
-.opp-art-note { font-size: 12px; color: #5a6b62; margin: 0 0 10px; }
+/* 一覧カードに画像は置かない。正式画像が追加されても詳細パネル内だけに表示する。 */
 .opp-trait { margin-top: 4px; font-size: 13px; color: var(--ink-dim); overflow-wrap: anywhere; }
 /* チェック欄：独立した 44px 以上のボタン（タップしても詳細は開かない） */
 .opp-check { position: absolute; top: 4px; right: 4px; width: 44px; min-height: 44px; padding: 0; display: flex; align-items: center; justify-content: center;
@@ -316,6 +313,9 @@ button.danger { background: #b42318; color: #fff; border-color: #b42318; }
 }
 .opp-close { position: absolute; top: 8px; right: 8px; width: 44px; padding: 0; font-size: 22px; background: transparent; border: none; color: #1c2a23; }
 .opp-d-name { margin: 0 44px 8px 0; font-size: 22px; }
+/* 将来の正式キャラクター画像：スマホでは詳細を開いた時だけ表示する（一覧にはDOMを作らない）。 */
+.opp-d-art { margin: 4px 0 12px; text-align: center; }
+.opp-d-art img { display: block; max-width: 100%; width: auto; height: auto; max-height: min(38dvh, 320px); object-fit: contain; margin: 0 auto; }
 .opp-d-list { display: grid; grid-template-columns: 4.5em minmax(0, 1fr); gap: 6px 10px; margin: 0; font-size: 15px; }
 .opp-d-list dt { font-weight: 700; color: #5a6b62; }
 .opp-d-list dd { margin: 0; overflow-wrap: anywhere; }
