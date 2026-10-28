@@ -3044,7 +3044,7 @@ async function v04Fixes(browser) {
     assert.equal(before.next, pending, '予約中の次回用モード');
     assert.ok(before.scores.some((x) => x !== 100) && before.hist > 0);
     const finInfo = await page.locator('.final-info').innerText();
-    for (const id of chars) assert.match(finInfo, new RegExp({ fukuyama: 'ふくやま', kaoru: 'かおる', asuma: 'アスマ', kanata: 'かなた', mitsuki: 'みつき', aoto: 'あおと' }[id]));
+    for (const id of chars) assert.match(finInfo, new RegExp({ fukuyama: 'シャカ', kaoru: 'かおる', asuma: 'アスマ', kanata: 'かなた', mitsuki: 'みつき', aoto: 'あおと' }[id]));
     assert.equal(await page.locator('button[data-action="again"]').innerText(), '同じ3人と再戦');
     await page.locator('button[data-action="again"]').tap();
     await page.waitForSelector('.hand .tile');
@@ -5944,7 +5944,7 @@ async function v06Characters(browser) {
   const roster = {
     beginner: ['かなた','みつき','あおと'],
     intermediate: ['おうすけ','なつき','ゆき'],
-    advanced: ['ふくやま','かおる','アスマ'],
+    advanced: ['シャカ','かおる','アスマ'],
   };
   for (const mode of ['math1', 'math2']) {
     let tileWidth = null;
@@ -5997,7 +5997,7 @@ async function v06FreeSelect(browser) {
     await page.locator('button[data-action="choose-opponents"]').tap();
     await page.waitForSelector('.select-screen');
     assert.deepEqual(await page.locator('.opp-card').evaluateAll((es) => es.map((e) => e.dataset.id)), ORDER, '9人を初級→中級→上級の順に連続');
-    assert.deepEqual(await page.locator('.opp-card .opp-name').allInnerTexts(), ['かなた', 'みつき', 'あおと', 'おうすけ', 'なつき', 'ゆき', 'ふくやま', 'かおる', 'アスマ']);
+    assert.deepEqual(await page.locator('.opp-card .opp-name').allInnerTexts(), ['かなた', 'みつき', 'あおと', 'おうすけ', 'なつき', 'ゆき', 'シャカ', 'かおる', 'アスマ']);
     assert.deepEqual(await page.locator('.opp-card .opp-level').allInnerTexts(), ['初級', '初級', '初級', '中級', '中級', '中級', '上級', '上級', '上級']);
     for (const t of await page.locator('.opp-card .opp-trait').allInnerTexts()) assert.ok(t.length >= 4, `性格の一言 ${t}`);
     assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.opp-grid')).gridTemplateColumns.split(' ').length), 2, 'スマートフォンは2列');

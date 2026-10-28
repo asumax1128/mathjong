@@ -45,7 +45,7 @@ export const CHARACTER_ROSTER = Object.freeze({
     { id: 'yuki', name: 'ゆき', age: 18, personality: 'closed', styleLabel: '逆転の切替型' },
   ]),
   advanced: Object.freeze([
-    { id: 'fukuyama', name: 'ふくやま', age: 28, personality: 'speed', styleLabel: '守備重視の理論派' },
+    { id: 'fukuyama', name: 'シャカ', age: 28, personality: 'speed', styleLabel: '守備重視の理論派' },
     { id: 'kaoru', name: 'かおる', age: 27, personality: 'value', styleLabel: 'お調子者の実力派' },
     { id: 'asuma', name: 'アスマ', age: 28, personality: 'closed', styleLabel: '高得点の勝負師' },
   ]),
