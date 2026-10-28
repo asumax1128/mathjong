@@ -6473,7 +6473,7 @@ async function v07BeginnerRoom2(browser) {
     const scores = await page.locator('.bp-settle td:nth-child(3)').allInnerTexts();
     assert.equal(scores.reduce((a, x) => a + parseInt(x, 10), 0), 400, '精算後の合計400点');
     await noHScroll(page, `${width}px 修了`);
-    // 「実際の対局に挑戦する」→ 通常の対戦相手の選択（9人）
+    // 「実際の対局に挑戦する」→ 通常の対戦相手の選択（12人）
     await tap('br-challenge');
     await page.waitForSelector('.opp-card');
     assert.equal(await page.locator('.opp-card').count(), 12);

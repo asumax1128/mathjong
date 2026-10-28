@@ -8,7 +8,7 @@
 node tests/e2e/play.mjs --public-url https://asumax1128.github.io/mathjong/ --only v07BeginnerRoom,v07BeginnerRoom2 --shots /tmp/public-beginner-shots
 ```
 
-先に画像保存先を作る。PlaywrightとChromiumが必要。専用の `.github/workflows/public-beginner-room.yml` がインストールと保存先作成を行い、`page_build`、`workflow_dispatch`、公開ランナー設定のPR変更で実行する。PRの未公開ゲームUIを本番へ要求しないよう、PR起動の対象パスはランナー設定に限定している。新サイトやプレビューを作らず、既存Pagesを使う。
+先に画像保存先を作る。PlaywrightとChromiumが必要。専用の `.github/workflows/public-beginner-room.yml` がインストールと保存先作成を行い、`page_build`、`workflow_dispatch`で実行する。未公開の12人UIを現在の公開サイトへ要求する偽失敗を避けるため、公開検査をPRでは起動しない。PRの回帰は既存のローカルE2Eワークフローで検査する。新サイトやプレビューを作らず、既存Pagesを使う。
 
 ## 検査範囲
 
@@ -40,3 +40,7 @@ node tests/e2e/play.mjs --public-url https://asumax1128.github.io/mathjong/ --on
 ## 限界
 
 Chromiumの自動操作はiPhone Safari実機受入ではない。全合法操作列、全和了経路、数学Ⅱの教材、配信JSのmainとのハッシュ一致はこの検査では保証しない。第4〜6段階の正式受入はオーナーのiPhone Safari確認を待つ。
+
+## 12人版への追従（2026-10-29）
+
+`test/public-beginner-trio-smoke` は0.6.1の統合候補を基準にした後続テスト専用ブランチ。旧ブランチ `test/public-beginner-room-smoke` の検査を引き継ぎ、12人の選択画面への卒業経路を維持する。ゲーム本体には後続ブランチの追加変更を入れない。実際のPages検査は新3人の正式マージ・Pagesデプロイ後に実行する。新しいブランチでは単体379件（失敗・スキップ0）と、直接URLモードで第1〜6段階・4画面幅・卒業後の12人選択→通常対局開始が成功。検査先は `http://mathjong.test:8891/mathjong/`（ループバックの本番相当配信、フック無効）。実際のPagesでは未実行。全体E2Eは本体統合候補で809.076秒で成功した結果であり、後続のテスト分岐を含めて全体を再実行したとは表記しない。

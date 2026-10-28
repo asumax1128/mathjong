@@ -1,11 +1,6 @@
 name: Public beginner room 1-6 (read-only)
 on:
-  # 公開サイトはPRの新しいゲームUIをまだ配信しないため、PR起動は公開ランナーの設定変更に限定。
-  pull_request:
-    paths:
-      - 'tests/e2e/public-target.mjs'
-      - 'tests/e2e-public-target.test.js'
-      - '.github/workflows/public-beginner-room.yml'
+  # 公開済みのUIだけを検査する。未公開のPRを本番に要求せず、PR回帰はローカルE2Eで実行。
   page_build:
   workflow_dispatch:
 permissions:
