@@ -1,12 +1,12 @@
-// 12人の窓口。既存9人は元の関数へそのまま委譲し、既存AIのRNG消費を変えない。
+// 12人の窓口。新3人の年齢・表示難易度はUI設定であり、AI係数やRNGには影響させない。
 import { CHARACTER_ROSTER as ORIGINAL_ROSTER, rosterForLevel, decideCharacter as originalDecision } from './character-ai.js';
 import { TRIO_PARAMS, publicGame, decideTrioCharacter } from './character-ai-trio.js';
 
 export { rosterForLevel }; // ?ai= の既定3人は従来のまま（4人へ増やさない）
 export const TRIO_ROSTER = Object.freeze([
-  Object.freeze({ id: 'yujin', name: 'ゆうじん', age: null, personality: 'closed', styleLabel: '鳴かずに刻子を育てる' }),
-  Object.freeze({ id: 'tara', name: 'たら', age: null, personality: 'speed', styleLabel: '待ちを育てる保留型' }),
-  Object.freeze({ id: 'nocchi', name: 'のっち', age: null, personality: 'speed', styleLabel: '公開行動への適応型' }),
+  Object.freeze({ id: 'yujin', name: 'ゆうじん', age: 26, level: 'beginner', personality: 'closed', styleLabel: '鳴かずに刻子を育てる' }),
+  Object.freeze({ id: 'tara', name: 'たら', age: 25, level: 'intermediate', personality: 'speed', styleLabel: '待ちを育てる保留型' }),
+  Object.freeze({ id: 'nocchi', name: 'のっち', age: 28, level: 'advanced', personality: 'speed', styleLabel: '公開行動への適応型' }),
 ]);
 export const CHARACTER_ROSTER = Object.freeze({ ...ORIGINAL_ROSTER, additional: TRIO_ROSTER });
 const views = new WeakMap();
