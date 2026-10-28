@@ -6321,10 +6321,19 @@ async function v07BeginnerRoom2(browser) {
     // 5-C：ツモ
     await lesson('5C');
     assert.equal(await count('button[data-action="bp-ron"]'), 0);
-    await page.locator('.bp-tile.drawn').tap(); await tap('bp-discard');
-    assert.match(await feedback(), /ツモ」を押そう/);
+    const checkTsumoOnly = async () => {
+      assert.match(await page.locator('.bp-status').innerText(), /ツモで和了しよう/);
+      assert.equal(await count('button[data-action="bp-riichi"], button[data-action="bp-discard"]'), 0, '課題で受け付けない操作は表示しない');
+      assert.equal(await page.locator('button[data-action="bp-tsumo"]').isEnabled(), true);
+    };
+    await checkTsumoOnly();
+    await page.locator('.bp-tile.drawn').tap();
+    await checkTsumoOnly();
+    await pickTile('sin');
+    await checkTsumoOnly();
     await tap('bp-tsumo');
     assert.match(await page.locator('.bp-result').innerText(), /ツモ和了[\s\S]*ほかの3人が払う/);
+    assert.deepEqual((await page.locator('.bp-settle td:nth-child(3)').allInnerTexts()).map((x) => parseInt(x, 10)), [108, 98, 98, 96], '5-C：子ツモの精算と合計400点');
     await tap('br-next');
     // 卒業試験：ヒント→やり直し→リーチ→ロンを見送る→ツモ
     await lesson('6');

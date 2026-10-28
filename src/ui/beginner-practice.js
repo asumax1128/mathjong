@@ -363,6 +363,8 @@ function actionsHTML(p) {
       pd.chi.map((c, i) => `<button class="primary bp-decl" data-action="bp-chi" data-opt="${i}">チー：${formulaHTML(g.rules, c.meld)}</button>`).join('') +
       '<button data-action="bp-pass">見送る</button>';
   }
+  // 5-C はツモの練習。エンジン上は合法でも、この課題で受け付けない操作は出さない。
+  if (lessonOf(p).id === '5C' && pd.canTsumo) return '<button class="primary bp-decl" data-action="bp-tsumo">ツモ</button>';
   const sel = p.selected;
   const ropts = g.riichiOptions(HUMAN);
   const canRiichi = sel !== null && ropts.some((o) => o.type === g.typeOf(sel));
@@ -376,6 +378,7 @@ function statusText(p) {
   const pd = pendingOf(p);
   if (p.pause || p.done || !pd) return '';
   if (pd.type === 'claim') return `${SEAT_NAMES[pd.from]}の ${esc(tileLabel(typeOfId(g, pd.tile)))} に対して、宣言できるよ。`;
+  if (lessonOf(p).id === '5C' && pd.canTsumo) return 'ツモで和了しよう。';
   if (g.riichi[HUMAN]) return 'リーチ中：ツモした牌（右端）だけ捨てられるよ。';
   if (g.drawn === null || g.drawn === undefined) return '鳴いた後はツモをしないで、1枚捨てよう。';
   return 'あなたの番：捨てる牌を選ぼう。';

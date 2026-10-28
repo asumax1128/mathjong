@@ -233,9 +233,52 @@ test('5-C：ツモ（引いた牌で和了）。捨てる操作は練習では�
   assert.equal(practiceAct(p, { type: 'tsumo' }), true);
   const r = p.game.result;
   assert.equal(r.how, 'tsumo');
+  assert.equal(r.points, 2);
+  assert.deepEqual(p.settlement.deltas, [8, -2, -2, -4], '子ツモ：親（席3）が4点、ほかの子2人が2点ずつ支払う');
   assert.deepEqual(p.settlement.deltas, settle(r, p.game.dealer));
   assert.equal(p.settlement.deltas.reduce((a, b) => a + b, 0), 0);
+  assert.equal(p.settlement.scores.reduce((a, b) => a + b, 0), 400);
   conserved(p);
+});
+
+test('5-C：ツモ可能ならツモだけを案内し、どの牌を選んでもリーチ・打牌を表示しない', () => {
+  const p = createPractice(rules, L['5C']);
+  const g = p.game;
+  const before = g.events.length;
+  assert.ok(g.riichiOptions(HUMAN).length > 0, 'エンジンの合法手は残し、教材側だけで表示を絞る');
+  const checkActions = () => {
+    const html = practiceHTML(p);
+    assert.match(html, /ツモで和了しよう/);
+    assert.match(html, /class="primary bp-decl" data-action="bp-tsumo"/);
+    assert.ok(!html.includes('data-action="bp-riichi"'));
+    assert.ok(!html.includes('data-action="bp-discard"'));
+    assert.ok(!html.includes('捨てる牌を選ぼう'));
+  };
+  checkActions();
+  for (const id of g.hands[HUMAN]) {
+    assert.equal(practiceSelect(p, id), true);
+    checkActions();
+  }
+  assert.equal(practiceAct(p, { type: 'discard', riichi: true }), false, '表示外からの操作も従来どおり拒否');
+  assert.equal(g.events.length, before);
+  assert.equal(g.riichi[HUMAN], null);
+  assert.equal(practiceAct(p, { type: 'tsumo' }), true);
+  assert.equal(p.done, true);
+  conserved(p);
+});
+
+test('5-Cの表示制限は教材内だけ：通常のエンジン操作ではツモを見送り打牌・リーチできる', () => {
+  for (const riichi of [false, true]) {
+    const g = createPractice(rules, L['5C']).game;
+    const id = g.drawn;
+    assert.ok(g.tsumoAnalysis(HUMAN));
+    assert.ok(g.riichiOptions(HUMAN).some((o) => o.type === g.typeOf(id)));
+    g.discard(HUMAN, id, { riichi });
+    assert.equal(g.rivers[HUMAN].at(-1).id, id);
+    assert.equal(!!g.riichi[HUMAN], riichi);
+    assert.ok(!g.hands[HUMAN].includes(id));
+    g.checkInvariants();
+  }
 });
 
 test('ロンとツモの違い：ロン以外の課題でロンボタンを出さない・ツモの課題でロンボタンを出さない', () => {
