@@ -2166,10 +2166,10 @@ async function chiAutoPass(browser) {
   // (12) バージョン表示：ヘッダー・ページタイトル・再現情報
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.6.3');
-    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.6.3');
+    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.6.4');
+    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.6.4');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.6\.3 ・ エンジン v0\.5\.0-a/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.6\.4 ・ エンジン v0\.5\.0-a/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -6116,6 +6116,7 @@ async function v06FreeSelect(browser) {
     assert.deepEqual(await page.locator('.opp-card .opp-level').allInnerTexts(), ['初級', '初級', '初級', '初級', '中級', '中級', '中級', '中級', '上級', '上級', '上級', '上級']);
     assert.equal(await page.locator('.opp-grid img, .opp-grid picture, .opp-placeholder').count(),0,'選択一覧には画像・仮表示を置かない');
     for (const t of await page.locator('.opp-card .opp-trait').allInnerTexts()) assert.ok(t.length >= 4, `性格の一言 ${t}`);
+    assert.equal(await page.locator('.opp-card[data-id="yujin"] .opp-trait').innerText(), '刻子大好き', 'ゆうじんの紹介を更新');
     assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.opp-grid')).gridTemplateColumns.split(' ').length), 2, 'スマートフォンは2列');
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 0, '横スクロールなし');
     let st = await oppState(page);
