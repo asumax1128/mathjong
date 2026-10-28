@@ -65,7 +65,7 @@ let PLAYERS = [
 const AI_LEVELS = [
   { id: 'beginner', label: '初級', desc: 'かなた・みつき・あおと。3人それぞれの打ち方' },
   { id: 'intermediate', label: '中級', desc: 'おうすけ・なつき・ゆき。点差で打ち方が変わります' },
-  { id: 'advanced', label: '上級', desc: 'ふくやま・かおる・アスマ。危険と高得点を読み合う' },
+  { id: 'advanced', label: '上級', desc: 'シャカ・かおる・アスマ。危険と高得点を読み合う' },
 ];
 const parseLen = (v) => (v === 4 || v === 8 || v === '4' || v === '8' ? Number(v) : null);
 const parseAi = (v) => (AI_LEVELS.some((a) => a.id === v) ? v : null);
