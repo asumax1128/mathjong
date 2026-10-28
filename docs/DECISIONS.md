@@ -1,6 +1,8 @@
 # 数雀｜現行の決定・承認ログ
 
-> **最新公開（2026-10-29）**：数雀 Ver.0.6.2（12人選択、ゆうじん26歳初級／たら25歳中級／のっち28歳上級、初中上各4人の順に表示）。[PR #27](https://github.com/asumax1128/mathjong/pull/27) HEAD `b1ff774bfcdc3b8408a4d812d2ea7389c0249249`、必須CI2件Success、mainマージ `627081240c3b9c9907adbf96061a6fcd71b81f2d`。[Pages 40781902816](https://github.com/asumax1128/mathjong/actions/runs/40781902816)、[公開通常対局smoke 40782005883](https://github.com/asumax1128/mathjong/actions/runs/40782005883)、[公開初心者教材E2E 40782005997](https://github.com/asumax1128/mathjong/actions/runs/40782005997)すべてSuccess。**Ver.0.6.2のiPhone実機表示確認は未実施**。ゲームルール、AI判断・係数、旧9人の内部ID、保存形式は不変。[変更仕様docs/42](42-ver0.6.2-trio-profiles.md)。
+> **最新公開（2026-10-29）：数雀 Ver.0.6.3**。オーナーが提示したiPhone Safari画面を受けて、新3名の「ゆ／た／の」と「仮表示」の仮画像を一覧から削除、詳細の準備中告知も削除。**12人の一覧は全端末で名前・難易度・特徴・選択チェックのみ。今後の正式イラストはスマホでは詳細を開いた時のみ閲覧できる**（実装上PCも一覧では画像を生成しない）。[PR #28](https://github.com/asumax1128/mathjong/pull/28) HEAD `e7a8171d297d02018376baccec2d7516c614e23c`、必須CI2件Success、mainマージ `9ae78cf97be6add41e8799fd0b066ba2298e5be4`。[Pages run 40786901639](https://github.com/asumax1128/mathjong/actions/runs/40786901639)、[公開通常smoke run 40786948418](https://github.com/asumax1128/mathjong/actions/runs/40786948418)、[初心者の部屋1〜6公開E2E run 40786948313](https://github.com/asumax1128/mathjong/actions/runs/40786948313)はすべてSuccess。[仕様 docs/43](43-ver0.6.3-opponent-list-text-only.md)。既存9人・新3名のAI、数学Ⅰ/Ⅱのルール、保存形式は不変。**Ver.0.6.3のiPhone実機再確認は未報告**。新規イラストの採用・実装は今回の対象外。
+
+> **前版の公開記録（2026-10-29）**：数雀 Ver.0.6.2（12人選択、ゆうじん26歳初級／たら25歳中級／のっち28歳上級、初中上各4人の順に表示）。[PR #27](https://github.com/asumax1128/mathjong/pull/27) HEAD `b1ff774bfcdc3b8408a4d812d2ea7389c0249249`、必須CI2件Success、mainマージ `627081240c3b9c9907adbf96061a6fcd71b81f2d`。[Pages 40781902816](https://github.com/asumax1128/mathjong/actions/runs/40781902816)、[公開通常対局smoke 40782005883](https://github.com/asumax1128/mathjong/actions/runs/40782005883)、[公開初心者教材E2E 40782005997](https://github.com/asumax1128/mathjong/actions/runs/40782005997)すべてSuccess。**Ver.0.6.2のiPhone実機表示確認は未実施**。ゲームルール、AI判断・係数、旧9人の内部ID、保存形式は不変。[変更仕様docs/42](42-ver0.6.2-trio-profiles.md)。
 
 > **正式な実機受入の区別**：Ver.0.6.1（新3名の本体統合、12人選択）はオーナーが2026-10-29にiPhone Safariで**8/8項目合格**を報告。[受入記録docs/41](41-ver0.6.1-release-acceptance.md)。[PR #24](https://github.com/asumax1128/mathjong/pull/24) は `6d254a56b92a3c041d1e1ffe5c2716a887179c57` でmerged。本受入をVer.0.6.2の実機合格として流用しない。正式画像は引き続き頭文字の仮表示。
 
@@ -68,3 +70,9 @@ D18はPR #24公開直後の中間状態。**後続の実態**：オーナーに�
 ## D21：Ver.0.6.2年齢・難易度表示変更の公開（2026-10-29）
 
 D19に基づくPR #27のHEAD `b1ff774bfcdc3b8408a4d812d2ea7389c0249249` で必須CI2件Success、mainマージ `627081240c3b9c9907adbf96061a6fcd71b81f2d`。Pages run 40781902816、通常対局smoke run 40782005883、初心者教材公開E2E run 40782005997がすべてSuccess。ゆうじん26歳・初級、たら25歳・中級、のっち28歳・上級。画面順は初級4名→中級4名→上級4名。旧9人やAI判断、ゲームルール、保存形式は変更なし。**本表示変更のiPhone Safari実機受入は未実施**。既存Ver.0.6.1の実機8/8合格はdocs/41で別に維持。
+
+## D22：一覧の仮画像削除と将来イラストの詳細限定（2026-10-29）
+
+オーナーがVer.0.6.2のiPhone Safari画像を提示し、『この、仮表示の部分があると見にくいので、なくす。もしイラストを今後追加しても、スマホ版は詳細を見ないとイラストは見られないようにして』と正式指示。Ver.0.6.3では全12人の一覧をテキスト（名前・難易度・特徴・選択）のみに統一し、仮表示文字・頭文字枠・詳細の準備中メッセージを削除。将来イラスト採用時は詳細モーダル内でのみ描画する。PR #28は必須CI2件Successでmain `9ae78cf97be6add41e8799fd0b066ba2298e5be4` に正規マージ。Ver.0.6.3のiPhone実機再受入は未確認。既存12名の打牌AI・ルール・保存形式は変更しない。詳細docs/43。
+
+**D22の公開後追記**：PR #28のPages run 40786901639、公開通常対局smoke run 40786948418、公開初心者の部屋1〜6 E2E run 40786948313 がすべてSuccess。新3名に正式イラストは未実装、Ver.0.6.3のiPhone Safari再実機確認は未報告。
