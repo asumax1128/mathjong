@@ -41,7 +41,7 @@
 - ゆうじん：一覧一言 **「刻子大好き」**（旧「鳴かずに刻子を育てる」、PR #30、Ver.0.6.4）
 - ふくやま：表示名 **「シャカ」**（内部ID `fukuyama` 維持）
 
-表示変更は[PR #18](https://github.com/asumax1128/mathjong/pull/18)でCI2件成功後に**mainマージ済み**。公開サイトの配信・iPhone表示は別途確認する。
+かなた・かおる・シャカの変更は[PR #18](https://github.com/asumax1128/mathjong/pull/18)、ゆうじんの一言変更は[PR #30](https://github.com/asumax1128/mathjong/pull/30)で、それぞれ必須CI成功後にmainマージ済み。Ver.0.6.4のPages・公開smokeはSuccess、iPhone Safari実機再確認は未報告（docs/44）。
 
 ## 技術的保守・未承認の将来案
 
