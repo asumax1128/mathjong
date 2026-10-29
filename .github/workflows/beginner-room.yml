@@ -40,3 +40,13 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Beginner room browser regression
         run: node tests/e2e/play.mjs --only v07BeginnerRoom,v07BeginnerRoom2,v06FreeSelect,v07TableHintDock
+      - name: Ver.0.7 UI preview screenshots (320px through desktop)
+        run: |
+          mkdir -p /tmp/v07-preview
+          node tests/e2e/play.mjs --only v07TableHintDock --shots /tmp/v07-preview
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v07-table-hint-preview
+          path: /tmp/v07-preview
+          if-no-files-found: ignore
