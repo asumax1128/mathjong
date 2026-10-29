@@ -1,4 +1,6 @@
 # 数雀｜新チャットでのGitHubからの復元入口
+> **次期開発方針（オーナー承認：2026-10-29）**：Ver.0.7は対局UIを本格麻雀卓寄りに刷新するが、**画面下のスペースは削らず既存の2段階ヒント・数式確認専用エリア**にする。以後は牌譜基盤→振り返り・戦績→一局勝負・何切る→詰め数雀・大会→高度牌譜分析の順。正式仕様と品質ゲートは[docs/45](45-v07-v11-roadmap.md)。**計画であって実装・公開済みという意味ではない**。
+
 
 > **最新公開（2026-10-29）：数雀 Ver.0.6.4**。オーナーの指示で「ゆうじん」の一覧の一言を **「鳴かずに刻子を育てる」→「刻子大好き」** に変更。表示用 `PROFILES.yujin.trait` と `TRIO_ROSTER` の `styleLabel` のみ（AI判断、刻子重視・鳴かない打ち方、ほか11名、ゲームルール、保存・PRNGは不変）。[PR #30](https://github.com/asumax1128/mathjong/pull/30) HEAD `6c77b12a0a84a430f880a95ca2186f06624f6a25` 必須CI2件Success後、main `e0db390858c9c7efe2ecc9558652ed144443d2cd` に正規マージ。[Pages run 40791462358](https://github.com/asumax1128/mathjong/actions/runs/40791462358)、[公開通常smoke run 40791509868](https://github.com/asumax1128/mathjong/actions/runs/40791509868)で新文言合格、[初心者の部屋1〜6公開E2E run 40791509859](https://github.com/asumax1128/mathjong/actions/runs/40791509859)はすべてSuccess。[仕様 docs/44](44-ver0.6.4-yujin-tagline.md)。**Ver.0.6.4のオーナーiPhone Safari実機確認は未報告**。画像はVer.0.6.3と同様、一覧に表示せず詳細限定。PR #19はDraftのまま変更しない。
 
