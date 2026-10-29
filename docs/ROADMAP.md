@@ -88,3 +88,8 @@ PR #37の開始HEAD `3f1344f`と専用CI [40860681346](https://github.com/asumax
 ## 2026-10-29 追記：Ver.0.8 第5段階の監査・読取専用復旧照合
 
 固定HEAD `215af87`を実装履歴なしの別Codexエージェントで読取レビューし、fixture/importの不存在物理ID受理P3を再現。新牌譜validatorのみで厳密化し、既存Game/ルール/AI/得点は維持。[監査・修正・読取照合・テスト・限界](55-v08-recovery-audit.md)を参照。outcome-unknown/CAS競合のID/token/digest/全内容を読み直すが、元writeの成功証明・token採用・自動retry/上書き/削除/再開はしない。app.js/卓UI/既存保存形式/URLは不変。通常対局未接続、PR #37 Draft維持、mainマージ・公開禁止。別人/別モデルの外部監査やSafari合格とは扱わず、過去CIを新HEADへ流用しない。
+
+
+## 2026-10-30 JST 追記：Ver.0.8 第6段階のセッション資源・保存状態
+
+[docs/56](56-v08-session-lifecycle.md)を参照。active最大1＋終了中最大1の独立調停と、私有データを含まない保存状態の純粋な説明関数を追加。飽和時はゲームを止めず新試合の記録だけ見送り、未保存損失を隠さない。読取り照合は事実確認のみで、自動retry/上書き/削除/token採用/再開なし。通常対局・app.js・卓UIへ未接続。既存エンジン/12人AI/得点/保存形式/URLとPR #36は不変。Draft #37維持、mainマージ・Pages公開・Ver.0.9以降は禁止。従来の履歴/CIを新HEADの実績へ流用しない。Safari/総ピークRAM/OS kill/ユーザー判断による保全・復旧は別ゲート。

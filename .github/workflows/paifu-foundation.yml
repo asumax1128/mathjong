@@ -7,6 +7,12 @@ on:
       - 'src/ui/paifu-worker-store.js'
       - 'src/ui/paifu-session.js'
       - 'src/ui/paifu-recovery.js'
+      - 'src/ui/paifu-lifecycle.js'
+      - 'src/ui/paifu-save-state.js'
+      - 'tests/paifu-lifecycle.test.js'
+      - 'tests/paifu-save-state.test.js'
+      - 'tests/e2e/paifu-lifecycle.mjs'
+      - 'docs/56-v08-session-lifecycle.md'
       - 'tests/paifu-recovery.test.js'
       - 'tests/paifu-audit.test.js'
       - 'tests/e2e/paifu-recovery.mjs'
@@ -51,6 +57,11 @@ jobs:
           node --check tests/paifu-recovery.test.js
           node --check tests/paifu-audit.test.js
           node --check tests/e2e/paifu-recovery.mjs
+          node --check src/ui/paifu-lifecycle.js
+          node --check src/ui/paifu-save-state.js
+          node --check tests/paifu-lifecycle.test.js
+          node --check tests/paifu-save-state.test.js
+          node --check tests/e2e/paifu-lifecycle.mjs
           node --check src/ui/paifu-session.js
           node --check tests/paifu-session.test.js
           node --check tests/e2e/paifu-session.mjs
@@ -76,6 +87,8 @@ jobs:
         run: node tests/e2e/paifu-session.mjs
       - name: Read-only recovery audit, lost acknowledgements and multiple pages
         run: node tests/e2e/paifu-recovery.mjs
+      - name: Bounded session lifecycle and private-safe save state
+        run: node tests/e2e/paifu-lifecycle.mjs
       - name: Diagnostic performance comparison (no skipped validation)
         run: node tests/e2e/paifu-performance.mjs --output paifu-performance.json
       - name: Preserve synthetic benchmark results
