@@ -1218,12 +1218,12 @@ async function handReorder(browser) {
   // (11) 320・375・390・430px の縦・横で並び替えでき、画面からはみ出さない
   for (const [w, h] of [[320, 568], [375, 667], [390, 844], [430, 932], [568, 320], [667, 375], [844, 390], [932, 430]]) {
     const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow', { width: w, height: h });
-    // 横画面では下端の操作バーが手牌に重なるので、利用者と同じくページの一番下までスクロールしてから操作する
-    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    // Ver.0.7は卓内スクロール。利用者と同じく手牌を表示してから実座標で押せることを検査する。
+    await page.locator('.self .hand').scrollIntoViewIfNeeded();
     await page.waitForTimeout(50);
     const hitOk = await page.evaluate(() => {
       const t = document.querySelector('.hand .tile').getBoundingClientRect();
-      return !!document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2).closest('.hand .tile');
+      return !!document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2)?.closest('.hand .tile');
     });
     assert.ok(hitOk, `${w}x${h}: スクロール後は手牌を押せる`);
     const o = await shownOrder(page);
@@ -6598,7 +6598,10 @@ async function v07TableHintDock(browser) {
       const before=e.scrollTop;window.__mathjong.render();return [before,document.querySelector('.study-dock-content').scrollTop];
     });
     assert.equal(scroll[0],scroll[1]);
-    if(SHOTS) await page.screenshot({path:`${SHOTS}/v07-dock-${width}x${height}-confirm.png`});
+    if(SHOTS) {
+      await page.locator('.study-dock-content').evaluate(e=>{e.scrollTop=0;});
+      await page.screenshot({path:`${SHOTS}/v07-dock-${width}x${height}-confirm.png`});
+    }
     await page.locator('button[data-action="hint"]').tap();
     assert.equal(await page.locator('.study-dock.idle').count(),1);
     assert.equal(await page.locator('.hand .tile.fhf').count(),0);
@@ -6613,6 +6616,35 @@ async function v07TableHintDock(browser) {
     assert.equal(await page.evaluate(()=>window.__mathjong.S.game.events.length),initial.events);
     await page.locator(`.hand .tile[data-id="${id}"]`).tap();
     assert.equal(await page.evaluate((id)=>window.__mathjong.S.game.events.filter(e=>e.type==='discard'&&e.seat===0&&e.tile===id).length,id),1);
+    if (width === 375 || (width === 1024 && tablet)) {
+      // 実Gameの合法なツモ切り/見送りで河を伸ばす。牌の重複や架空の河を作らない。
+      const river = await page.evaluate(() => {
+        const m=window.__mathjong,g=m.S.game;
+        clearTimeout(m.S.timer);m.S.timer=null;
+        const advanceTo=n=>{
+          for(let steps=0;g.rivers[1].length<n && steps<1000;steps++) {
+            const p=g.pending();if(!p)throw new Error('河の検査前に終局');
+            if(p.type==='claim')g.respond(p.seat,{type:'pass'});
+            else g.discard(p.seat,g.drawn);
+          }
+          g.checkInvariants();
+        };
+        const read=()=>{const e=document.querySelector('.seat-1 .river'),b=e.getBoundingClientRect(),t=e.lastElementChild.getBoundingClientRect();
+          return {top:e.scrollTop,max:e.scrollHeight-e.clientHeight,lastVisible:t.bottom<=b.bottom+2,last:Number(e.lastElementChild.dataset.id)};};
+        advanceTo(20);m.render();const first=read();
+        document.querySelector('.seat-1 .river').scrollTop=0;m.render();const retained=read();
+        advanceTo(21);m.render();const next=read();
+        const table=document.querySelector('.table');table.scrollTop=75;const scroll=table.scrollTop;m.render();
+        const result={first,retained,next,expectedLast:g.rivers[1].at(-1).id,scroll,restored:document.querySelector('.table').scrollTop};
+        m.startRound();result.reset=document.querySelector('.table').scrollTop;return result;
+      });
+      assert.ok(river.first.max>0 && river.first.top>=river.first.max-2 && river.first.lastVisible,'長い河の最新牌が見える');
+      assert.equal(river.retained.top,0,'過去の河を読む位置を再描画で維持');
+      assert.ok(river.next.top>=river.next.max-2 && river.next.lastVisible,'新しい打牌の追加で末尾へ移動');
+      assert.equal(river.next.last,river.expectedLast,'物理牌IDも一致');
+      assert.equal(river.restored,river.scroll,'卓全体のスクロールも再描画で維持');
+      assert.equal(river.reset,0,'次局にはスクロールを持ち越さない');
+    }
     assert.deepEqual(errors,[]);
     await ctx.close();
   }
@@ -6636,7 +6668,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock };
+    const fns = { handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
