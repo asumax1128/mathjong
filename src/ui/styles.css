@@ -919,3 +919,21 @@ table.values td.undef { color: #999; font-size: 12px; }
   .table .msg { min-height: 18px; }
   .table .self .hand-help { gap: 4px; }
 }
+
+/* Ver.0.7 回帰対策：横向き短画面でも学習エリアが行動バーの下へ隠れない。
+   牌の寸法と宣言ボタンのタップサイズは維持し、補助説明と空白を詰める。 */
+@media (orientation: landscape) and (max-height: 500px) {
+  #app:has(> .bar) > .table { padding: 3px 6px; gap: 2px; }
+  .table .opponents { min-height: 20px; padding: 3px; gap: 3px; }
+  .table .msg { min-height: 0; height: 17px; overflow: hidden; padding: 0 2px; font-size: 12px; }
+  .table .self { padding: 2px 6px; }
+  .table .self .river.mine { min-height: 12px; max-height: 17px; overflow-y: auto; }
+  .table .self .melds.mine { margin-top: 1px; }
+  .table .self .hand { margin-top: 0; padding-top: 3px; }
+  .table .self .hand-help { gap: 2px; margin-top: 2px; }
+  .table .self .hand-help > span:first-child { display: none; }
+  .table .study-dock { min-height: 36px; height: 37px; }
+  .table .study-dock.open { min-height: 82px; height: min(23dvh, 92px); }
+  .table .study-dock-head { padding: 2px 8px; }
+  .table .study-placeholder { font-size: 11px; }
+}
