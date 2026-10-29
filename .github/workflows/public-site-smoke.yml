@@ -22,7 +22,7 @@ jobs:
       - name: Open the existing Pages URL (title → choose 3 opponents → start a match)
         run: |
           mkdir -p /tmp/public-shots
-          node tools/public-smoke.mjs --url https://asumax1128.github.io/mathjong/ --version 0.6.3 --wait 900 --shots /tmp/public-shots
+          node tools/public-smoke.mjs --url https://asumax1128.github.io/mathjong/ --version 0.6.4 --wait 900 --shots /tmp/public-shots
       - uses: actions/upload-artifact@v4
         if: always()
         with:

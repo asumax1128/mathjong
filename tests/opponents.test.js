@@ -35,6 +35,7 @@ test('一覧：12人を初級→中級→上級の順に連続。名前・年齢
   assert.equal(opponentById('kaoru').name, 'かおる');
   assert.equal(opponentById('kanata').trait, '冷静に待ちを見る');
   assert.equal(opponentById('kaoru').trait, 'ヨイショの達人');
+  assert.equal(opponentById('yujin').trait, '刻子大好き', 'ゆうじんの一覧の一言');
   assert.equal(opponentById('fukuyama').name, 'シャカ');
   assert.equal(opponentById('fukuyama').id, 'fukuyama');
   assert.equal(opponentById('nobody'), null);
