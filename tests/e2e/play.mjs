@@ -97,8 +97,17 @@ async function playDevice(browser, dev, seed, rounds, stats, { autopass = false,
   const tap = (loc) => (dev.hasTouch ? loc.tap() : loc.click());
 
   // 操作バーが画面内（下端のホームインジケーター領域を除く）に収まっている
+  if (dev.viewport.width > dev.viewport.height && dev.viewport.height <= 500) await page.locator('.study-dock').scrollIntoViewIfNeeded();
   const bar = await page.locator('.bar').boundingBox();
   assert.ok(bar && bar.y + bar.height <= dev.viewport.height + 0.5, `${dev.name}: 操作バーが画面外`);
+  assert.equal(await page.locator('.board-center').count(), 1, '中央の局情報パネルがある');
+  const handRect = await page.locator('.self .hand').boundingBox();
+  const dockRect = await page.locator('.study-dock').boundingBox();
+  const split = dev.viewport.width >= 1000 && dev.viewport.height >= 600 && dev.viewport.width > dev.viewport.height;
+  assert.ok(handRect && dockRect && (split ? dockRect.x >= handRect.x + handRect.width - 1 : dockRect.y >= handRect.y + handRect.height - 1),
+    `${dev.name}: ヒント専用エリアは手牌より下`);
+  assert.ok(dockRect.y + dockRect.height <= bar.y + 2,
+    `${dev.name}: ヒント専用エリアは操作バーより上`);
   // 牌が iOS のダブルタップ拡大を起こさない設定
   assert.equal(await page.locator('.hand .tile').first().evaluate((el) => getComputedStyle(el).touchAction), 'manipulation');
   // 手牌のタップ領域（幅30px以上）
@@ -481,6 +490,8 @@ async function v02aFeatures(browser) {
   // (1) 役候補ヒント：最大3件、エンジンの yakuCandidates（公開情報）と一致、必要牌は表示しない
   await page.locator('button[data-action="hint"]').tap();
   await page.waitForSelector('.hint-yaku');
+  assert.equal(await page.locator('.study-dock.open .hint-box .hint-basic').count(), 1, '第1段階ヒントは手牌下の専用エリアに表示');
+  assert.equal(await page.locator('.self .hint-box').count(), 0, '手牌内にヒントを重複表示しない');
   const shown = await page.locator('.yaku-cands li b').allInnerTexts();
   const expected = await page.evaluate(async (base) => {
     const { yakuCandidates } = await import(`${base}src/engine/yakuhint.js`);
@@ -1207,12 +1218,12 @@ async function handReorder(browser) {
   // (11) 320・375・390・430px の縦・横で並び替えでき、画面からはみ出さない
   for (const [w, h] of [[320, 568], [375, 667], [390, 844], [430, 932], [568, 320], [667, 375], [844, 390], [932, 430]]) {
     const { ctx, page, cdp, errors } = await reorderPage(browser, '?seed=9&speed=slow', { width: w, height: h });
-    // 横画面では下端の操作バーが手牌に重なるので、利用者と同じくページの一番下までスクロールしてから操作する
-    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    // Ver.0.7は卓内スクロール。利用者と同じく手牌を表示してから実座標で押せることを検査する。
+    await page.locator('.self .hand').scrollIntoViewIfNeeded();
     await page.waitForTimeout(50);
     const hitOk = await page.evaluate(() => {
       const t = document.querySelector('.hand .tile').getBoundingClientRect();
-      return !!document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2).closest('.hand .tile');
+      return !!document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2)?.closest('.hand .tile');
     });
     assert.ok(hitOk, `${w}x${h}: スクロール後は手牌を押せる`);
     const o = await shownOrder(page);
@@ -2166,10 +2177,10 @@ async function chiAutoPass(browser) {
   // (12) バージョン表示：ヘッダー・ページタイトル・再現情報
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.6.4');
-    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.6.4');
+    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.7.0-a');
+    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.7.0-a');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.6\.4 ・ エンジン v0\.5\.0-a/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.7\.0-a ・ エンジン v0\.5\.0-a/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -6517,6 +6528,129 @@ async function v07BeginnerRoom2(browser) {
   console.log('✓ 初心者の部屋 第4〜6段階：チー・ポン・役の制限・リーチ・ロン・ツモ・卒業試験、再開・一覧・やり直し・保存不可、320/375/390/430px');
 }
 
+// ---- Ver.0.7：麻雀卓と下部ヒント・数式確認エリアの画面検査 ----
+async function v07TableHintDock(browser) {
+  const viewports = [[320,568],[375,667],[390,844],[430,932],[568,320],[844,390],
+    [768,1024],[1024,768],[1180,820],[1366,1024],[1366,768]];
+  for (const [width, height] of viewports) {
+    const tablet = width >= 1000 && height >= 600 && width > height;
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    const mode = width === 390 || tablet ? 'math2' : 'math1';
+    await page.goto(LOCAL + `?mode=${mode}&seed=7007&speed=slow`);
+    await page.waitForSelector('.hand .tile');
+    // 必ず完成した2式を含める。数式なしのランダム配牌で第2段階を空振りさせない。
+    await apScene(page, presetWall(['sin','30','=1/2','cos','180','=-1','tan','45'], ['0'], [
+      ['sin','sin','0','90','90','=-√3','=√3','150'],
+      ['cos','135','=√3','=-1/√2','120','120','tan','=0'],
+      ['=-1','tan','tan','120','=1/√3','90','=-1/√2','=-√3'],
+    ]));
+    const initial = await page.evaluate(() => ({ hand:window.__mathjong.S.game.hands[0].slice(),
+      events:window.__mathjong.S.game.events.length, hints:window.__mathjong.S.hintsUsed }));
+    assert.equal(await page.locator('.board-center .bc-round').count(), 1);
+    assert.equal(await page.locator('.study-dock.idle').count(), 1);
+    async function geometry(stage) {
+      const g = await page.evaluate(() => {
+        const box=s=>{const b=document.querySelector(s).getBoundingClientRect();return {top:b.top,bottom:b.bottom,left:b.left,right:b.right,width:b.width,height:b.height};};
+        return {table:box('.table'), board:box('.opponents'),center:box('.board-center'),hand:box('.self'),
+          dock:box('.study-dock'),bar:box('.bar'),panels:[1,2,3].map(s=>box(`.seat-${s}`)),
+          overflow:document.documentElement.scrollWidth-innerWidth};
+      });
+      const label=`${width}x${height} ${stage} ${JSON.stringify(g)}`;
+      assert.ok(g.overflow<=1, '横スクロールなし '+label);
+      assert.ok(g.bar.bottom<=height+1 && g.bar.top>=0,'操作バーは画面内 '+label);
+      for(const p of g.panels) {
+        const intersects=p.left<g.center.right-1 && p.right>g.center.left+1 && p.top<g.center.bottom-1 && p.bottom>g.center.top+1;
+        assert.ok(!intersects,'局情報が他家と重ならない '+label);
+      }
+      assert.ok(g.center.left>=g.board.left && g.center.right<=g.board.right,'局情報は卓内 '+label);
+      if(tablet) {
+        const leftRatio=g.board.width/(g.dock.right-g.board.left);
+        assert.ok(leftRatio>=.60 && leftRatio<=.65, '左卓60〜65% '+label);
+        assert.ok(g.dock.left>=g.board.right && g.dock.top<=g.board.top+1,'右に学習専用領域 '+label);
+        assert.ok(g.dock.bottom<=g.bar.top && g.hand.right<=g.dock.left,'手牌と学習エリアは非重複 '+label);
+      } else {
+        assert.ok(g.dock.top>=g.hand.bottom-1, '手牌より下の学習エリア '+label);
+        await page.locator('.study-dock').scrollIntoViewIfNeeded();
+        const d=await page.locator('.study-dock').boundingBox();
+        assert.ok(d.y>=g.table.top-2 && d.y+d.height<=g.bar.top+2,'学習エリアまで卓内スクロールできる '+label+' actual='+JSON.stringify(d));
+      }
+      for(const b of await page.locator('.bar button').all()) assert.ok((await b.boundingBox()).height>=44,'行動ボタン44px');
+    }
+    await geometry('OFF');
+    if(width===320) {
+      const all=await page.evaluate(()=>[...document.querySelectorAll('.panel,.self .hand')].every(e=>{const b=e.getBoundingClientRect(),t=document.querySelector('.table').getBoundingClientRect();return b.top>=t.top-2&&b.bottom<=t.bottom+2;}));
+      assert.ok(all,'320pxの初期表示で3人と手牌を同時に確認できる');
+    }
+    await page.locator('button[data-action="hint"]').tap();
+    assert.equal(await page.locator('.study-dock.open .hint-basic').count(), 1);
+    assert.equal(await page.locator('.self .hint-box').count(), 0);
+    await geometry('発見');
+    await page.locator('[data-action="fh-confirm"]').tap();
+    assert.equal(await page.locator('.study-dock.open .fh').count(), 1);
+    assert.ok(await page.locator('.hand .tile.fhf').count()>0, '既存の数式枠');
+    await geometry('数式確認');
+    const hints=await page.evaluate(()=>window.__mathjong.S.hintsUsed);
+    assert.equal(hints,initial.hints+2,'明示操作2段階だけ加算');
+    // スクロール中のAI再描画でも、同じ手牌のヒント位置と段階を維持。
+    const scroll=await page.evaluate(()=>{
+      const e=document.querySelector('.study-dock-content');e.scrollTop=35;
+      const before=e.scrollTop;window.__mathjong.render();return [before,document.querySelector('.study-dock-content').scrollTop];
+    });
+    assert.equal(scroll[0],scroll[1]);
+    if(SHOTS) {
+      await page.locator('.study-dock-content').evaluate(e=>{e.scrollTop=0;});
+      await page.screenshot({path:`${SHOTS}/v07-dock-${width}x${height}-confirm.png`});
+    }
+    await page.locator('button[data-action="hint"]').tap();
+    assert.equal(await page.locator('.study-dock.idle').count(),1);
+    assert.equal(await page.locator('.hand .tile.fhf').count(),0);
+    const after=await page.evaluate(()=>{const g=window.__mathjong.S.game;g.checkInvariants();return {hand:g.hands[0].slice(),events:g.events.length};});
+    assert.deepEqual(after,{hand:initial.hand,events:initial.events},'表示操作は牌・イベントを変更しない');
+    await page.locator('.self .hand').scrollIntoViewIfNeeded();
+    if(SHOTS) await page.screenshot({path:`${SHOTS}/v07-dock-${width}x${height}.png`});
+    // 2回タップは従来どおり：1回目は選択だけ。2回目の打牌は1回だけ。
+    const drawn=page.locator('.hand .tile.drawn');
+    const id=Number(await drawn.getAttribute('data-id'));
+    await drawn.tap();
+    assert.equal(await page.evaluate(()=>window.__mathjong.S.game.events.length),initial.events);
+    await page.locator(`.hand .tile[data-id="${id}"]`).tap();
+    assert.equal(await page.evaluate((id)=>window.__mathjong.S.game.events.filter(e=>e.type==='discard'&&e.seat===0&&e.tile===id).length,id),1);
+    if (width === 375 || (width === 1024 && tablet)) {
+      // 実Gameの合法なツモ切り/見送りで河を伸ばす。牌の重複や架空の河を作らない。
+      const river = await page.evaluate(() => {
+        const m=window.__mathjong,g=m.S.game;
+        clearTimeout(m.S.timer);m.S.timer=null;
+        const advanceTo=n=>{
+          for(let steps=0;g.rivers[1].length<n && steps<1000;steps++) {
+            const p=g.pending();if(!p)throw new Error('河の検査前に終局');
+            if(p.type==='claim')g.respond(p.seat,{type:'pass'});
+            else g.discard(p.seat,g.drawn);
+          }
+          g.checkInvariants();
+        };
+        const read=()=>{const e=document.querySelector('.seat-1 .river'),b=e.getBoundingClientRect(),t=e.lastElementChild.getBoundingClientRect();
+          return {top:e.scrollTop,max:e.scrollHeight-e.clientHeight,lastVisible:t.bottom<=b.bottom+2,last:Number(e.lastElementChild.dataset.id)};};
+        advanceTo(20);m.render();const first=read();
+        document.querySelector('.seat-1 .river').scrollTop=0;m.render();const retained=read();
+        advanceTo(21);m.render();const next=read();
+        const table=document.querySelector('.table');table.scrollTop=75;const scroll=table.scrollTop;m.render();
+        const result={first,retained,next,expectedLast:g.rivers[1].at(-1).id,scroll,restored:document.querySelector('.table').scrollTop};
+        m.startRound();result.reset=document.querySelector('.table').scrollTop;return result;
+      });
+      assert.ok(river.first.max>0 && river.first.top>=river.first.max-2 && river.first.lastVisible,'長い河の最新牌が見える');
+      assert.equal(river.retained.top,0,'過去の河を読む位置を再描画で維持');
+      assert.ok(river.next.top>=river.next.max-2 && river.next.lastVisible,'新しい打牌の追加で末尾へ移動');
+      assert.equal(river.next.last,river.expectedLast,'物理牌IDも一致');
+      assert.equal(river.restored,river.scroll,'卓全体のスクロールも再描画で維持');
+      assert.equal(river.reset,0,'次局にはスクロールを持ち越さない');
+    }
+    assert.deepEqual(errors,[]);
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.7：11画面・卓と局情報の非重複・縦の学習ドック・横タブレット62/38・数学ⅠⅡ・2段階・スクロール維持・2回タップ');
+}
+
 // 公開モードではサーバーも転送先も作らない。接続失敗をローカル成功で隠さない。
 const server = EXTERNAL ? null : await startServer(0, { base: BASE, host: '127.0.0.1' });
 if (server) {
@@ -6534,7 +6668,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2 };
+    const fns = { handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -6586,6 +6720,7 @@ try {
   await v06TrioIntegration(browser);
   await v07BeginnerRoom(browser);
   await v07BeginnerRoom2(browser);
+  await v07TableHintDock(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));

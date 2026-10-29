@@ -1,0 +1,152 @@
+{
+  "pr": 34,
+  "branch": "feature/v0.7-table-hint-dock",
+  "baselineHead": "60a5c2db6798b7c6856eee93b76d83c9551c8cb1",
+  "baseMain": "2e5124ee1d353d35689729606731699bba796884",
+  "recovery": {
+    "changesPreserved": true,
+    "priorTmpLogsAndScreenshots": "not present; regenerated",
+    "uncommittedPatchArchived": true
+  },
+  "sourceSha256": {
+    "src/ui/app.js": "3c6bc2e4a43bd4ffc8a53744a8ea2be01efd0126821dd9b94385cb7d5e3aa361",
+    "src/ui/styles.css": "282bbc29f15f3ae1bb7c47ed8bef969b28ff3bcc5d36d1eaca2ee08948486381",
+    "tests/e2e/play.mjs": "6042c59382eef2bcbcfe3ffdb0518586c33b0972ecb69385503b019a7c644464"
+  },
+  "unchangedFromMain": [
+    "src/engine",
+    "src/ui/render.js",
+    "src/ui/handdrag.js",
+    "src/ui/handorder.js",
+    "src/ui/opponents.js",
+    "src/ui/beginner-room.js",
+    "src/ui/beginner-practice.js",
+    "src/ui/beginner-progress.js",
+    "src/ui/effects.js",
+    "src/ui/sound.js",
+    "src/ui/voice.js",
+    "src/ui/params.js",
+    "src/ui/replay.js"
+  ],
+  "browser": "system Chromium 154.0.8037.57 with external Playwright launch helper; not two distinct browser modes",
+  "unit": {
+    "passed": 379,
+    "failed": 0,
+    "skipped": 0
+  },
+  "responsive": {
+    "passed": true,
+    "viewports": [
+      [
+        320,
+        568
+      ],
+      [
+        375,
+        667
+      ],
+      [
+        390,
+        844
+      ],
+      [
+        430,
+        932
+      ],
+      [
+        568,
+        320
+      ],
+      [
+        844,
+        390
+      ],
+      [
+        768,
+        1024
+      ],
+      [
+        1024,
+        768
+      ],
+      [
+        1180,
+        820
+      ],
+      [
+        1366,
+        1024
+      ],
+      [
+        1366,
+        768
+      ]
+    ],
+    "stages": [
+      "off",
+      "discovery",
+      "formula confirmation"
+    ],
+    "realRiverScroll": true,
+    "stageCountsUnchanged": true,
+    "doubleTapDiscardOnce": true
+  },
+  "handReorder": {
+    "passed": true,
+    "note": "test scrolls the actual table to the hand, then checks hit testing and real touch/mouse; keeps all assertions"
+  },
+  "negativeControl": {
+    "priorCSS": "expected failure: overlapping center and players at320px",
+    "repositoryChanged": false
+  },
+  "fullE2E": {
+    "passed": true,
+    "completion": "E2E OK",
+    "seconds": 793.345,
+    "deviceProgressSummary": {
+      "rounds": 23,
+      "wins": [
+        0,
+        3,
+        12,
+        8
+      ],
+      "draws": 0,
+      "tsumo": 0,
+      "ron": 0,
+      "ronDeclined": 1,
+      "chi": 7,
+      "chiPassed": 15,
+      "chiOverriddenByRon": 0,
+      "discards": 118,
+      "yaku": {
+        "三関制覇": 12,
+        "三象限巡り": 7,
+        "リーチ": 16,
+        "同関一色": 1,
+        "第2象限一色": 2,
+        "象限三角揃い": 3,
+        "第1象限一色": 2,
+        "余角対": 1
+      },
+      "pon": 4,
+      "autoPassed": 7,
+      "seconds": 793.345
+    },
+    "coverageNote": "summary counts device play only; scenario/AI/lesson/effect checks also ran"
+  },
+  "screenshots": [
+    "docs/previews/v07/v07-dock-1024x768-confirm.png",
+    "docs/previews/v07/v07-dock-320x568.png",
+    "docs/previews/v07/v07-dock-390x844-confirm.png",
+    "docs/previews/v07/v07-dock-844x390.png"
+  ],
+  "remoteCI": "to be checked against final pushed HEAD; prior-head results are not reused",
+  "safari": "iPhone Safari/WebKit untested",
+  "publish": {
+    "mainMerged": false,
+    "pagesDeployed": false,
+    "draftChanged": false
+  },
+  "verification": "implementer regression verification, not separate independent audit"
+}

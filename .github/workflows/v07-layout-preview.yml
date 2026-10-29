@@ -1,0 +1,38 @@
+name: Ver.0.7 table UI responsive check (no deploy)
+on:
+  pull_request:
+    paths:
+      - 'src/ui/app.js'
+      - 'src/ui/styles.css'
+      - 'tests/e2e/play.mjs'
+      - '.github/workflows/v07-layout-preview.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  layout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check syntax
+        run: node --check src/ui/app.js && node --check tests/e2e/play.mjs
+      - name: Install browser
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Responsive UI and hint dock (11 viewports)
+        run: |
+          mkdir -p /tmp/v07-layout
+          node tests/e2e/play.mjs --only v07TableHintDock --shots /tmp/v07-layout
+      - name: Real touch and mouse hand reorder regression
+        run: node tests/e2e/play.mjs --only handReorder
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v07-responsive-table-shots
+          path: /tmp/v07-layout
+          if-no-files-found: ignore
