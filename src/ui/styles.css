@@ -833,3 +833,89 @@ table.values td.undef { color: #999; font-size: 12px; }
 .br-stage-state { font-size: 12px; color: var(--ink-dim); }
 .br-stage:disabled { opacity: 0.45; }
 @media (max-width: 350px) { .bp-hand { gap: 4px; } .bp-hand .br-pick { min-height: 54px; } .bp-table { padding: 6px; } .br-progress { gap: 8px; } }
+
+
+/* ===== Ver.0.7 UI 第1段階：麻雀卓レイアウト＋下部ヒント・数式確認 =====
+   非対局画面は変更しない。牌サイズと入力判定は従来のものを利用する。
+   牌・対戦相手の河・現在の局情報は盤面上、計算補助は手牌より下、合法操作は下端。 */
+#app:has(> .bar) { height: 100dvh; min-height: 0; }
+#app:has(> .bar) > .top { flex: 0 0 auto; }
+#app:has(> .bar) > .table {
+  min-height: 0; overflow-y: hidden; overflow-x: clip;
+  background: radial-gradient(ellipse at 48% 35%, #284a57 0%, #153341 55%, #102630 100%);
+  padding: 8px; gap: 6px;
+}
+#app:has(> .bar) > .bar { flex: 0 0 auto; z-index: 3; }
+.table .opponents {
+  flex: 1 1 auto; min-height: 76px; overflow-y: auto; overscroll-behavior: contain;
+  display: grid; gap: 8px; padding: 9px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas: "top top" "left right" "center center";
+  grid-auto-rows: min-content;
+  border: 2px solid rgba(190, 211, 209, .23);
+  border-radius: 16px;
+  background: radial-gradient(ellipse at 50% 35%, #24475b, #10283b);
+  box-shadow: inset 0 0 0 3px rgba(4, 14, 25, .18), inset 0 8px 24px rgba(0, 0, 0, .20);
+  scrollbar-width: thin;
+}
+.table .panel { background: rgba(7, 20, 33, .47); border-color: rgba(193, 208, 218, .24); }
+.table .panel.active, .table .self.active { border-color: var(--gold); }
+.table .area-center { grid-area: center; min-width: 0; }
+.table .board-center {
+  display: flex; flex-wrap: wrap; justify-content: center; align-items: center;
+  gap: 3px 9px; padding: 5px 9px; min-height: 44px; max-width: 100%;
+  background: rgba(4, 14, 24, .67); border: 1px solid rgba(217, 230, 239, .20);
+  border-radius: 10px; box-shadow: inset 0 0 10px rgba(0, 0, 0, .3);
+  color: var(--ink); font-size: 11px; font-variant-numeric: tabular-nums;
+}
+.table .bc-mode { font-size: 10px; color: var(--ink-dim); }
+.table .bc-round { font-size: 18px; color: var(--gold); letter-spacing: .04em; }
+.table .bc-wall strong { color: #fff; }
+.table .bc-parent, .table .bc-state { color: var(--ink-dim); }
+.table .msg { flex: 0 0 auto; min-height: 24px; padding: 2px 4px; }
+.table .self {
+  flex: 0 0 auto; border-color: rgba(193, 208, 218, .27);
+  background: rgba(5, 22, 31, .64); padding: 5px 7px 8px;
+}
+.table .self .river.mine { max-height: min(10dvh, 80px); overflow-y: auto; overscroll-behavior: contain; }
+.table .self .hand { margin-top: 5px; padding-top: 10px; }
+.table .self .hand-help { margin-top: 4px; }
+.table .study-dock {
+  flex: 0 0 auto; min-height: 70px; height: clamp(74px, 13dvh, 150px);
+  display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+  border: 1px solid rgba(213, 228, 231, .27); border-radius: 12px;
+  background: rgba(5, 18, 28, .84); color: var(--ink);
+}
+.table .study-dock.open { height: clamp(110px, 28dvh, 270px); }
+.table .study-dock-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  flex: 0 0 auto; padding: 5px 10px;
+  border-bottom: 1px solid rgba(206, 223, 227, .19); font-size: 12px;
+}
+.table .study-dock-head b { color: var(--gold); }
+.table .study-dock-head span { color: var(--ink-dim); font-size: 11px; }
+.table .study-placeholder { margin: auto 10px; text-align: center; font-size: 12px; color: var(--ink-dim); }
+.table .study-dock-content {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch; margin: 0; padding: 4px 9px 10px;
+  color: var(--ink-dim); text-align: left;
+}
+.table .study-dock-content .hint-yaku { margin-top: 6px; }
+@media (min-width: 820px) {
+  .table .opponents {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1fr);
+    grid-template-areas: "left top right" "left center right";
+    align-content: center;
+  }
+  .table .board-center { min-height: 110px; flex-direction: column; gap: 5px; }
+  .table .bc-round { font-size: 26px; }
+  .table .study-dock { max-width: 850px; width: 100%; margin-inline: auto; }
+}
+@media (max-height: 600px) {
+  .table .study-dock { min-height: 56px; height: 58px; }
+  .table .study-dock.open { min-height: 90px; height: min(26dvh, 120px); }
+  .table .study-dock-head { padding: 3px 9px; }
+  .table .opponents { padding: 5px; gap: 4px; min-height: 45px; }
+  .table .msg { min-height: 18px; }
+  .table .self .hand-help { gap: 4px; }
+}
