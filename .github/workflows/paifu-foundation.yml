@@ -5,6 +5,10 @@ on:
       - 'src/engine/**'
       - 'src/ui/paifu-storage.js'
       - 'src/ui/paifu-worker-store.js'
+      - 'src/ui/paifu-session.js'
+      - 'tests/paifu-session.test.js'
+      - 'tests/e2e/paifu-session.mjs'
+      - 'docs/54-v08-auto-recording-connection.md'
       - 'src/ui/paifu-storage-worker.js'
       - 'tests/paifu-worker-store.test.js'
       - 'tests/paifu-storage-fixtures.mjs'
@@ -38,6 +42,9 @@ jobs:
           node --check src/ui/paifu-storage.js
           node --check tests/paifu-storage.test.js
           node --check tests/e2e/paifu-storage.mjs
+          node --check src/ui/paifu-session.js
+          node --check tests/paifu-session.test.js
+          node --check tests/e2e/paifu-session.mjs
           node --check src/ui/paifu-worker-store.js
           node --check src/ui/paifu-storage-worker.js
           node --check tests/paifu-worker-store.test.js
@@ -56,6 +63,8 @@ jobs:
         run: node tests/e2e/paifu-storage.mjs
       - name: Native Worker, bounded queue and termination recovery
         run: node tests/e2e/paifu-worker.mjs
+      - name: Independent recording lifecycle and real Worker persistence
+        run: node tests/e2e/paifu-session.mjs
       - name: Diagnostic performance comparison (no skipped validation)
         run: node tests/e2e/paifu-performance.mjs --output paifu-performance.json
       - name: Preserve synthetic benchmark results

@@ -109,3 +109,8 @@ Windowの強制GC後heap参考値は1,137,896→1,832,836 bytes。これはWorke
 3. 8MiB/1牌譜、20件/本文32MiBの既存上限は維持。上限を超える長期連荘の分割・版移行・復旧は別設計。今回の24連荘を無制限連荘の保証にしない。
 4. 実ディスクquota/消去/プライベートブラウズ、WebKit/iPhone Safariのmodule WorkerとIDB、低速端末の期限設定は未検証。
 5. Safari実機・別担当者の独立監査・接続設計を経るまで、mainマージ・公開はしない。Ver.0.9以降には進まない。
+
+
+## 2026-10-29 追記：Ver.0.8 第4段階の接続設計・独立制御
+
+第3段階HEAD `fcdfdaf`とディレクター完了判定を確認し、[接続点・failure isolation・保存頻度・独立制御モジュール・未完成事項](54-v08-auto-recording-connection.md)を追加。全判断のメモリ記録と、Worker保存時点の集約を分離する。app.js/卓UI/既存エンジン/12人AI/保存形式/URLは変更せず、通常対局へ未接続。PR #37はDraft、mainマージ・Pages公開禁止、PR #36には触れない。過去のCIを新HEADへ流用せず、新HEADで専用CIを確認する。既存履歴は保持。

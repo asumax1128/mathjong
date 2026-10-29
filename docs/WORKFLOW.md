@@ -116,3 +116,8 @@ PR #37の開始HEAD `3f1344f`と専用CI [40860681346](https://github.com/asumax
 ## 2026-10-29 追記：Ver.0.8 第3段階 Worker復旧・独立試作
 
 第2段階HEAD `cf1a419`から未コミット6ファイルとログを回収・アーカイブし、保全コミット`2e7a1f8`をPR #37へpush。[復旧・性能比較・API・検証結果・制限](53-v08-worker-recovery-performance.md)を参照。既存DB/牌譜/保存キー/再現URLと全復元検証を保持した専用Worker＋有界FIFOを試作。総完了時間は短縮せず、画面側の重い処理を減らす方式。通常対局未接続、PR #37 Draft維持、mainマージ・Pages公開禁止。PR #36/卓UI/既存エンジン/AI/得点は変更しない。新HEADのCIを確認し、過去のSuccessを流用しない。既存履歴は保持。
+
+
+## 2026-10-29 追記：Ver.0.8 第4段階の接続設計・独立制御
+
+第3段階HEAD `fcdfdaf`とディレクター完了判定を確認し、[接続点・failure isolation・保存頻度・独立制御モジュール・未完成事項](54-v08-auto-recording-connection.md)を追加。全判断のメモリ記録と、Worker保存時点の集約を分離する。app.js/卓UI/既存エンジン/12人AI/保存形式/URLは変更せず、通常対局へ未接続。PR #37はDraft、mainマージ・Pages公開禁止、PR #36には触れない。過去のCIを新HEADへ流用せず、新HEADで専用CIを確認する。既存履歴は保持。
