@@ -1,6 +1,6 @@
 # 数雀｜開発・監査・公開・引き継ぎの標準運用
 
-> **2026-10-29 PR #34開発再開**：unavailable前の未コミット変更を保全し、スマホ縦は手牌下のヒント、タブレット横は左約62%の卓／右約38%の学習領域を実装・再検証中。[docs/46](46-v07-table-hint-dock.md)。最新指示はPRへのpushとCI確認までで、**mainマージ・Pages公開は禁止**。本番は引き続きVer.0.6.4、Ver.0.7の実機受入は未実施。
+> **2026-10-29 PR #34開発再開**：unavailable前の未コミット変更を保全し、スマホ縦は手牌下のヒント、タブレット横は左約62%の卓／右約38%の学習領域を実装し、単体379件・11画面E2E・全体E2E（793.345秒）がローカルで成功。[docs/46](46-v07-table-hint-dock.md)。最新指示はPRへのpushとCI確認までで、**mainマージ・Pages公開は禁止**。本番は引き続きVer.0.6.4、Ver.0.7の実機受入は未実施。
 
 > **最新公開（2026-10-29）：数雀 Ver.0.6.4**。オーナーの指示で「ゆうじん」の一覧の一言を **「鳴かずに刻子を育てる」→「刻子大好き」** に変更。表示用 `PROFILES.yujin.trait` と `TRIO_ROSTER` の `styleLabel` のみ（AI判断、刻子重視・鳴かない打ち方、ほか11名、ゲームルール、保存・PRNGは不変）。[PR #30](https://github.com/asumax1128/mathjong/pull/30) HEAD `6c77b12a0a84a430f880a95ca2186f06624f6a25` 必須CI2件Success後、main `e0db390858c9c7efe2ecc9558652ed144443d2cd` に正規マージ。[Pages run 40791462358](https://github.com/asumax1128/mathjong/actions/runs/40791462358)、[公開通常smoke run 40791509868](https://github.com/asumax1128/mathjong/actions/runs/40791509868)で新文言合格、[初心者の部屋1〜6公開E2E run 40791509859](https://github.com/asumax1128/mathjong/actions/runs/40791509859)はすべてSuccess。[仕様 docs/44](44-ver0.6.4-yujin-tagline.md)。**Ver.0.6.4のオーナーiPhone Safari実機確認は未報告**。画像はVer.0.6.3と同様、一覧に表示せず詳細限定。PR #19はDraftのまま変更しない。
 
