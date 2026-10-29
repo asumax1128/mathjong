@@ -545,7 +545,7 @@ function riverHTML(seat, size) {
   const last = [...g.events].reverse().find((e) => e.type === 'discard');
   const claimTile = g.claim ? g.claim.tile : null;
   return g.rivers[seat].map((r) => tileHTML(T(g.typeOf(r.id)), {
-    size,
+    size, id: r.id,
     cls: [r.tsumogiri ? 'tsumogiri' : '', r.riichi ? 'riichi-decl' : '', last && last.tile === r.id ? 'last' : '', claimTile === r.id ? 'claimable' : ''].join(' '),
   })).join('');
 }
@@ -717,6 +717,29 @@ function headerHTML() {
   </header>`;
 }
 
+// DOMの再生成で、閲覧中の河や学習エリアを毎回先頭へ戻さない。ゲーム・乱数には使用しない。
+let renderedTableGame = null;
+let renderedHintKey = null;
+function tableScrollSnapshot(g) {
+  if (renderedTableGame !== g) return [];
+  const selectors = ['.table', '.opponents', '.study-dock-content', '.fh-list', '.self > .river',
+    ...[1, 2, 3].map(s => `.seat-${s} .river`)];
+  return selectors.flatMap(selector => {
+    const e = app.querySelector(selector);
+    return e ? [{ selector, top: e.scrollTop, last: e.lastElementChild?.dataset.id }] : [];
+  });
+}
+function restoreTableScroll(snapshot) {
+  const key = `${S.hintHandKey}:${S.hintStage}`;
+  for (const { selector, top, last } of snapshot) {
+    const e = app.querySelector(selector);
+    if (!e || ((selector === '.study-dock-content' || selector === '.fh-list') && key !== renderedHintKey)) continue;
+    e.scrollTop = selector.includes('.river') && last !== e.lastElementChild?.dataset.id ? e.scrollHeight : top;
+  }
+  renderedTableGame = S.game;
+  renderedHintKey = key;
+}
+
 function render() {
   if (S.screen === 'title') { app.innerHTML = titleHTML(); return; }
   if (S.screen === 'select') { app.innerHTML = selectHTML(); return; }
@@ -726,6 +749,7 @@ function render() {
   // 並び替え中に再描画が必要になったら、並び替えを中止してから描画する（DOM が作り直されるため）
   if (drag && drag.isDragging()) drag.cancel('render');
   const g = S.game;
+  const scrollSnapshot = tableScrollSnapshot(g);
   // ヒント表示中は、役候補が参照する公開情報（手牌・河・公開面子・宣言状態）が変わったときだけ再計算する。
   // 自動更新ではヒント使用回数を加算しない。
   if (S.hintOpen) refreshHintIfChanged();
@@ -759,17 +783,18 @@ function render() {
         <div class="melds mine">${meldsHTML(HUMAN, 'm')}</div>
         ${handHTML()}
       </section>
-      <section class="study-dock${S.hintOpen ? ' open' : ' idle'}" aria-label="ヒント・数式確認エリア">
+      <section class="study-dock${S.hintOpen ? ' open' : ' idle'}" aria-labelledby="study-heading">
         <div class="study-dock-head">
-          <b>ヒント・数式確認</b>
+          <b id="study-heading">ヒント・数式確認</b>
           <span>${S.hintOpen ? (S.hintStage === 2 ? '数式確認' : '発見ヒント') : 'ヒントOFF'}</span>
         </div>
-        ${S.hintText ? `<div class="study-dock-content hint-box">${S.hintText}</div>` : '<p class="study-placeholder">手牌の下にある「ヒント」から、完成数式・役候補を確認できます。</p>'}
+        ${S.hintText ? `<div class="study-dock-content hint-box" tabindex="0" aria-label="ヒントの内容（スクロールできます）">${S.hintText}</div>` : '<p class="study-placeholder">タップ2回で打牌、長押しで並べ替え。「ヒント」で数式・役候補を確認。</p>'}
       </section>
     </main>
     <footer class="bar">${actionsHTML()}</footer>
     ${modalHTML()}
   `;
+  restoreTableScroll(scrollSnapshot);
   fxApply(); // 再描画で作り直された要素にも、演出中なら続きから発光・揺れを付ける
 }
 
@@ -1308,6 +1333,7 @@ app.addEventListener('click', (ev) => {
         countHint('discover');
       }
       render();
+      app.querySelector(S.hintOpen ? '.study-dock' : '.self .hand')?.scrollIntoView({ block: 'nearest' });
       break;
     case 'fh-confirm':
       // 第2段階（数式の確認）へ。同じ手牌の状態では回数を1回だけ数える

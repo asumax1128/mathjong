@@ -97,12 +97,14 @@ async function playDevice(browser, dev, seed, rounds, stats, { autopass = false,
   const tap = (loc) => (dev.hasTouch ? loc.tap() : loc.click());
 
   // 操作バーが画面内（下端のホームインジケーター領域を除く）に収まっている
+  if (dev.viewport.width > dev.viewport.height && dev.viewport.height <= 500) await page.locator('.study-dock').scrollIntoViewIfNeeded();
   const bar = await page.locator('.bar').boundingBox();
   assert.ok(bar && bar.y + bar.height <= dev.viewport.height + 0.5, `${dev.name}: 操作バーが画面外`);
   assert.equal(await page.locator('.board-center').count(), 1, '中央の局情報パネルがある');
   const handRect = await page.locator('.self .hand').boundingBox();
   const dockRect = await page.locator('.study-dock').boundingBox();
-  assert.ok(handRect && dockRect && dockRect.y >= handRect.y + handRect.height - 1,
+  const split = dev.viewport.width >= 1000 && dev.viewport.height >= 600 && dev.viewport.width > dev.viewport.height;
+  assert.ok(handRect && dockRect && (split ? dockRect.x >= handRect.x + handRect.width - 1 : dockRect.y >= handRect.y + handRect.height - 1),
     `${dev.name}: ヒント専用エリアは手牌より下`);
   assert.ok(dockRect.y + dockRect.height <= bar.y + 2,
     `${dev.name}: ヒント専用エリアは操作バーより上`);
@@ -6528,55 +6530,93 @@ async function v07BeginnerRoom2(browser) {
 
 // ---- Ver.0.7：麻雀卓と下部ヒント・数式確認エリアの画面検査 ----
 async function v07TableHintDock(browser) {
-  for (const [width, height] of [[320,568],[375,667],[390,844],[430,932],[844,390],[768,1024],[1366,768]]) {
-    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1000, hasTouch: width < 1000 });
+  const viewports = [[320,568],[375,667],[390,844],[430,932],[568,320],[844,390],
+    [768,1024],[1024,768],[1180,820],[1366,1024],[1366,768]];
+  for (const [width, height] of viewports) {
+    const tablet = width >= 1000 && height >= 600 && width > height;
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
     const page = await ctx.newPage(), errors = watchErrors(page);
-    const shortLandscape = width > height && height <= 500;
-    const press = (locator) => width < 1000 ? locator.tap() : locator.click();
-    await page.goto(LOCAL + '?mode=math1&seed=7007&speed=test');
+    const mode = width === 390 || tablet ? 'math2' : 'math1';
+    await page.goto(LOCAL + `?mode=${mode}&seed=7007&speed=slow`);
     await page.waitForSelector('.hand .tile');
-    assert.equal(await page.locator('.board-center .bc-round').count(), 1, '中央の局名');
-    assert.match(await page.locator('.board-center').innerText(), /東|南/);
-    assert.equal(await page.locator('.study-dock.idle').count(), 1, 'ヒントOFFの学習エリア');
-    if (shortLandscape) await page.locator('.board-center').scrollIntoViewIfNeeded();
-    const topBoard = await page.evaluate((landscape) => {
-      const panel = document.querySelector(landscape ? '.table' : '.opponents').getBoundingClientRect();
-      const center = document.querySelector('.board-center').getBoundingClientRect();
-      return { inView: center.top >= panel.top - 1 && center.bottom <= panel.bottom + 1,
-        panel: {top:panel.top,bottom:panel.bottom}, center: {top:center.top,bottom:center.bottom} };
-    }, shortLandscape);
-    assert.ok(topBoard.inView, '中央局情報が他家の盤面から隠れない ' + width + 'x' + height + ' ' + JSON.stringify(topBoard));
+    // 必ず完成した2式を含める。数式なしのランダム配牌で第2段階を空振りさせない。
+    await apScene(page, presetWall(['sin','30','=1/2','cos','180','=-1','tan','45'], ['0'], [
+      ['sin','sin','0','90','90','=-√3','=√3','150'],
+      ['cos','135','=√3','=-1/√2','120','120','tan','=0'],
+      ['=-1','tan','tan','120','=1/√3','90','=-1/√2','=-√3'],
+    ]));
+    const initial = await page.evaluate(() => ({ hand:window.__mathjong.S.game.hands[0].slice(),
+      events:window.__mathjong.S.game.events.length, hints:window.__mathjong.S.hintsUsed }));
+    assert.equal(await page.locator('.board-center .bc-round').count(), 1);
+    assert.equal(await page.locator('.study-dock.idle').count(), 1);
     async function geometry(stage) {
-      if (shortLandscape) await page.locator('.study-dock').scrollIntoViewIfNeeded();
-      const a = await page.evaluate(() => {
-        const box = (s) => { const e=document.querySelector(s); if (!e) return null;
-          const b=e.getBoundingClientRect(); return { top:b.top,bottom:b.bottom,height:b.height }; };
-        return {hand:box('.self .hand'),dock:box('.study-dock'),bar:box('.bar'),scroll:document.documentElement.scrollWidth-innerWidth};
+      const g = await page.evaluate(() => {
+        const box=s=>{const b=document.querySelector(s).getBoundingClientRect();return {top:b.top,bottom:b.bottom,left:b.left,right:b.right,width:b.width,height:b.height};};
+        return {table:box('.table'), board:box('.opponents'),center:box('.board-center'),hand:box('.self'),
+          dock:box('.study-dock'),bar:box('.bar'),panels:[1,2,3].map(s=>box(`.seat-${s}`)),
+          overflow:document.documentElement.scrollWidth-innerWidth};
       });
-      const label = width + 'x' + height + ' ' + stage;
-      assert.ok(a.hand && a.dock && a.bar, label + ' 必須エリア');
-      assert.ok(a.dock.top >= a.hand.bottom-2, label + ' 学習エリアは手牌より下 ' + JSON.stringify(a));
-      assert.ok(a.dock.bottom <= a.bar.top+2, label + ' 学習エリアはバーより上 ' + JSON.stringify(a));
-      assert.ok(a.bar.bottom <= height+2, label + ' バーが画面内 ' + JSON.stringify(a));
-      assert.ok(a.scroll <= 1, label + ' 横スクロールなし');
+      const label=`${width}x${height} ${stage} ${JSON.stringify(g)}`;
+      assert.ok(g.overflow<=1, '横スクロールなし '+label);
+      assert.ok(g.bar.bottom<=height+1 && g.bar.top>=0,'操作バーは画面内 '+label);
+      for(const p of g.panels) {
+        const intersects=p.left<g.center.right-1 && p.right>g.center.left+1 && p.top<g.center.bottom-1 && p.bottom>g.center.top+1;
+        assert.ok(!intersects,'局情報が他家と重ならない '+label);
+      }
+      assert.ok(g.center.left>=g.board.left && g.center.right<=g.board.right,'局情報は卓内 '+label);
+      if(tablet) {
+        const leftRatio=g.board.width/(g.dock.right-g.board.left);
+        assert.ok(leftRatio>=.60 && leftRatio<=.65, '左卓60〜65% '+label);
+        assert.ok(g.dock.left>=g.board.right && g.dock.top<=g.board.top+1,'右に学習専用領域 '+label);
+        assert.ok(g.dock.bottom<=g.bar.top && g.hand.right<=g.dock.left,'手牌と学習エリアは非重複 '+label);
+      } else {
+        assert.ok(g.dock.top>=g.hand.bottom-1, '手牌より下の学習エリア '+label);
+        await page.locator('.study-dock').scrollIntoViewIfNeeded();
+        const d=await page.locator('.study-dock').boundingBox();
+        assert.ok(d.y>=g.table.top-2 && d.y+d.height<=g.bar.top+2,'学習エリアまで卓内スクロールできる '+label+' actual='+JSON.stringify(d));
+      }
+      for(const b of await page.locator('.bar button').all()) assert.ok((await b.boundingBox()).height>=44,'行動ボタン44px');
     }
     await geometry('OFF');
-    await press(page.locator('button[data-action="hint"]'));
-    assert.equal(await page.locator('.study-dock.open .hint-box .hint-basic').count(), 1, '発見ヒントを下部へ移動');
-    assert.equal(await page.locator('.self .hint-box').count(), 0, '手牌にヒントを重複表示しない');
-    await geometry('発見');
-    if (await page.locator('[data-action="fh-confirm"]').count()) {
-      await press(page.locator('[data-action="fh-confirm"]'));
-      assert.equal(await page.locator('.study-dock.open .fh').count(), 1, '数式確認を下部に表示');
-      await geometry('数式確認');
+    if(width===320) {
+      const all=await page.evaluate(()=>[...document.querySelectorAll('.panel,.self .hand')].every(e=>{const b=e.getBoundingClientRect(),t=document.querySelector('.table').getBoundingClientRect();return b.top>=t.top-2&&b.bottom<=t.bottom+2;}));
+      assert.ok(all,'320pxの初期表示で3人と手牌を同時に確認できる');
     }
-    await press(page.locator('button[data-action="hint"]'));
-    assert.equal(await page.locator('.study-dock.idle').count(), 1, 'ヒントを閉じても学習エリアを残す');
-    assert.deepEqual(errors, [], 'コンソール/資源エラーなし');
-    if (SHOTS) await page.screenshot({ path: SHOTS + '/v07-dock-' + width + 'x' + height + '.png' });
+    await page.locator('button[data-action="hint"]').tap();
+    assert.equal(await page.locator('.study-dock.open .hint-basic').count(), 1);
+    assert.equal(await page.locator('.self .hint-box').count(), 0);
+    await geometry('発見');
+    await page.locator('[data-action="fh-confirm"]').tap();
+    assert.equal(await page.locator('.study-dock.open .fh').count(), 1);
+    assert.ok(await page.locator('.hand .tile.fhf').count()>0, '既存の数式枠');
+    await geometry('数式確認');
+    const hints=await page.evaluate(()=>window.__mathjong.S.hintsUsed);
+    assert.equal(hints,initial.hints+2,'明示操作2段階だけ加算');
+    // スクロール中のAI再描画でも、同じ手牌のヒント位置と段階を維持。
+    const scroll=await page.evaluate(()=>{
+      const e=document.querySelector('.study-dock-content');e.scrollTop=35;
+      const before=e.scrollTop;window.__mathjong.render();return [before,document.querySelector('.study-dock-content').scrollTop];
+    });
+    assert.equal(scroll[0],scroll[1]);
+    if(SHOTS) await page.screenshot({path:`${SHOTS}/v07-dock-${width}x${height}-confirm.png`});
+    await page.locator('button[data-action="hint"]').tap();
+    assert.equal(await page.locator('.study-dock.idle').count(),1);
+    assert.equal(await page.locator('.hand .tile.fhf').count(),0);
+    const after=await page.evaluate(()=>{const g=window.__mathjong.S.game;g.checkInvariants();return {hand:g.hands[0].slice(),events:g.events.length};});
+    assert.deepEqual(after,{hand:initial.hand,events:initial.events},'表示操作は牌・イベントを変更しない');
+    await page.locator('.self .hand').scrollIntoViewIfNeeded();
+    if(SHOTS) await page.screenshot({path:`${SHOTS}/v07-dock-${width}x${height}.png`});
+    // 2回タップは従来どおり：1回目は選択だけ。2回目の打牌は1回だけ。
+    const drawn=page.locator('.hand .tile.drawn');
+    const id=Number(await drawn.getAttribute('data-id'));
+    await drawn.tap();
+    assert.equal(await page.evaluate(()=>window.__mathjong.S.game.events.length),initial.events);
+    await page.locator(`.hand .tile[data-id="${id}"]`).tap();
+    assert.equal(await page.evaluate((id)=>window.__mathjong.S.game.events.filter(e=>e.type==='discard'&&e.seat===0&&e.tile===id).length,id),1);
+    assert.deepEqual(errors,[]);
     await ctx.close();
   }
-  console.log('✓ Ver.0.7 下部学習エリア：スマホ縦横・iPad・PCで表示・発見・数式確認・操作バー');
+  console.log('✓ Ver.0.7：11画面・卓と局情報の非重複・縦の学習ドック・横タブレット62/38・数学ⅠⅡ・2段階・スクロール維持・2回タップ');
 }
 
 // 公開モードではサーバーも転送先も作らない。接続失敗をローカル成功で隠さない。
