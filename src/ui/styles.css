@@ -950,3 +950,9 @@ table.values td.undef { color: #999; font-size: 12px; }
 @media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
   .table .opponents { align-content: start; }
 }
+
+/* 極端に低い横向き画面では、ヒントを小さなスクロール窓に収めてバーと重ねない。 */
+@media (orientation: landscape) and (max-height: 500px) {
+  .table .opponents { min-height: 12px; }
+  .table .study-dock.open { min-height: 54px; height: 54px; }
+}
