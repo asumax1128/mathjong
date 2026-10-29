@@ -937,3 +937,16 @@ table.values td.undef { color: #999; font-size: 12px; }
   .table .study-dock-head { padding: 2px 8px; }
   .table .study-placeholder { font-size: 11px; }
 }
+
+/* スマホ縦：小画面でも中央の局名を相手の河に押し出さない。
+   河が空なのに固定の空白が広がるのを抑え、河が増えたら盤面内でスクロール。 */
+@media (max-width: 600px) and (orientation: portrait) {
+  .table .opponents { gap: 4px; padding: 5px; align-content: space-evenly; }
+  .table .panel { padding: 3px 5px; }
+  .table .panel .row { min-height: 14px; margin-top: 1px; }
+  .table .panel .river { min-height: 10px; margin-top: 2px; }
+  .table .board-center { min-height: 36px; padding: 4px 6px; }
+}
+@media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
+  .table .opponents { align-content: start; }
+}
