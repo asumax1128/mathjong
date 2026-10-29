@@ -39,4 +39,4 @@ jobs:
           npm install --no-save playwright@1.56.1
           npx playwright install --with-deps chromium
       - name: Beginner room browser regression
-        run: node tests/e2e/play.mjs --only v07BeginnerRoom,v07BeginnerRoom2,v06FreeSelect
+        run: node tests/e2e/play.mjs --only v07BeginnerRoom,v07BeginnerRoom2,v06FreeSelect,v07TableHintDock
