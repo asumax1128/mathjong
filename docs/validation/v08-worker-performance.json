@@ -1,0 +1,1714 @@
+{
+  "browser": "154.0.8037.57",
+  "samplesPerVariant": 3,
+  "instrumentation": "test-only module responses; no engine file edits; validation unchanged",
+  "workerColdStartIncluded": false,
+  "workerColdStartMs": 57.400000002235174,
+  "windowHeapAfterForcedGc": {
+    "before": 1137896,
+    "after": 1832836,
+    "excludesWorkerAndNativeIndexedDb": true
+  },
+  "samples": [
+    {
+      "id": "bench-math1-4",
+      "mode": "math1",
+      "length": 4,
+      "bytes": 1098438,
+      "recording": {
+        "decisions": 555,
+        "rounds": 4,
+        "renchan": 0,
+        "appendP95Ms": 2.6269210000000385,
+        "appendMaxMs": 7.707165000000032,
+        "captureP95Ms": 0.21700799999996434
+      },
+      "samples": [
+        {
+          "kind": "direct",
+          "iteration": 0,
+          "save": {
+            "totalMs": 227.5,
+            "submitMs": 218.5,
+            "maxTimerGapMs": 219.39999999850988,
+            "maxFrameGapMs": 216.5999999999999,
+            "frameCallbacks": 5,
+            "stages": {
+              "jsonStructure": 17.599999997764826,
+              "validation": 152.09999999776483,
+              "jsonCanonical": 27.200000002980232,
+              "utf8": 4.599999997764826,
+              "storageUtf8": 3.899999998509884,
+              "metadataJsonParse": 5.5,
+              "sha256": 7,
+              "idbOpen": 0.8000000007450581,
+              "idbTransaction:readwrite": 8.199999999254942
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 169.60000000149012,
+            "submitMs": 0.20000000298023224,
+            "maxTimerGapMs": 170.20000000298023,
+            "maxFrameGapMs": 150.0999999999999,
+            "frameCallbacks": 5,
+            "stages": {
+              "idbOpen": 0.6000000014901161,
+              "idbTransaction:readonly": 4.399999998509884,
+              "storageUtf8": 5.200000002980232,
+              "sha256": 5.599999997764826,
+              "utf8": 5.199999999254942,
+              "jsonParse": 4.399999998509884,
+              "jsonStructure": 8.900000002235174,
+              "freeze": 4.199999999254942,
+              "validation": 130.39999999850988
+            }
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 0,
+          "save": {
+            "totalMs": 248.69999999925494,
+            "submitMs": 6.5,
+            "maxTimerGapMs": 8.599999997764826,
+            "maxFrameGapMs": 16.700000000000273,
+            "frameCallbacks": 17,
+            "stages": {
+              "jsonStructure": 19.5,
+              "validation": 152.60000000149012,
+              "jsonCanonical": 28.199999999254942,
+              "utf8": 4.699999999254942,
+              "storageUtf8": 4.100000001490116,
+              "metadataJsonParse": 4,
+              "sha256": 6.699999999254942,
+              "idbOpen": 0.4000000022351742,
+              "idbTransaction:readwrite": 7.899999998509884
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 204.59999999776483,
+            "submitMs": 0.09999999776482582,
+            "maxTimerGapMs": 28.800000000745058,
+            "maxFrameGapMs": 16.800000000000182,
+            "frameCallbacks": 14,
+            "stages": {
+              "idbOpen": 0.5,
+              "idbTransaction:readonly": 4.099999997764826,
+              "storageUtf8": 5,
+              "sha256": 6.899999998509884,
+              "utf8": 4.299999997019768,
+              "jsonParse": 4.5,
+              "jsonStructure": 15.5,
+              "freeze": 6,
+              "validation": 124.70000000298023
+            },
+            "mainResultFreezeMs": 7.400000002235174
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 1,
+          "save": {
+            "totalMs": 203.30000000074506,
+            "submitMs": 7,
+            "maxTimerGapMs": 8.200000002980232,
+            "maxFrameGapMs": 16.799999999999727,
+            "frameCallbacks": 15,
+            "stages": {
+              "jsonStructure": 7.699999999254942,
+              "validation": 125.10000000149012,
+              "jsonCanonical": 25.399999998509884,
+              "utf8": 4.100000001490116,
+              "storageUtf8": 4.199999999254942,
+              "metadataJsonParse": 5.300000000745058,
+              "sha256": 6.699999999254942,
+              "idbOpen": 0.5999999977648258,
+              "idbTransaction:readwrite": 6.400000002235174
+            },
+            "mainResultFreezeMs": 0.10000000149011612
+          },
+          "loadPrivate": {
+            "totalMs": 202.5,
+            "submitMs": 0.09999999776482582,
+            "maxTimerGapMs": 26.699999999254942,
+            "maxFrameGapMs": 16.800000000000182,
+            "frameCallbacks": 14,
+            "stages": {
+              "idbOpen": 0.8000000007450581,
+              "idbTransaction:readonly": 4.699999999254942,
+              "storageUtf8": 4.800000000745058,
+              "sha256": 5.300000000745058,
+              "utf8": 4,
+              "jsonParse": 6.600000001490116,
+              "jsonStructure": 8.799999997019768,
+              "freeze": 7.300000000745058,
+              "validation": 124.10000000149012
+            },
+            "mainResultFreezeMs": 8.100000001490116
+          }
+        },
+        {
+          "kind": "direct",
+          "iteration": 1,
+          "save": {
+            "totalMs": 183.10000000149012,
+            "submitMs": 176,
+            "maxTimerGapMs": 176.60000000149012,
+            "maxFrameGapMs": 166.80000000000018,
+            "frameCallbacks": 5,
+            "stages": {
+              "jsonStructure": 9,
+              "validation": 125.30000000074506,
+              "jsonCanonical": 22.399999998509884,
+              "utf8": 4.300000000745058,
+              "storageUtf8": 4.399999998509884,
+              "metadataJsonParse": 4.699999999254942,
+              "sha256": 5.800000000745058,
+              "idbOpen": 1.6000000014901161,
+              "idbTransaction:readwrite": 5.5
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 161.20000000298023,
+            "submitMs": 0.10000000149011612,
+            "maxTimerGapMs": 161.69999999925494,
+            "maxFrameGapMs": 133.30000000000018,
+            "frameCallbacks": 5,
+            "stages": {
+              "idbOpen": 0.5,
+              "idbTransaction:readonly": 4.200000002980232,
+              "storageUtf8": 4,
+              "sha256": 5,
+              "utf8": 3.900000002235174,
+              "jsonParse": 4.099999997764826,
+              "jsonStructure": 6.699999999254942,
+              "freeze": 4.100000001490116,
+              "validation": 128.5
+            }
+          }
+        },
+        {
+          "kind": "direct",
+          "iteration": 2,
+          "save": {
+            "totalMs": 197.79999999701977,
+            "submitMs": 191,
+            "maxTimerGapMs": 191.69999999925494,
+            "maxFrameGapMs": 183.29999999999973,
+            "frameCallbacks": 5,
+            "stages": {
+              "jsonStructure": 7.299999997019768,
+              "validation": 135.20000000298023,
+              "jsonCanonical": 29,
+              "utf8": 4.399999998509884,
+              "storageUtf8": 4.699999999254942,
+              "metadataJsonParse": 4.800000000745058,
+              "sha256": 5.5,
+              "idbOpen": 0.6999999992549419,
+              "idbTransaction:readwrite": 6
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 160.89999999850988,
+            "submitMs": 0.09999999776482582,
+            "maxTimerGapMs": 161.59999999776483,
+            "maxFrameGapMs": 133.40000000000055,
+            "frameCallbacks": 5,
+            "stages": {
+              "idbOpen": 0.5,
+              "idbTransaction:readonly": 3.599999997764826,
+              "storageUtf8": 5.299999997019768,
+              "sha256": 5.400000002235174,
+              "utf8": 4.300000000745058,
+              "jsonParse": 4.599999997764826,
+              "jsonStructure": 8.400000002235174,
+              "freeze": 4.399999998509884,
+              "validation": 124.10000000149012
+            }
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 2,
+          "save": {
+            "totalMs": 215.90000000223517,
+            "submitMs": 7.199999999254942,
+            "maxTimerGapMs": 8.399999998509884,
+            "maxFrameGapMs": 16.800000000000182,
+            "frameCallbacks": 16,
+            "stages": {
+              "jsonStructure": 9.300000000745058,
+              "validation": 137.39999999850988,
+              "jsonCanonical": 25.600000001490116,
+              "utf8": 4.399999998509884,
+              "storageUtf8": 4,
+              "metadataJsonParse": 4.199999999254942,
+              "sha256": 5.5,
+              "idbOpen": 0.8000000007450581,
+              "idbTransaction:readwrite": 6.099999997764826
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 205.09999999776483,
+            "submitMs": 0.09999999776482582,
+            "maxTimerGapMs": 29.100000001490116,
+            "maxFrameGapMs": 16.800000000000182,
+            "frameCallbacks": 14,
+            "stages": {
+              "idbOpen": 0.7999999970197678,
+              "idbTransaction:readonly": 3.400000002235174,
+              "storageUtf8": 4.300000000745058,
+              "sha256": 4.900000002235174,
+              "utf8": 5.099999997764826,
+              "jsonParse": 4.900000002235174,
+              "jsonStructure": 7.799999997019768,
+              "freeze": 4.400000002235174,
+              "validation": 130.30000000074506
+            },
+            "mainResultFreezeMs": 6.600000001490116
+          }
+        }
+      ],
+      "browserOneDecision": {
+        "beforeMs": 0,
+        "afterMs": 0.09999999776482582,
+        "appendMs": 0.5,
+        "description": "one valid decision at start of last round; earlier rounds retained; validation/setup excluded"
+      }
+    },
+    {
+      "id": "bench-math1-8",
+      "mode": "math1",
+      "length": 8,
+      "bytes": 2128021,
+      "recording": {
+        "decisions": 1078,
+        "rounds": 8,
+        "renchan": 0,
+        "appendP95Ms": 1.5424709999999777,
+        "appendMaxMs": 5.410997999999836,
+        "captureP95Ms": 0.18235600000002705
+      },
+      "samples": [
+        {
+          "kind": "direct",
+          "iteration": 0,
+          "save": {
+            "totalMs": 392.5,
+            "submitMs": 361.19999999925494,
+            "maxTimerGapMs": 361.9000000022352,
+            "maxFrameGapMs": 366.6999999999998,
+            "frameCallbacks": 6,
+            "stages": {
+              "jsonStructure": 11.400000002235174,
+              "validation": 260,
+              "jsonCanonical": 51.19999999925494,
+              "utf8": 9.099999997764826,
+              "storageUtf8": 9.399999998509884,
+              "metadataJsonParse": 8.899999998509884,
+              "sha256": 11,
+              "idbOpen": 1.199999999254942,
+              "idbTransaction:readwrite": 29.899999998509884
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 292.3999999985099,
+            "submitMs": 0.09999999776482582,
+            "maxTimerGapMs": 292.8999999985099,
+            "maxFrameGapMs": 266.60000000000036,
+            "frameCallbacks": 4,
+            "stages": {
+              "idbOpen": 0.5,
+              "idbTransaction:readonly": 6.299999997019768,
+              "storageUtf8": 9.699999999254942,
+              "sha256": 12.5,
+              "utf8": 10,
+              "jsonParse": 7.199999999254942,
+              "jsonStructure": 14.399999998509884,
+              "freeze": 8.600000001490116,
+              "validation": 222.89999999850988
+            }
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 0,
+          "save": {
+            "totalMs": 375.4000000022352,
+            "submitMs": 14,
+            "maxTimerGapMs": 14.5,
+            "maxFrameGapMs": 16.700000000000728,
+            "frameCallbacks": 26,
+            "stages": {
+              "jsonStructure": 16.199999999254942,
+              "validation": 228.80000000074506,
+              "jsonCanonical": 46.80000000074506,
+              "utf8": 9.399999998509884,
+              "storageUtf8": 8.700000002980232,
+              "metadataJsonParse": 8.199999999254942,
+              "sha256": 11.5,
+              "idbOpen": 2.399999998509884,
+              "idbTransaction:readwrite": 10.700000002980232
+            },
+            "mainResultFreezeMs": 0.10000000149011612
+          },
+          "loadPrivate": {
+            "totalMs": 348.5,
+            "submitMs": 0,
+            "maxTimerGapMs": 44.600000001490116,
+            "maxFrameGapMs": 33.29999999999927,
+            "frameCallbacks": 22,
+            "stages": {
+              "idbOpen": 0.6000000014901161,
+              "idbTransaction:readonly": 6.300000000745058,
+              "storageUtf8": 9.199999999254942,
+              "sha256": 12.5,
+              "utf8": 8,
+              "jsonParse": 7.200000002980232,
+              "jsonStructure": 14.699999999254942,
+              "freeze": 8.800000000745058,
+              "validation": 226.30000000074506
+            },
+            "mainResultFreezeMs": 10.800000000745058
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 1,
+          "save": {
+            "totalMs": 344.5,
+            "submitMs": 13.600000001490116,
+            "maxTimerGapMs": 13.900000002235174,
+            "maxFrameGapMs": 16.799999999999272,
+            "frameCallbacks": 24,
+            "stages": {
+              "jsonStructure": 11.599999997764826,
+              "validation": 206.80000000074506,
+              "jsonCanonical": 43.5,
+              "utf8": 7.899999998509884,
+              "storageUtf8": 8.700000002980232,
+              "metadataJsonParse": 7.800000000745058,
+              "sha256": 10.399999998509884,
+              "idbOpen": 3.800000000745058,
+              "idbTransaction:readwrite": 11.5
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 378.19999999925494,
+            "submitMs": 0.09999999776482582,
+            "maxTimerGapMs": 50.5,
+            "maxFrameGapMs": 33.29999999999927,
+            "frameCallbacks": 24,
+            "stages": {
+              "idbOpen": 0.6999999992549419,
+              "idbTransaction:readonly": 5.5,
+              "storageUtf8": 8.700000002980232,
+              "sha256": 10.699999999254942,
+              "utf8": 10.099999997764826,
+              "jsonParse": 7.100000001490116,
+              "jsonStructure": 16.100000001490116,
+              "freeze": 8,
+              "validation": 244.39999999850988
+            },
+            "mainResultFreezeMs": 16.400000002235174
+          }
+        },
+        {
+          "kind": "direct",
+          "iteration": 1,
+          "save": {
+            "totalMs": 330.29999999701977,
+            "submitMs": 320.8999999985099,
+            "maxTimerGapMs": 321.5,
+            "maxFrameGapMs": 333.2999999999993,
+            "frameCallbacks": 4,
+            "stages": {
+              "jsonStructure": 18.300000000745058,
+              "validation": 218.80000000074506,
+              "jsonCanonical": 47.19999999925494,
+              "utf8": 8.699999999254942,
+              "storageUtf8": 9.200000002980232,
+              "metadataJsonParse": 8.300000000745058,
+              "sha256": 9.899999998509884,
+              "idbOpen": 0.5,
+              "idbTransaction:readwrite": 8.799999997019768
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 266,
+            "submitMs": 0,
+            "maxTimerGapMs": 266.6000000014901,
+            "maxFrameGapMs": 250,
+            "frameCallbacks": 4,
+            "stages": {
+              "idbOpen": 0.4000000022351742,
+              "idbTransaction:readonly": 4.699999999254942,
+              "storageUtf8": 8.100000001490116,
+              "sha256": 9.899999998509884,
+              "utf8": 8.800000000745058,
+              "jsonParse": 7.300000000745058,
+              "jsonStructure": 12.699999999254942,
+              "freeze": 7.100000001490116,
+              "validation": 206.80000000074506
+            }
+          }
+        },
+        {
+          "kind": "direct",
+          "iteration": 2,
+          "save": {
+            "totalMs": 299.5,
+            "submitMs": 290.4000000022352,
+            "maxTimerGapMs": 291.19999999925494,
+            "maxFrameGapMs": 283.2999999999993,
+            "frameCallbacks": 5,
+            "stages": {
+              "jsonStructure": 12.600000001490116,
+              "validation": 202.60000000149012,
+              "jsonCanonical": 42.099999997764826,
+              "utf8": 7.900000002235174,
+              "storageUtf8": 7.899999998509884,
+              "metadataJsonParse": 7.399999998509884,
+              "sha256": 9.899999998509884,
+              "idbOpen": 0.8000000007450581,
+              "idbTransaction:readwrite": 8.199999999254942
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 251.89999999850988,
+            "submitMs": 0.10000000149011612,
+            "maxTimerGapMs": 252.19999999925494,
+            "maxFrameGapMs": 233.39999999999964,
+            "frameCallbacks": 4,
+            "stages": {
+              "idbOpen": 0.6999999992549419,
+              "idbTransaction:readonly": 4.800000000745058,
+              "storageUtf8": 8.5,
+              "sha256": 10.100000001490116,
+              "utf8": 7.599999997764826,
+              "jsonParse": 6.699999999254942,
+              "jsonStructure": 12.5,
+              "freeze": 7.300000000745058,
+              "validation": 193.5
+            }
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 2,
+          "save": {
+            "totalMs": 345.8999999985099,
+            "submitMs": 12.599999997764826,
+            "maxTimerGapMs": 13,
+            "maxFrameGapMs": 16.799999999999272,
+            "frameCallbacks": 24,
+            "stages": {
+              "jsonStructure": 13.700000002980232,
+              "validation": 208.09999999776483,
+              "jsonCanonical": 43,
+              "utf8": 7.800000000745058,
+              "storageUtf8": 7.399999998509884,
+              "metadataJsonParse": 6.800000000745058,
+              "sha256": 9.899999998509884,
+              "idbOpen": 4.800000000745058,
+              "idbTransaction:readwrite": 11.199999999254942
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 336.6000000014901,
+            "submitMs": 0,
+            "maxTimerGapMs": 40.79999999701977,
+            "maxFrameGapMs": 33.29999999999927,
+            "frameCallbacks": 22,
+            "stages": {
+              "idbOpen": 0.5999999977648258,
+              "idbTransaction:readonly": 7,
+              "storageUtf8": 10.399999998509884,
+              "sha256": 12.900000002235174,
+              "utf8": 8.699999999254942,
+              "jsonParse": 7.099999997764826,
+              "jsonStructure": 14.900000002235174,
+              "freeze": 7.800000000745058,
+              "validation": 209
+            },
+            "mainResultFreezeMs": 12
+          }
+        }
+      ],
+      "browserOneDecision": {
+        "beforeMs": 0,
+        "afterMs": 0,
+        "appendMs": 0.30000000074505806,
+        "description": "one valid decision at start of last round; earlier rounds retained; validation/setup excluded"
+      }
+    },
+    {
+      "id": "bench-math2-4",
+      "mode": "math2",
+      "length": 4,
+      "bytes": 2082976,
+      "recording": {
+        "decisions": 766,
+        "rounds": 4,
+        "renchan": 0,
+        "appendP95Ms": 1.8743079999999281,
+        "appendMaxMs": 4.175077999999758,
+        "captureP95Ms": 0.2517909999996846
+      },
+      "samples": [
+        {
+          "kind": "direct",
+          "iteration": 0,
+          "save": {
+            "totalMs": 294,
+            "submitMs": 284.69999999925494,
+            "maxTimerGapMs": 285.80000000074506,
+            "maxFrameGapMs": 300.09999999999854,
+            "frameCallbacks": 5,
+            "stages": {
+              "jsonStructure": 13.199999999254942,
+              "validation": 200.09999999776483,
+              "jsonCanonical": 41,
+              "utf8": 7.300000000745058,
+              "storageUtf8": 7.199999999254942,
+              "metadataJsonParse": 6.399999998509884,
+              "sha256": 9.300000000745058,
+              "idbOpen": 0.8000000007450581,
+              "idbTransaction:readwrite": 8.400000002235174
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 245.59999999776483,
+            "submitMs": 0,
+            "maxTimerGapMs": 246.19999999925494,
+            "maxFrameGapMs": 233.29999999999927,
+            "frameCallbacks": 4,
+            "stages": {
+              "idbOpen": 0.30000000074505806,
+              "idbTransaction:readonly": 5.299999997019768,
+              "storageUtf8": 8.600000001490116,
+              "sha256": 9.199999999254942,
+              "utf8": 8.100000001490116,
+              "jsonParse": 6.300000000745058,
+              "jsonStructure": 12.899999998509884,
+              "freeze": 6.299999997019768,
+              "validation": 188.40000000223517
+            }
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 0,
+          "save": {
+            "totalMs": 311,
+            "submitMs": 11.199999999254942,
+            "maxTimerGapMs": 11.600000001490116,
+            "maxFrameGapMs": 16.700000000000728,
+            "frameCallbacks": 22,
+            "stages": {
+              "jsonStructure": 11.199999999254942,
+              "validation": 189.80000000074506,
+              "jsonCanonical": 38.69999999925494,
+              "utf8": 7.5,
+              "storageUtf8": 7.199999999254942,
+              "metadataJsonParse": 6.399999998509884,
+              "sha256": 9.399999998509884,
+              "idbOpen": 3.100000001490116,
+              "idbTransaction:readwrite": 9.199999999254942
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 301.1000000014901,
+            "submitMs": 0.10000000149011612,
+            "maxTimerGapMs": 37.399999998509884,
+            "maxFrameGapMs": 16.700000000000728,
+            "frameCallbacks": 21,
+            "stages": {
+              "idbOpen": 0.3999999985098839,
+              "idbTransaction:readonly": 5,
+              "storageUtf8": 7.899999998509884,
+              "sha256": 9,
+              "utf8": 7.600000001490116,
+              "jsonParse": 6.399999998509884,
+              "jsonStructure": 11.400000002235174,
+              "freeze": 6.099999997764826,
+              "validation": 194.70000000298023
+            },
+            "mainResultFreezeMs": 10.5
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 1,
+          "save": {
+            "totalMs": 315.80000000074506,
+            "submitMs": 12.300000000745058,
+            "maxTimerGapMs": 12.700000002980232,
+            "maxFrameGapMs": 16.799999999999272,
+            "frameCallbacks": 21,
+            "stages": {
+              "jsonStructure": 15.899999998509884,
+              "validation": 187.5,
+              "jsonCanonical": 39.400000002235174,
+              "utf8": 7.799999997019768,
+              "storageUtf8": 7.200000002980232,
+              "metadataJsonParse": 6,
+              "sha256": 9.800000000745058,
+              "idbOpen": 1,
+              "idbTransaction:readwrite": 11.5
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 299.5999999977648,
+            "submitMs": 0.09999999776482582,
+            "maxTimerGapMs": 43.899999998509884,
+            "maxFrameGapMs": 33.400000000001455,
+            "frameCallbacks": 19,
+            "stages": {
+              "idbOpen": 0.3999999985098839,
+              "idbTransaction:readonly": 5.100000001490116,
+              "storageUtf8": 7.800000000745058,
+              "sha256": 9.100000001490116,
+              "utf8": 7.5,
+              "jsonParse": 6.100000001490116,
+              "jsonStructure": 11.399999998509884,
+              "freeze": 6.300000000745058,
+              "validation": 190
+            },
+            "mainResultFreezeMs": 11.300000000745058
+          }
+        },
+        {
+          "kind": "direct",
+          "iteration": 1,
+          "save": {
+            "totalMs": 283.69999999925494,
+            "submitMs": 270.0999999977648,
+            "maxTimerGapMs": 270.5999999977648,
+            "maxFrameGapMs": 266.59999999999854,
+            "frameCallbacks": 5,
+            "stages": {
+              "jsonStructure": 11.199999999254942,
+              "validation": 187.60000000149012,
+              "jsonCanonical": 39.599999997764826,
+              "utf8": 8,
+              "storageUtf8": 8.099999997764826,
+              "metadataJsonParse": 6,
+              "sha256": 9.299999997019768,
+              "idbOpen": 0.8000000007450581,
+              "idbTransaction:readwrite": 12.699999999254942
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 274.5,
+            "submitMs": 0.19999999925494194,
+            "maxTimerGapMs": 275.19999999925494,
+            "maxFrameGapMs": 266.7000000000007,
+            "frameCallbacks": 4,
+            "stages": {
+              "idbOpen": 0.6000000014901161,
+              "idbTransaction:readonly": 4.399999998509884,
+              "storageUtf8": 8.5,
+              "sha256": 9.899999998509884,
+              "utf8": 8.300000000745058,
+              "jsonParse": 6.800000000745058,
+              "jsonStructure": 13.200000002980232,
+              "freeze": 7.399999998509884,
+              "validation": 215.09999999776483
+            }
+          }
+        },
+        {
+          "kind": "direct",
+          "iteration": 2,
+          "save": {
+            "totalMs": 291,
+            "submitMs": 281.3999999985099,
+            "maxTimerGapMs": 282,
+            "maxFrameGapMs": 266.59999999999854,
+            "frameCallbacks": 5,
+            "stages": {
+              "jsonStructure": 12.800000000745058,
+              "validation": 194.40000000223517,
+              "jsonCanonical": 40.30000000074506,
+              "utf8": 8.899999998509884,
+              "storageUtf8": 7.899999998509884,
+              "metadataJsonParse": 7.100000001490116,
+              "sha256": 9.899999998509884,
+              "idbOpen": 0.6000000014901161,
+              "idbTransaction:readwrite": 8.899999998509884
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 255.80000000074506,
+            "submitMs": 0.10000000149011612,
+            "maxTimerGapMs": 256.3999999985099,
+            "maxFrameGapMs": 233.39999999999782,
+            "frameCallbacks": 5,
+            "stages": {
+              "idbOpen": 0.3999999985098839,
+              "idbTransaction:readonly": 5.300000000745058,
+              "storageUtf8": 8.400000002235174,
+              "sha256": 10.699999999254942,
+              "utf8": 7.800000000745058,
+              "jsonParse": 6.399999998509884,
+              "jsonStructure": 14.300000000745058,
+              "freeze": 6.299999997019768,
+              "validation": 195.90000000223517
+            }
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 2,
+          "save": {
+            "totalMs": 313.5,
+            "submitMs": 12.399999998509884,
+            "maxTimerGapMs": 12.699999999254942,
+            "maxFrameGapMs": 16.700000000000728,
+            "frameCallbacks": 22,
+            "stages": {
+              "jsonStructure": 11,
+              "validation": 187.20000000298023,
+              "jsonCanonical": 40.19999999925494,
+              "utf8": 7.899999998509884,
+              "storageUtf8": 7.599999997764826,
+              "metadataJsonParse": 6.100000001490116,
+              "sha256": 10.199999999254942,
+              "idbOpen": 0.8999999985098839,
+              "idbTransaction:readwrite": 11.600000001490116
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 325.9000000022352,
+            "submitMs": 0,
+            "maxTimerGapMs": 54.099999997764826,
+            "maxFrameGapMs": 33.29999999999927,
+            "frameCallbacks": 21,
+            "stages": {
+              "idbOpen": 0.5,
+              "idbTransaction:readonly": 5.100000001490116,
+              "storageUtf8": 8.199999999254942,
+              "sha256": 9.800000000745058,
+              "utf8": 7.699999999254942,
+              "jsonParse": 6.599999997764826,
+              "jsonStructure": 12,
+              "freeze": 7,
+              "validation": 204.60000000149012
+            },
+            "mainResultFreezeMs": 19.199999999254942
+          }
+        }
+      ],
+      "browserOneDecision": {
+        "beforeMs": 0,
+        "afterMs": 0,
+        "appendMs": 0.30000000074505806,
+        "description": "one valid decision at start of last round; earlier rounds retained; validation/setup excluded"
+      }
+    },
+    {
+      "id": "bench-math2-8",
+      "mode": "math2",
+      "length": 8,
+      "bytes": 4284874,
+      "recording": {
+        "decisions": 1580,
+        "rounds": 8,
+        "renchan": 0,
+        "appendP95Ms": 2.033719000000019,
+        "appendMaxMs": 6.777376999999888,
+        "captureP95Ms": 0.2526029999999082
+      },
+      "samples": [
+        {
+          "kind": "direct",
+          "iteration": 0,
+          "save": {
+            "totalMs": 597.3000000007451,
+            "submitMs": 578.0999999977648,
+            "maxTimerGapMs": 578.6999999992549,
+            "maxFrameGapMs": 566.5,
+            "frameCallbacks": 6,
+            "stages": {
+              "jsonStructure": 24.5,
+              "validation": 407.80000000074506,
+              "jsonCanonical": 81.79999999701977,
+              "utf8": 15.399999998509884,
+              "storageUtf8": 15.600000001490116,
+              "metadataJsonParse": 12.599999997764826,
+              "sha256": 20.199999999254942,
+              "idbOpen": 0.6000000014901161,
+              "idbTransaction:readwrite": 18.5
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 534.1000000014901,
+            "submitMs": 0.10000000149011612,
+            "maxTimerGapMs": 526.3000000007451,
+            "maxFrameGapMs": 499.90000000000146,
+            "frameCallbacks": 6,
+            "stages": {
+              "idbOpen": 0.4000000022351742,
+              "idbTransaction:readonly": 8.099999997764826,
+              "storageUtf8": 16.300000000745058,
+              "sha256": 20.899999998509884,
+              "utf8": 16.199999999254942,
+              "jsonParse": 13.699999999254942,
+              "jsonStructure": 24.900000002235174,
+              "freeze": 15.699999999254942,
+              "validation": 417.5
+            }
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 0,
+          "save": {
+            "totalMs": 688.5,
+            "submitMs": 27.899999998509884,
+            "maxTimerGapMs": 28.5,
+            "maxFrameGapMs": 33.400000000001455,
+            "frameCallbacks": 44,
+            "stages": {
+              "jsonStructure": 25.400000002235174,
+              "validation": 395.29999999701977,
+              "jsonCanonical": 92.40000000223517,
+              "utf8": 19,
+              "storageUtf8": 18.599999997764826,
+              "metadataJsonParse": 14.600000001490116,
+              "sha256": 25.699999999254942,
+              "idbOpen": 1.4000000022351742,
+              "idbTransaction:readwrite": 28
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 666,
+            "submitMs": 0.09999999776482582,
+            "maxTimerGapMs": 82.40000000223517,
+            "maxFrameGapMs": 66.70000000000073,
+            "frameCallbacks": 39,
+            "stages": {
+              "idbOpen": 0.3999999985098839,
+              "idbTransaction:readonly": 11.699999999254942,
+              "storageUtf8": 16.599999997764826,
+              "sha256": 21.199999999254942,
+              "utf8": 17,
+              "jsonParse": 13.300000000745058,
+              "jsonStructure": 26.199999999254942,
+              "freeze": 17.600000001490116,
+              "validation": 427.30000000074506
+            },
+            "mainResultFreezeMs": 25.100000001490116
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 1,
+          "save": {
+            "totalMs": 685.6000000014901,
+            "submitMs": 26,
+            "maxTimerGapMs": 26.300000000745058,
+            "maxFrameGapMs": 16.799999999999272,
+            "frameCallbacks": 44,
+            "stages": {
+              "jsonStructure": 40.79999999701977,
+              "validation": 398.9000000022352,
+              "jsonCanonical": 84.89999999850988,
+              "utf8": 16.400000002235174,
+              "storageUtf8": 15.699999999254942,
+              "metadataJsonParse": 15.5,
+              "sha256": 24.200000002980232,
+              "idbOpen": 7.199999999254942,
+              "idbTransaction:readwrite": 19
+            },
+            "mainResultFreezeMs": 0.10000000149011612
+          },
+          "loadPrivate": {
+            "totalMs": 652.9000000022352,
+            "submitMs": 0,
+            "maxTimerGapMs": 77.19999999925494,
+            "maxFrameGapMs": 50,
+            "frameCallbacks": 39,
+            "stages": {
+              "idbOpen": 0.5,
+              "idbTransaction:readonly": 10.799999997019768,
+              "storageUtf8": 21.100000001490116,
+              "sha256": 30.799999997019768,
+              "utf8": 16,
+              "jsonParse": 12.800000000745058,
+              "jsonStructure": 24.800000000745058,
+              "freeze": 17.800000000745058,
+              "validation": 408.4000000022352
+            },
+            "mainResultFreezeMs": 22.100000001490116
+          }
+        },
+        {
+          "kind": "direct",
+          "iteration": 1,
+          "save": {
+            "totalMs": 585,
+            "submitMs": 566.2000000029802,
+            "maxTimerGapMs": 566.9000000022352,
+            "maxFrameGapMs": 566.6000000000022,
+            "frameCallbacks": 6,
+            "stages": {
+              "jsonStructure": 28.900000002235174,
+              "validation": 387.0999999977648,
+              "jsonCanonical": 83.90000000223517,
+              "utf8": 15.300000000745058,
+              "storageUtf8": 16.399999998509884,
+              "metadataJsonParse": 13.100000001490116,
+              "sha256": 21.599999997764826,
+              "idbOpen": 0.8999999985098839,
+              "idbTransaction:readwrite": 17.699999999254942
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 569.1000000014901,
+            "submitMs": 0.10000000149011612,
+            "maxTimerGapMs": 552.1999999992549,
+            "maxFrameGapMs": 533.3999999999978,
+            "frameCallbacks": 5,
+            "stages": {
+              "idbOpen": 0.3999999985098839,
+              "idbTransaction:readonly": 17,
+              "storageUtf8": 16.800000000745058,
+              "sha256": 20.899999998509884,
+              "utf8": 16.300000000745058,
+              "jsonParse": 15.199999999254942,
+              "jsonStructure": 27.199999999254942,
+              "freeze": 14.200000002980232,
+              "validation": 440.79999999701977
+            }
+          }
+        },
+        {
+          "kind": "direct",
+          "iteration": 2,
+          "save": {
+            "totalMs": 633.6000000014901,
+            "submitMs": 616.1999999992549,
+            "maxTimerGapMs": 616.8000000007451,
+            "maxFrameGapMs": 616.6000000000022,
+            "frameCallbacks": 5,
+            "stages": {
+              "jsonStructure": 27.800000000745058,
+              "validation": 432.5,
+              "jsonCanonical": 88.19999999925494,
+              "utf8": 16.199999999254942,
+              "storageUtf8": 17.199999999254942,
+              "metadataJsonParse": 13.900000002235174,
+              "sha256": 20.399999998509884,
+              "idbOpen": 0.5999999977648258,
+              "idbTransaction:readwrite": 16.700000002980232
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 543.5999999977648,
+            "submitMs": 0.09999999776482582,
+            "maxTimerGapMs": 533.1999999992549,
+            "maxFrameGapMs": 516.7000000000007,
+            "frameCallbacks": 5,
+            "stages": {
+              "idbOpen": 0.5999999977648258,
+              "idbTransaction:readonly": 10.400000002235174,
+              "storageUtf8": 15.799999997019768,
+              "sha256": 23,
+              "utf8": 16.800000000745058,
+              "jsonParse": 14,
+              "jsonStructure": 29.900000002235174,
+              "freeze": 15.199999999254942,
+              "validation": 417.70000000298023
+            }
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 2,
+          "save": {
+            "totalMs": 663.8999999985099,
+            "submitMs": 26.699999999254942,
+            "maxTimerGapMs": 27.300000000745058,
+            "maxFrameGapMs": 16.80000000000291,
+            "frameCallbacks": 43,
+            "stages": {
+              "jsonStructure": 43.399999998509884,
+              "validation": 377.69999999925494,
+              "jsonCanonical": 84.40000000223517,
+              "utf8": 16.699999999254942,
+              "storageUtf8": 16.899999998509884,
+              "metadataJsonParse": 13.5,
+              "sha256": 20.600000001490116,
+              "idbOpen": 1,
+              "idbTransaction:readwrite": 22.399999998509884
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 653.5,
+            "submitMs": 0,
+            "maxTimerGapMs": 78,
+            "maxFrameGapMs": 50,
+            "frameCallbacks": 40,
+            "stages": {
+              "idbOpen": 0.5,
+              "idbTransaction:readonly": 11.5,
+              "storageUtf8": 18.5,
+              "sha256": 24.900000002235174,
+              "utf8": 19.5,
+              "jsonParse": 13.599999997764826,
+              "jsonStructure": 24.200000002980232,
+              "freeze": 16.799999997019768,
+              "validation": 413.1000000014901
+            },
+            "mainResultFreezeMs": 22.5
+          }
+        }
+      ],
+      "browserOneDecision": {
+        "beforeMs": 0,
+        "afterMs": 0,
+        "appendMs": 0.3999999985098839,
+        "description": "one valid decision at start of last round; earlier rounds retained; validation/setup excluded"
+      }
+    },
+    {
+      "id": "bench-long-24",
+      "mode": "math1",
+      "length": 4,
+      "bytes": 3842392,
+      "recording": {
+        "decisions": 2184,
+        "rounds": 24,
+        "renchan": 24,
+        "appendP95Ms": 1.1328960000000734,
+        "appendMaxMs": 2.4707360000002154,
+        "captureP95Ms": 0.1415550000001531
+      },
+      "samples": [
+        {
+          "kind": "direct",
+          "iteration": 0,
+          "save": {
+            "totalMs": 597.3999999985099,
+            "submitMs": 561.7999999970198,
+            "maxTimerGapMs": 562.2999999970198,
+            "maxFrameGapMs": 566.5999999999985,
+            "frameCallbacks": 6,
+            "stages": {
+              "jsonStructure": 31,
+              "validation": 394.8999999985099,
+              "jsonCanonical": 74,
+              "utf8": 13.800000000745058,
+              "storageUtf8": 15.599999997764826,
+              "metadataJsonParse": 12.899999998509884,
+              "sha256": 19.399999998509884,
+              "idbOpen": 0.6000000014901161,
+              "idbTransaction:readwrite": 35
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 560.2000000029802,
+            "submitMs": 0.10000000149011612,
+            "maxTimerGapMs": 547.9000000022352,
+            "maxFrameGapMs": 533.3000000000029,
+            "frameCallbacks": 5,
+            "stages": {
+              "idbOpen": 0.5,
+              "idbTransaction:readonly": 12.800000000745058,
+              "storageUtf8": 26.5,
+              "sha256": 33.5,
+              "utf8": 17.800000000745058,
+              "jsonParse": 13.099999997764826,
+              "jsonStructure": 27.400000002235174,
+              "freeze": 17.399999998509884,
+              "validation": 410.4000000022352
+            }
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 0,
+          "save": {
+            "totalMs": 679.6999999992549,
+            "submitMs": 24.5,
+            "maxTimerGapMs": 25,
+            "maxFrameGapMs": 33.30000000000291,
+            "frameCallbacks": 44,
+            "stages": {
+              "jsonStructure": 35.69999999925494,
+              "validation": 421.80000000074506,
+              "jsonCanonical": 82.09999999776483,
+              "utf8": 14.400000002235174,
+              "storageUtf8": 14.199999999254942,
+              "metadataJsonParse": 12.699999999254942,
+              "sha256": 18,
+              "idbOpen": 0.8999999985098839,
+              "idbTransaction:readwrite": 20.800000000745058
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 624.1999999992549,
+            "submitMs": 0.09999999776482582,
+            "maxTimerGapMs": 80.5,
+            "maxFrameGapMs": 66.70000000000437,
+            "frameCallbacks": 37,
+            "stages": {
+              "idbOpen": 0.3999999985098839,
+              "idbTransaction:readonly": 9.5,
+              "storageUtf8": 16.600000001490116,
+              "sha256": 36,
+              "utf8": 13.800000000745058,
+              "jsonParse": 12.400000002235174,
+              "jsonStructure": 27.5,
+              "freeze": 16.699999999254942,
+              "validation": 384.0999999977648
+            },
+            "mainResultFreezeMs": 23.600000001490116
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 1,
+          "save": {
+            "totalMs": 655.1000000014901,
+            "submitMs": 24.300000000745058,
+            "maxTimerGapMs": 24.600000001490116,
+            "maxFrameGapMs": 16.80000000000291,
+            "frameCallbacks": 42,
+            "stages": {
+              "jsonStructure": 33.5,
+              "validation": 411.9000000022352,
+              "jsonCanonical": 72.60000000149012,
+              "utf8": 13.899999998509884,
+              "storageUtf8": 14.900000002235174,
+              "metadataJsonParse": 15,
+              "sha256": 18.5,
+              "idbOpen": 0.8999999985098839,
+              "idbTransaction:readwrite": 19.699999999254942
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 626.6999999992549,
+            "submitMs": 0,
+            "maxTimerGapMs": 74.90000000223517,
+            "maxFrameGapMs": 50,
+            "frameCallbacks": 38,
+            "stages": {
+              "idbOpen": 0.30000000074505806,
+              "idbTransaction:readonly": 9.300000000745058,
+              "storageUtf8": 15.099999997764826,
+              "sha256": 23.400000002235174,
+              "utf8": 14.5,
+              "jsonParse": 12.899999998509884,
+              "jsonStructure": 25.399999998509884,
+              "freeze": 17.300000000745058,
+              "validation": 402.6000000014901
+            },
+            "mainResultFreezeMs": 25.099999997764826
+          }
+        },
+        {
+          "kind": "direct",
+          "iteration": 1,
+          "save": {
+            "totalMs": 571.4000000022352,
+            "submitMs": 556.5,
+            "maxTimerGapMs": 557,
+            "maxFrameGapMs": 566.5999999999985,
+            "frameCallbacks": 5,
+            "stages": {
+              "jsonStructure": 27,
+              "validation": 392.80000000074506,
+              "jsonCanonical": 76.19999999925494,
+              "utf8": 14.5,
+              "storageUtf8": 14.5,
+              "metadataJsonParse": 13.099999997764826,
+              "sha256": 18.199999999254942,
+              "idbOpen": 0.5999999977648258,
+              "idbTransaction:readwrite": 14.200000002980232
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 487.9000000022352,
+            "submitMs": 0.10000000149011612,
+            "maxTimerGapMs": 479.1000000014901,
+            "maxFrameGapMs": 450,
+            "frameCallbacks": 6,
+            "stages": {
+              "idbOpen": 0.5,
+              "idbTransaction:readonly": 8.900000002235174,
+              "storageUtf8": 14,
+              "sha256": 18.199999999254942,
+              "utf8": 14.200000002980232,
+              "jsonParse": 12.899999998509884,
+              "jsonStructure": 25.5,
+              "freeze": 15.800000000745058,
+              "validation": 377.5
+            }
+          }
+        },
+        {
+          "kind": "direct",
+          "iteration": 2,
+          "save": {
+            "totalMs": 593.8999999985099,
+            "submitMs": 579.6000000014901,
+            "maxTimerGapMs": 580.1999999992549,
+            "maxFrameGapMs": 583.2999999999956,
+            "frameCallbacks": 5,
+            "stages": {
+              "jsonStructure": 22.799999997019768,
+              "validation": 389,
+              "jsonCanonical": 85.5,
+              "utf8": 25.5,
+              "storageUtf8": 15,
+              "metadataJsonParse": 15.199999999254942,
+              "sha256": 26.5,
+              "idbOpen": 0.6999999992549419,
+              "idbTransaction:readwrite": 13.5
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 582,
+            "submitMs": 0.19999999925494194,
+            "maxTimerGapMs": 573.1999999992549,
+            "maxFrameGapMs": 550.0999999999985,
+            "frameCallbacks": 6,
+            "stages": {
+              "idbOpen": 0.4000000022351742,
+              "idbTransaction:readonly": 8.899999998509884,
+              "storageUtf8": 13.900000002235174,
+              "sha256": 22.099999997764826,
+              "utf8": 17.099999997764826,
+              "jsonParse": 15.600000001490116,
+              "jsonStructure": 30.399999998509884,
+              "freeze": 13.299999997019768,
+              "validation": 459.80000000074506
+            }
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 2,
+          "save": {
+            "totalMs": 693.9000000022352,
+            "submitMs": 24.100000001490116,
+            "maxTimerGapMs": 24.599999997764826,
+            "maxFrameGapMs": 16.700000000004366,
+            "frameCallbacks": 45,
+            "stages": {
+              "jsonStructure": 36.900000002235174,
+              "validation": 439,
+              "jsonCanonical": 78.89999999850988,
+              "utf8": 13.5,
+              "storageUtf8": 14,
+              "metadataJsonParse": 12.300000000745058,
+              "sha256": 17.699999999254942,
+              "idbOpen": 6.700000002980232,
+              "idbTransaction:readwrite": 15.199999999254942
+            },
+            "mainResultFreezeMs": 0.10000000149011612
+          },
+          "loadPrivate": {
+            "totalMs": 597,
+            "submitMs": 0,
+            "maxTimerGapMs": 77.39999999850988,
+            "maxFrameGapMs": 50,
+            "frameCallbacks": 36,
+            "stages": {
+              "idbOpen": 0.4000000022351742,
+              "idbTransaction:readonly": 8.399999998509884,
+              "storageUtf8": 14.399999998509884,
+              "sha256": 19,
+              "utf8": 15.799999997019768,
+              "jsonParse": 12.600000001490116,
+              "jsonStructure": 27.699999999254942,
+              "freeze": 16.400000002235174,
+              "validation": 376.79999999701977
+            },
+            "mainResultFreezeMs": 24
+          }
+        }
+      ],
+      "browserOneDecision": {
+        "beforeMs": 0.10000000149011612,
+        "afterMs": 0,
+        "appendMs": 0.29999999701976776,
+        "description": "one valid decision at start of last round; earlier rounds retained; validation/setup excluded"
+      }
+    },
+    {
+      "id": "bench-partial",
+      "mode": "math2",
+      "length": 8,
+      "bytes": 27034,
+      "recording": {
+        "decisions": 17,
+        "rounds": 1,
+        "renchan": 0,
+        "appendP95Ms": 0.49929599999995844,
+        "appendMaxMs": 0.49929599999995844,
+        "captureP95Ms": 0.12776299999950425
+      },
+      "samples": [
+        {
+          "kind": "direct",
+          "iteration": 0,
+          "save": {
+            "totalMs": 9.699999999254942,
+            "submitMs": 6.800000000745058,
+            "maxTimerGapMs": 8.899999998509884,
+            "maxFrameGapMs": 16.700000000004366,
+            "frameCallbacks": 4,
+            "stages": {
+              "jsonStructure": 0.30000000074505806,
+              "validation": 4.800000000745058,
+              "jsonCanonical": 0.8999999985098839,
+              "utf8": 0.10000000149011612,
+              "storageUtf8": 0.09999999776482582,
+              "metadataJsonParse": 0.30000000074505806,
+              "sha256": 0.19999999925494194,
+              "idbOpen": 0.6999999992549419,
+              "idbTransaction:readwrite": 2.199999999254942
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 8.900000002235174,
+            "submitMs": 0.10000000149011612,
+            "maxTimerGapMs": 8.900000002235174,
+            "maxFrameGapMs": 16.69999999999709,
+            "frameCallbacks": 3,
+            "stages": {
+              "idbOpen": 0.6000000014901161,
+              "idbTransaction:readonly": 4.100000001490116,
+              "storageUtf8": 0.09999999776482582,
+              "sha256": 0.10000000149011612,
+              "utf8": 0.09999999776482582,
+              "jsonParse": 0.20000000298023224,
+              "jsonStructure": 0.29999999701976776,
+              "freeze": 0.10000000149011612,
+              "validation": 3.100000001490116
+            }
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 0,
+          "save": {
+            "totalMs": 12.399999998509884,
+            "submitMs": 0.10000000149011612,
+            "maxTimerGapMs": 8.200000002980232,
+            "maxFrameGapMs": 16.700000000004366,
+            "frameCallbacks": 4,
+            "stages": {
+              "jsonStructure": 0.30000000074505806,
+              "validation": 7.599999997764826,
+              "jsonCanonical": 1,
+              "utf8": 0.20000000298023224,
+              "storageUtf8": 0.19999999925494194,
+              "metadataJsonParse": 0.10000000149011612,
+              "sha256": 0.3999999985098839,
+              "idbOpen": 0.7000000029802322,
+              "idbTransaction:readwrite": 1.0999999977648258
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 6.800000000745058,
+            "submitMs": 0,
+            "maxTimerGapMs": 8.100000001490116,
+            "maxFrameGapMs": 16.700000000004366,
+            "frameCallbacks": 3,
+            "stages": {
+              "idbOpen": 0.3999999985098839,
+              "idbTransaction:readonly": 0.9000000022351742,
+              "storageUtf8": 0.10000000149011612,
+              "sha256": 0.09999999776482582,
+              "utf8": 0.10000000149011612,
+              "jsonParse": 0.10000000149011612,
+              "jsonStructure": 0.29999999701976776,
+              "freeze": 0.10000000149011612,
+              "validation": 3.600000001490116
+            },
+            "mainResultFreezeMs": 0
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 1,
+          "save": {
+            "totalMs": 10.599999997764826,
+            "submitMs": 0.30000000074505806,
+            "maxTimerGapMs": 8.300000000745058,
+            "maxFrameGapMs": 16.799999999995634,
+            "frameCallbacks": 3,
+            "stages": {
+              "jsonStructure": 0.19999999925494194,
+              "validation": 4.199999999254942,
+              "jsonCanonical": 0.5,
+              "utf8": 0,
+              "storageUtf8": 0.09999999776482582,
+              "metadataJsonParse": 0.10000000149011612,
+              "sha256": 0.09999999776482582,
+              "idbOpen": 0.3999999985098839,
+              "idbTransaction:readwrite": 4
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 6.5,
+            "submitMs": 0.10000000149011612,
+            "maxTimerGapMs": 8.200000002980232,
+            "maxFrameGapMs": 16.69999999999709,
+            "frameCallbacks": 3,
+            "stages": {
+              "idbOpen": 0.3999999985098839,
+              "idbTransaction:readonly": 0.6000000014901161,
+              "storageUtf8": 0.10000000149011612,
+              "sha256": 0.09999999776482582,
+              "utf8": 0.10000000149011612,
+              "jsonParse": 0.19999999925494194,
+              "jsonStructure": 0.30000000074505806,
+              "freeze": 0.10000000149011612,
+              "validation": 3.2999999970197678
+            },
+            "mainResultFreezeMs": 0.09999999776482582
+          }
+        },
+        {
+          "kind": "direct",
+          "iteration": 1,
+          "save": {
+            "totalMs": 6.5,
+            "submitMs": 5.399999998509884,
+            "maxTimerGapMs": 8.100000001490116,
+            "maxFrameGapMs": 16.799999999995634,
+            "frameCallbacks": 3,
+            "stages": {
+              "jsonStructure": 0.30000000074505806,
+              "validation": 4.099999997764826,
+              "jsonCanonical": 0.6000000014901161,
+              "utf8": 0.10000000149011612,
+              "storageUtf8": 0,
+              "metadataJsonParse": 0.19999999925494194,
+              "sha256": 0.09999999776482582,
+              "idbOpen": 0.4000000022351742,
+              "idbTransaction:readwrite": 0.6999999992549419
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 6.700000002980232,
+            "submitMs": 0.10000000149011612,
+            "maxTimerGapMs": 8.300000000745058,
+            "maxFrameGapMs": 16.599999999998545,
+            "frameCallbacks": 2,
+            "stages": {
+              "idbOpen": 0.6000000014901161,
+              "idbTransaction:readonly": 0.3999999985098839,
+              "storageUtf8": 0.19999999925494194,
+              "sha256": 0.10000000149011612,
+              "utf8": 0.09999999776482582,
+              "jsonParse": 0.30000000074505806,
+              "jsonStructure": 0.10000000149011612,
+              "freeze": 0.19999999925494194,
+              "validation": 4.5
+            }
+          }
+        },
+        {
+          "kind": "direct",
+          "iteration": 2,
+          "save": {
+            "totalMs": 12,
+            "submitMs": 8,
+            "maxTimerGapMs": 8.399999998509884,
+            "maxFrameGapMs": 16.700000000004366,
+            "frameCallbacks": 3,
+            "stages": {
+              "jsonStructure": 0.30000000074505806,
+              "validation": 6.5,
+              "jsonCanonical": 0.5,
+              "utf8": 0.10000000149011612,
+              "storageUtf8": 0.19999999925494194,
+              "metadataJsonParse": 0.19999999925494194,
+              "sha256": 0.19999999925494194,
+              "idbOpen": 0.6000000014901161,
+              "idbTransaction:readwrite": 3.300000000745058
+            }
+          },
+          "loadPrivate": {
+            "totalMs": 5.5,
+            "submitMs": 0.09999999776482582,
+            "maxTimerGapMs": 8.300000000745058,
+            "maxFrameGapMs": 16.700000000004366,
+            "frameCallbacks": 3,
+            "stages": {
+              "idbOpen": 0.30000000074505806,
+              "idbTransaction:readonly": 0.6999999992549419,
+              "storageUtf8": 0.10000000149011612,
+              "sha256": 0.19999999925494194,
+              "utf8": 0,
+              "jsonParse": 0.19999999925494194,
+              "jsonStructure": 0.30000000074505806,
+              "freeze": 0,
+              "validation": 3.5
+            }
+          }
+        },
+        {
+          "kind": "remote",
+          "iteration": 2,
+          "save": {
+            "totalMs": 8.200000002980232,
+            "submitMs": 0.20000000298023224,
+            "maxTimerGapMs": 8.199999999254942,
+            "maxFrameGapMs": 16.69999999999709,
+            "frameCallbacks": 3,
+            "stages": {
+              "jsonStructure": 0.20000000298023224,
+              "validation": 4.599999997764826,
+              "jsonCanonical": 0.6000000014901161,
+              "utf8": 0,
+              "storageUtf8": 0.09999999776482582,
+              "metadataJsonParse": 0.30000000074505806,
+              "sha256": 0.19999999925494194,
+              "idbOpen": 0.4000000022351742,
+              "idbTransaction:readwrite": 1.199999999254942
+            },
+            "mainResultFreezeMs": 0
+          },
+          "loadPrivate": {
+            "totalMs": 7.5,
+            "submitMs": 0.09999999776482582,
+            "maxTimerGapMs": 8.300000000745058,
+            "maxFrameGapMs": 16.700000000004366,
+            "frameCallbacks": 2,
+            "stages": {
+              "idbOpen": 0.3999999985098839,
+              "idbTransaction:readonly": 0.8000000007450581,
+              "storageUtf8": 0.19999999925494194,
+              "sha256": 0.10000000149011612,
+              "utf8": 0.09999999776482582,
+              "jsonParse": 0.10000000149011612,
+              "jsonStructure": 0.30000000074505806,
+              "freeze": 0.09999999776482582,
+              "validation": 4.200000002980232
+            },
+            "mainResultFreezeMs": 0.10000000149011612
+          }
+        }
+      ],
+      "browserOneDecision": {
+        "beforeMs": 0,
+        "afterMs": 0,
+        "appendMs": 0.30000000074505806,
+        "description": "one valid decision at start of last round; earlier rounds retained; validation/setup excluded"
+      }
+    }
+  ],
+  "sourceSha256": {
+    "src/ui/paifu-worker-store.js": "52639185e9c0cd6e099d45e1505b5edfeb3814dd84cff71584814cd98a4f72f1",
+    "src/ui/paifu-storage-worker.js": "9c237f71febd0216683f220da19b7674bf89322add9a795b58ee20618f8760e0",
+    "src/ui/paifu-storage.js": "1838450f83097e65f15bb8e40314338977eb1f4037eed2986f78504a404707cf",
+    "src/engine/paifu.js": "17bfe02c5f77e88370b2de232a5dff70c91e4540788780fbbd0c1b6bb7bafab9",
+    "tests/e2e/paifu-performance.mjs": "dfc2edb5207e5f6e1b8cb5abac760916fa19d4fa0c9bcfb7f3ab81158a6262c7",
+    "tests/paifu-storage-fixtures.mjs": "8cb3e59b552e68a8ca4a718acb0b6024e140e337987190d491d4b75a49044d73"
+  },
+  "stage": 3,
+  "baseHead": "cf1a4190531d7193d2f8ab69f3ecc2b304166d84",
+  "recoveredCommit": "2e7a1f8401a3edb0a426f0300c97b85ffee6b016",
+  "fullPlayE2ERerun": false,
+  "mainGameConnected": false,
+  "mainMerged": false,
+  "published": false,
+  "regression": {
+    "executions": [
+      {
+        "name": "unit",
+        "exit": 0,
+        "seconds": 141.547,
+        "command": [
+          "npm",
+          "test"
+        ]
+      },
+      {
+        "name": "worker",
+        "exit": 0,
+        "seconds": 27.708,
+        "command": [
+          "node",
+          "--require",
+          "/workspace/.mathjong-tools/playwright-system.cjs",
+          "tests/e2e/paifu-worker.mjs"
+        ]
+      },
+      {
+        "name": "storage",
+        "exit": 0,
+        "seconds": 7.311,
+        "command": [
+          "node",
+          "--require",
+          "/workspace/.mathjong-tools/playwright-system.cjs",
+          "tests/e2e/paifu-storage.mjs"
+        ]
+      },
+      {
+        "name": "foundation",
+        "exit": 0,
+        "seconds": 3.038,
+        "command": [
+          "node",
+          "--require",
+          "/workspace/.mathjong-tools/playwright-system.cjs",
+          "tests/e2e/paifu.mjs"
+        ]
+      },
+      {
+        "name": "related",
+        "exit": 0,
+        "seconds": 97.918,
+        "command": [
+          "node",
+          "--require",
+          "/workspace/.mathjong-tools/playwright-system.cjs",
+          "tests/e2e/play.mjs",
+          "--only",
+          "v06TrioIntegration,v07BeginnerRoom2,v05Riichi,v04End"
+        ]
+      }
+    ],
+    "unit": {
+      "passed": 438,
+      "baseline": 426,
+      "added": 12,
+      "failed": 0,
+      "skipped": 0
+    },
+    "nativeWorkerChecks": 14,
+    "nativeIndexedDbChecks": 21,
+    "foundationBrowserCases": 4,
+    "relatedPlayGroups": [
+      "v06TrioIntegration",
+      "v07BeginnerRoom2",
+      "v05Riichi",
+      "v04End"
+    ],
+    "fullPlayE2ERerun": false,
+    "safari": "not executed"
+  }
+}

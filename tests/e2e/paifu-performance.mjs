@@ -24,6 +24,8 @@ storage=one(storage,'finally { clearTimeout(timer); }',"finally { clearTimeout(t
 storage=one(storage,'const db = await open();',"const __openAt=performance.now(); const db = await open(); __stageLog('idbOpen',performance.now()-__openAt); const __txAt=performance.now();");
 storage=one(storage,'finally { db.close(); }',"finally { db.close(); __stageLog('idbTransaction:'+mode,performance.now()-__txAt); }");
 storage=one(storage,'const snapshot = JSON.parse(json), id = snapshot.id;',"const snapshot = __stageSync('metadataJsonParse',()=>JSON.parse(json)), id = snapshot.id;")+probe;
+let frontend=await readFile(new URL('../../src/ui/paifu-worker-store.js',import.meta.url),'utf8');
+frontend=one(frontend,'job.resolve(freezeResult(m.result));',"job.resolve(__stageSync('resultFreeze',()=>freezeResult(m.result)));")+probe;
 const fixtures=[];
 for(const mode of ['math1','math2'])for(const length of [4,8])fixtures.push(makeStorageFixture({id:`bench-${mode}-${length}`,mode,length}));
 fixtures.push(makeStorageFixture({id:'bench-long-24',mode:'math1',length:4,renchan:24}));
@@ -33,6 +35,7 @@ try{
  browser=await chromium.launch({args:['--no-proxy-server']});const context=await browser.newContext({viewport:{width:390,height:844}}),page=await context.newPage();
  await context.route('**/src/engine/paifu.js',r=>r.fulfill({contentType:'text/javascript',body:codec}));
  await context.route('**/src/ui/paifu-storage.js',r=>r.fulfill({contentType:'text/javascript',body:storage}));
+ await context.route('**/src/ui/paifu-worker-store.js',r=>r.fulfill({contentType:'text/javascript',body:frontend}));
  await page.goto(`http://localhost:${server.address().port}/mathjong/`);
  await page.evaluate(async()=>{
   const mod=f=>import(new URL(`src/ui/${f}`,location.href)),[{createPaifuStore},{createPaifuWorkerStore}]=await Promise.all([mod('paifu-storage.js'),mod('paifu-worker-store.js')]);
@@ -65,9 +68,10 @@ try{
    await page.evaluate(kind=>bench[kind].clearAll(),kind);
    const sample={kind,iteration};
    for(const method of ['save','loadPrivate']){
-    const realm=kind==='direct'?page:worker;await realm.evaluate(()=>globalThis.__paifuStageTimes=[]);
+    const realm=kind==='direct'?page:worker;await realm.evaluate(()=>globalThis.__paifuStageTimes=[]);if(kind==='remote')await page.evaluate(()=>globalThis.__paifuStageTimes=[]);
     sample[method]=await page.evaluate(({kind,method})=>measure(kind,method),{kind,method});
     const stages=await realm.evaluate(()=>globalThis.__paifuStageTimes??[]);sample[method].stages=Object.fromEntries([...new Set(stages.map(s=>s.name))].map(name=>[name,stages.filter(s=>s.name===name).reduce((n,s)=>n+s.ms,0)]));
+    if(kind==='remote'){const main=await page.evaluate(()=>globalThis.__paifuStageTimes??[]);sample[method].mainResultFreezeMs=main.filter(s=>s.name==='resultFreeze').reduce((n,s)=>n+s.ms,0);}
     assert.ok(sample[method].stages.validation>=0,'full validation not instrumented');
     assert.ok(sample[method].stages.sha256>=0,'SHA not instrumented');
    }

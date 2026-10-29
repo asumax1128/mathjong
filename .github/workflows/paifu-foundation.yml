@@ -4,6 +4,13 @@ on:
     paths:
       - 'src/engine/**'
       - 'src/ui/paifu-storage.js'
+      - 'src/ui/paifu-worker-store.js'
+      - 'src/ui/paifu-storage-worker.js'
+      - 'tests/paifu-worker-store.test.js'
+      - 'tests/paifu-storage-fixtures.mjs'
+      - 'tests/e2e/paifu-worker.mjs'
+      - 'tests/e2e/paifu-performance.mjs'
+      - 'docs/53-v08-worker-recovery-performance.md'
       - 'tests/paifu-storage.test.js'
       - 'tests/e2e/paifu-storage.mjs'
       - 'docs/52-v08-paifu-indexeddb.md'
@@ -31,6 +38,12 @@ jobs:
           node --check src/ui/paifu-storage.js
           node --check tests/paifu-storage.test.js
           node --check tests/e2e/paifu-storage.mjs
+          node --check src/ui/paifu-worker-store.js
+          node --check src/ui/paifu-storage-worker.js
+          node --check tests/paifu-worker-store.test.js
+          node --check tests/paifu-storage-fixtures.mjs
+          node --check tests/e2e/paifu-worker.mjs
+          node --check tests/e2e/paifu-performance.mjs
       - name: All unit tests
         run: npm test
       - name: Install browser
@@ -41,5 +54,15 @@ jobs:
         run: node tests/e2e/paifu.mjs
       - name: Native IndexedDB storage, rollback and failure isolation
         run: node tests/e2e/paifu-storage.mjs
+      - name: Native Worker, bounded queue and termination recovery
+        run: node tests/e2e/paifu-worker.mjs
+      - name: Diagnostic performance comparison (no skipped validation)
+        run: node tests/e2e/paifu-performance.mjs --output paifu-performance.json
+      - name: Preserve synthetic benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: paifu-performance-${{ github.sha }}
+          path: paifu-performance.json
+          if-no-files-found: error
       - name: Existing AI, beginner room, riichi and match regression
         run: node tests/e2e/play.mjs --only v06TrioIntegration,v07BeginnerRoom2,v05Riichi,v04End

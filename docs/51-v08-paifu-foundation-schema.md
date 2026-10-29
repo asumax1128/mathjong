@@ -171,3 +171,8 @@ Nodeの時間は`appendDecision`だけで、AI判断・前後capture・保存・
 ## 2026-10-29 続編：第2段階のIndexedDBアダプター
 
 この文書の未採用/未実装の記載は第1段階HEADの履歴。ディレクターによるPR #37作成と同HEADの専用CI Successを確認後、[docs/52](52-v08-paifu-indexeddb.md)の保存・読込・検証・削除APIを独立実装した。通常対局の自動記録/自動保存は引き続き未接続で、UI・既存エンジン・既存保存キーは変更しない。Draft維持、mainマージ・公開は禁止。最新HEADのCI状態はPR #37を参照し、第1段階のSuccessを流用しない。
+
+
+## 2026-10-29 追記：Ver.0.8 第3段階 Worker復旧・独立試作
+
+第2段階HEAD `cf1a419`から未コミット6ファイルとログを回収・アーカイブし、保全コミット`2e7a1f8`をPR #37へpush。[復旧・性能比較・API・検証結果・制限](53-v08-worker-recovery-performance.md)を参照。既存DB/牌譜/保存キー/再現URLと全復元検証を保持した専用Worker＋有界FIFOを試作。総完了時間は短縮せず、画面側の重い処理を減らす方式。通常対局未接続、PR #37 Draft維持、mainマージ・Pages公開禁止。PR #36/卓UI/既存エンジン/AI/得点は変更しない。新HEADのCIを確認し、過去のSuccessを流用しない。既存履歴は保持。
