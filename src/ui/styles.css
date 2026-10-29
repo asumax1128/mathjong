@@ -88,11 +88,6 @@ button:focus-visible, .tile.tap:focus-visible { outline: 3px solid var(--accent)
 .meld { display: inline-flex; gap: 1px; padding: 1px; border-radius: 4px; background: rgba(214, 178, 94, 0.25); }
 .river { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 4px; min-height: 24px; }
 
-.msg {
-  text-align: center; font-size: 14px; min-height: 36px; padding: 4px;
-  display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap;
-}
-
 .self .river.mine { min-height: 26px; }
 .melds.mine { margin-top: 4px; }
 .hand { position: relative; display: flex; gap: 3px; justify-content: center; align-items: flex-end; margin-top: 8px; padding-top: 10px;
@@ -847,9 +842,9 @@ table.values td.undef { color: #999; font-size: 12px; }
 }
 #app:has(> .bar) > .bar { flex: 0 0 auto; z-index: 3; }
 .table .opponents {
-  flex: 1 0 auto; min-height: 184px; min-width: 0;
-  display: grid; gap: 6px; padding: 7px;
-  grid-template-columns: minmax(0, 1fr) minmax(72px, .85fr) minmax(0, 1fr);
+  flex: 0 0 auto; min-height: 150px; min-width: 0;
+  display: grid; gap: 4px; padding: 5px;
+  grid-template-columns: minmax(0, 1fr) minmax(64px, .63fr) minmax(0, 1fr);
   grid-template-areas: "top top top" "left center right";
   grid-template-rows: auto minmax(min-content, 1fr);
   border: 2px solid rgba(190, 211, 209, .23); border-radius: 16px;
@@ -859,8 +854,8 @@ table.values td.undef { color: #999; font-size: 12px; }
 .table .area-top { width: min(100%, 360px); justify-self: center; }
 .table .panel { height: 100%; background: rgba(7, 20, 33, .47); border-color: rgba(193, 208, 218, .24); }
 .table .panel.active, .table .self.active { border-color: var(--gold); }
-.table .panel .row { min-height: 14px; }
-.table .panel .river { min-height: 0; max-height: 66px; overflow-y: auto; padding: 2px; scrollbar-width: thin; }
+.table .panel .row { min-height: 12px; gap: 3px; }
+.table .panel .river { min-height: 0; max-height: 52px; overflow-y: auto; padding: 2px; scrollbar-width: thin; }
 .table .area-center { grid-area: center; min-width: 0; display: flex; align-items: center; }
 .table .board-center {
   display: flex; flex-direction: column; justify-content: center; align-items: center;
@@ -872,10 +867,9 @@ table.values td.undef { color: #999; font-size: 12px; }
 }
 .table .bc-mode { font-size: 10px; color: var(--ink-dim); }
 .table .bc-round { font-size: 18px; color: var(--gold); letter-spacing: .04em; }
-.table .bc-wall strong { color: #fff; }
+.table .bc-wall b { color: #fff; }
 .table .bc-parent, .table .bc-state { color: var(--ink-dim); }
 .table .bc-state:empty { display: none; }
-.table .msg { flex: 0 0 auto; min-height: 22px; padding: 2px 4px; }
 .table .self {
   flex: 0 0 auto; border-color: rgba(193, 208, 218, .27);
   background: rgba(5, 22, 31, .64); padding: 5px 7px 8px;
@@ -927,12 +921,11 @@ table.values td.undef { color: #999; font-size: 12px; }
 @media (min-width: 1000px) and (min-height: 600px) and (orientation: landscape) {
   #app:has(> .bar) > .table {
     display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto auto;
-    grid-template-areas: "board study" "message study" "hand study";
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas: "board study" "hand study";
     overflow-y: hidden; gap: 8px;
   }
   .table .opponents { grid-area: board; min-height: 0; overflow-y: auto; align-content: start; }
-  .table .msg { grid-area: message; }
   .table .self { grid-area: hand; }
   .table .study-dock, .table .study-dock.open { grid-area: study; height: 100%; min-height: 0; }
   .table .board-center { min-height: 110px; }
@@ -944,8 +937,39 @@ table.values td.undef { color: #999; font-size: 12px; }
 @media (orientation: landscape) and (max-height: 500px) {
   #app:has(> .bar) > .table { padding: 4px 6px; gap: 4px; }
   .table .opponents { min-height: 180px; }
-  .table .msg { min-height: 18px; font-size: 12px; }
   .table .self .hand-help > span:first-child { display: none; }
   .table .study-dock { height: 76px; }
   .table .study-dock.open { height: 150px; }
+}
+
+/* Ver.0.7 公開後UI改善①：対局中だけ重複情報を省き、他家の牌を席の向きへ。
+   transformで見た目だけ回転してもレイアウトは縮まらないので、枠に回転後の実寸を確保する。
+   標準サイズ定義・数式DOMは保持し、自分の牌は回転しない。リーチ宣言牌は席の向きに対してさらに90度。 */
+#app:has(> .bar) > .top { padding: 2px 8px; justify-content: space-between; }
+#app:has(> .bar) > .top .logo { display: inline; font-size: 13px; }
+#app:has(> .bar) > .top button { min-height: 44px; }
+.table .panel { padding: 3px 4px; }
+.table .panel header { gap: 3px; line-height: 1.25; }
+.table .seat-1 { --seat-angle: -90deg; }
+.table .seat-2 { --seat-angle: 180deg; }
+.table .seat-3 { --seat-angle: 90deg; }
+.table .panel .seat-tile {
+  --face-w: 22px; --face-h: 30px;
+  display: inline-flex; position: relative; flex: 0 0 auto;
+  width: var(--face-w); height: var(--face-h);
+}
+.table .seat-1 .seat-tile, .table .seat-3 .seat-tile,
+.table .seat-2 .riichi-slot { width: var(--face-h); height: var(--face-w); }
+.table .seat-1 .riichi-slot, .table .seat-3 .riichi-slot { width: var(--face-w); height: var(--face-h); }
+.table .panel .seat-tile > .tile {
+  position: absolute; left: 50%; top: 50%; margin: 0;
+  transform: translate(-50%, -50%) rotate(var(--seat-angle));
+}
+.table .panel .riichi-slot > .tile { transform: translate(-50%, -50%) rotate(calc(var(--seat-angle) + 90deg)); }
+.table .seat-1 .back, .table .seat-3 .back { width: 12px; height: 7px; }
+.table .panel .backs { flex-wrap: wrap; max-width: 100%; }
+.table .panel .melds { max-width: 100%; gap: 2px; }
+.table .panel .meld { gap: 1px; }
+@media (min-width: 820px) {
+  .table .panel .seat-tile { --face-w: 26px; --face-h: 35px; }
 }

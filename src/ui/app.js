@@ -515,27 +515,19 @@ function fxApply() {
 
 // ---------- 描画 ----------
 
-function lastEventText() {
-  const g = S.game;
-  for (let i = g.events.length - 1; i >= 0; i--) {
-    const e = g.events[i];
-    if (e.type === 'discard') {
-      const decl = i > 0 && g.events[i - 1].type === 'riichi' && g.events[i - 1].tile === e.tile;
-      return decl ? `${nameOf(e.seat)} が<b class="riichi-word">リーチ</b>： ${tileHTML(T(g.typeOf(e.tile)), { size: 's' })} を捨てました`
-        : `${nameOf(e.seat)} が ${tileHTML(T(g.typeOf(e.tile)), { size: 's' })} を捨てました`;
-    }
-    if (e.type === 'chi') return `${nameOf(e.seat)} がチー： ${formulaHTML(rules, e.meld)}`;
-    if (e.type === 'pon') return `${nameOf(e.seat)} がポン： ${formulaHTML(rules, e.meld)}`;
-    if (e.type === 'win') return `${nameOf(e.seat)} の${e.how === 'ron' ? 'ロン' : 'ツモ'}和了！`;
-    if (e.type === 'exhaustive-draw') return '流局（山がなくなりました）';
-  }
-  return `${nameOf(g.dealer)} が親です`;
+// 他家だけ牌全体を回転する。枠が回転後の寸法を確保し、数式と物理牌IDは元の描画を保つ。
+function seatTileHTML(seat, html, { id, riichi = false } = {}) {
+  if (seat === HUMAN) return html;
+  return `<span class="seat-tile${riichi ? ' riichi-slot' : ''}"${id === undefined ? '' : ` data-id="${id}"`}>${html}</span>`;
 }
 
-function meldsHTML(seat, size) {
+function meldsHTML(seat, size, oriented = false) {
   const g = S.game;
   return g.melds[seat].map((m) => {
-    const tiles = m.tiles.map((id) => tileHTML(T(g.typeOf(id)), { size, cls: id === m.claimed ? 'claimed' : '' })).join('');
+    const tiles = m.tiles.map((id) => {
+      const html = tileHTML(T(g.typeOf(id)), { size, cls: id === m.claimed ? 'claimed' : '' });
+      return oriented ? seatTileHTML(seat, html) : html;
+    }).join('');
     return `<span class="meld ${m.call === 'pon' ? 'pon' : 'chi'}" data-claimed="${m.claimed}" title="${m.call === 'pon' ? 'ポン' : 'チー'}">${tiles}</span>`;
   }).join('');
 }
@@ -544,10 +536,10 @@ function riverHTML(seat, size) {
   const g = S.game;
   const last = [...g.events].reverse().find((e) => e.type === 'discard');
   const claimTile = g.claim ? g.claim.tile : null;
-  return g.rivers[seat].map((r) => tileHTML(T(g.typeOf(r.id)), {
+  return g.rivers[seat].map((r) => seatTileHTML(seat, tileHTML(T(g.typeOf(r.id)), {
     size, id: r.id,
     cls: [r.tsumogiri ? 'tsumogiri' : '', r.riichi ? 'riichi-decl' : '', last && last.tile === r.id ? 'last' : '', claimTile === r.id ? 'claimable' : ''].join(' '),
-  })).join('');
+  }), { id: r.id, riichi: r.riichi })).join('');
 }
 
 function panelHTML(seat) {
@@ -564,7 +556,7 @@ function panelHTML(seat) {
       ${!g.isClosed(seat) ? '<span class="naki">鳴き</span>' : ''}
       <span class="score">${S.scores[seat]}点</span>
     </header>
-    <div class="row">${backHTML(g.hands[seat].length)}<span class="melds">${meldsHTML(seat, 's')}</span></div>
+    <div class="row">${backHTML(g.hands[seat].length)}<span class="melds">${meldsHTML(seat, 'xs', true)}</span></div>
     <div class="river">${riverHTML(seat, 'xs')}</div>
   </section>`;
 }
@@ -704,12 +696,8 @@ function actionsHTML() {
 }
 
 function headerHTML() {
-  const g = S.game;
-  // 局の表示：終局後（精算済み）はその局の名前のまま（試合の状態は次の局へ進んでいる）
-  const cur = S.scored && S.lastRound ? S.lastRound : { label: handLabel(S.match), renchan: S.match.renchan };
   return `<header class="top">
     <span class="logo">数雀 <small>Ver.${APP_VERSION}</small></span>
-    <span class="info"><span class="mode" title="${modeLabel(rules)}">${({ math1: '数Ⅰ', math2: '数Ⅱ' })[rules.config.mode] || '旧'}</span> <b class="hand-label">${cur.label}</b>${cur.renchan ? ` <span class="renchan">連荘${cur.renchan}</span>` : ''} <span class="wall" aria-label="山の残り">山 <b>${g.wall.length}</b></span></span>
     <span class="tools">
       <button data-action="guide" class="small">ガイド</button>
       <button data-action="settings" class="small" aria-label="設定">⚙</button>
@@ -763,14 +751,13 @@ function render() {
         <div class="area-center">
           <div class="board-center" aria-label="現在の局情報">
             <span class="bc-mode">${modeLabel(rules)}</span>
-            <b class="bc-round">${S.scored && S.lastRound ? S.lastRound.label : handLabel(S.match)}</b>
+            <b class="bc-round hand-label">${S.scored && S.lastRound ? S.lastRound.label : handLabel(S.match)}</b>
             <span class="bc-state">${(S.scored && S.lastRound ? S.lastRound.renchan : S.match.renchan) ? `連荘${S.scored && S.lastRound ? S.lastRound.renchan : S.match.renchan}` : '' }</span>
-            <span class="bc-wall">残り山牌 <strong>${g.wall.length}</strong>枚</span>
+            <span class="bc-wall wall" aria-label="山の残り">山 <b>${g.wall.length}</b>枚</span>
             <span class="bc-parent">親：${nameOf(g.dealer)}</span>
           </div>
         </div>
       </div>
-      <div class="msg" aria-live="polite">${lastEventText()}</div>
       <section class="self ${g.pending() && g.pending().seat === HUMAN && g.pending().type === 'turn' ? 'active' : ''}">
         <header>
           <span class="pos">自分</span><span class="name">あなた</span>

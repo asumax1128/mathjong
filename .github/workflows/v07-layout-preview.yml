@@ -27,7 +27,7 @@ jobs:
       - name: Responsive UI and hint dock (11 viewports)
         run: |
           mkdir -p /tmp/v07-layout
-          node tests/e2e/play.mjs --only v07TableHintDock --shots /tmp/v07-layout
+          node tests/e2e/play.mjs --only v07TableHintDock,v07CompactTable --shots /tmp/v07-layout
       - name: Real touch and mouse hand reorder regression
         run: node tests/e2e/play.mjs --only handReorder
       - uses: actions/upload-artifact@v4

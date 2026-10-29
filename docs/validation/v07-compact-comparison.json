@@ -1,0 +1,1522 @@
+[
+  {
+    "width": 320,
+    "height": 568,
+    "mode": "math1",
+    "scene": "initial",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 320
+      },
+      "board": {
+        "top": 55,
+        "bottom": 217,
+        "height": 162,
+        "width": 304
+      },
+      "self": {
+        "top": 253,
+        "bottom": 389.25,
+        "height": 136.25,
+        "width": 304
+      },
+      "hand": {
+        "top": 282,
+        "bottom": 332.25,
+        "height": 50.25,
+        "width": 288
+      },
+      "msg": {
+        "top": 223,
+        "bottom": 247,
+        "height": 24,
+        "width": 304
+      },
+      "dock": {
+        "top": 395.25,
+        "bottom": 471.25,
+        "height": 76,
+        "width": 304
+      },
+      "tableScroll": 432,
+      "handTile": {
+        "top": 292,
+        "bottom": 332.25,
+        "height": 40.25,
+        "width": 29.15625
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 320
+      },
+      "board": {
+        "top": 57,
+        "bottom": 213,
+        "height": 156,
+        "width": 304
+      },
+      "self": {
+        "top": 219,
+        "bottom": 355.25,
+        "height": 136.25,
+        "width": 304
+      },
+      "hand": {
+        "top": 248,
+        "bottom": 298.25,
+        "height": 50.25,
+        "width": 288
+      },
+      "msg": null,
+      "dock": {
+        "top": 361.25,
+        "bottom": 437.25,
+        "height": 76,
+        "width": 304
+      },
+      "tableScroll": 430,
+      "handTile": {
+        "top": 258,
+        "bottom": 298.25,
+        "height": 40.25,
+        "width": 29.15625
+      },
+      "overflow": 0
+    },
+    "boardSaved": 6,
+    "handTopSaved": 34
+  },
+  {
+    "width": 320,
+    "height": 568,
+    "mode": "math1",
+    "scene": "dense",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 320
+      },
+      "board": {
+        "top": 55,
+        "bottom": 427,
+        "height": 372,
+        "width": 304
+      },
+      "self": {
+        "top": 478,
+        "bottom": 734.25,
+        "height": 256.25,
+        "width": 304
+      },
+      "hand": {
+        "top": 627,
+        "bottom": 677.25,
+        "height": 50.25,
+        "width": 288
+      },
+      "msg": {
+        "top": 433,
+        "bottom": 472,
+        "height": 39,
+        "width": 304
+      },
+      "dock": {
+        "top": 740.25,
+        "bottom": 816.25,
+        "height": 76,
+        "width": 304
+      },
+      "tableScroll": 777,
+      "handTile": {
+        "top": 637,
+        "bottom": 677.25,
+        "height": 40.25,
+        "width": 29.15625
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 320
+      },
+      "board": {
+        "top": 57,
+        "bottom": 347.75,
+        "height": 290.75,
+        "width": 304
+      },
+      "self": {
+        "top": 353.75,
+        "bottom": 610,
+        "height": 256.25,
+        "width": 304
+      },
+      "hand": {
+        "top": 502.75,
+        "bottom": 553,
+        "height": 50.25,
+        "width": 288
+      },
+      "msg": null,
+      "dock": {
+        "top": 616,
+        "bottom": 692,
+        "height": 76,
+        "width": 304
+      },
+      "tableScroll": 651,
+      "handTile": {
+        "top": 512.75,
+        "bottom": 553,
+        "height": 40.25,
+        "width": 29.15625
+      },
+      "overflow": 0
+    },
+    "boardSaved": 81.25,
+    "handTopSaved": 124.25
+  },
+  {
+    "width": 320,
+    "height": 568,
+    "mode": "math2",
+    "scene": "initial",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 320
+      },
+      "board": {
+        "top": 55,
+        "bottom": 217,
+        "height": 162,
+        "width": 304
+      },
+      "self": {
+        "top": 253,
+        "bottom": 389.25,
+        "height": 136.25,
+        "width": 304
+      },
+      "hand": {
+        "top": 282,
+        "bottom": 332.25,
+        "height": 50.25,
+        "width": 288
+      },
+      "msg": {
+        "top": 223,
+        "bottom": 247,
+        "height": 24,
+        "width": 304
+      },
+      "dock": {
+        "top": 395.25,
+        "bottom": 471.25,
+        "height": 76,
+        "width": 304
+      },
+      "tableScroll": 432,
+      "handTile": {
+        "top": 292,
+        "bottom": 332.25,
+        "height": 40.25,
+        "width": 29.15625
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 320
+      },
+      "board": {
+        "top": 57,
+        "bottom": 213,
+        "height": 156,
+        "width": 304
+      },
+      "self": {
+        "top": 219,
+        "bottom": 355.25,
+        "height": 136.25,
+        "width": 304
+      },
+      "hand": {
+        "top": 248,
+        "bottom": 298.25,
+        "height": 50.25,
+        "width": 288
+      },
+      "msg": null,
+      "dock": {
+        "top": 361.25,
+        "bottom": 437.25,
+        "height": 76,
+        "width": 304
+      },
+      "tableScroll": 430,
+      "handTile": {
+        "top": 258,
+        "bottom": 298.25,
+        "height": 40.25,
+        "width": 29.15625
+      },
+      "overflow": 0
+    },
+    "boardSaved": 6,
+    "handTopSaved": 34
+  },
+  {
+    "width": 320,
+    "height": 568,
+    "mode": "math2",
+    "scene": "dense",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 320
+      },
+      "board": {
+        "top": 55,
+        "bottom": 427,
+        "height": 372,
+        "width": 304
+      },
+      "self": {
+        "top": 478,
+        "bottom": 734.25,
+        "height": 256.25,
+        "width": 304
+      },
+      "hand": {
+        "top": 627,
+        "bottom": 677.25,
+        "height": 50.25,
+        "width": 288
+      },
+      "msg": {
+        "top": 433,
+        "bottom": 472,
+        "height": 39,
+        "width": 304
+      },
+      "dock": {
+        "top": 740.25,
+        "bottom": 816.25,
+        "height": 76,
+        "width": 304
+      },
+      "tableScroll": 777,
+      "handTile": {
+        "top": 637,
+        "bottom": 677.25,
+        "height": 40.25,
+        "width": 29.15625
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 320
+      },
+      "board": {
+        "top": 57,
+        "bottom": 347.75,
+        "height": 290.75,
+        "width": 304
+      },
+      "self": {
+        "top": 353.75,
+        "bottom": 610,
+        "height": 256.25,
+        "width": 304
+      },
+      "hand": {
+        "top": 502.75,
+        "bottom": 553,
+        "height": 50.25,
+        "width": 288
+      },
+      "msg": null,
+      "dock": {
+        "top": 616,
+        "bottom": 692,
+        "height": 76,
+        "width": 304
+      },
+      "tableScroll": 651,
+      "handTile": {
+        "top": 512.75,
+        "bottom": 553,
+        "height": 40.25,
+        "width": 29.15625
+      },
+      "overflow": 0
+    },
+    "boardSaved": 81.25,
+    "handTopSaved": 124.25
+  },
+  {
+    "width": 375,
+    "height": 667,
+    "mode": "math1",
+    "scene": "initial",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 375
+      },
+      "board": {
+        "top": 55,
+        "bottom": 297.140625,
+        "height": 242.140625,
+        "width": 359
+      },
+      "self": {
+        "top": 333.140625,
+        "bottom": 501.296875,
+        "height": 168.15625,
+        "width": 359
+      },
+      "hand": {
+        "top": 362.140625,
+        "bottom": 420.296875,
+        "height": 58.15625,
+        "width": 343
+      },
+      "msg": {
+        "top": 303.140625,
+        "bottom": 327.140625,
+        "height": 24,
+        "width": 359
+      },
+      "dock": {
+        "top": 507.296875,
+        "bottom": 594,
+        "height": 86.703125,
+        "width": 359
+      },
+      "tableScroll": 555,
+      "handTile": {
+        "top": 372.140625,
+        "bottom": 420.296875,
+        "height": 48.15625,
+        "width": 34.890625
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 375
+      },
+      "board": {
+        "top": 57,
+        "bottom": 224,
+        "height": 167,
+        "width": 359
+      },
+      "self": {
+        "top": 230,
+        "bottom": 398.15625,
+        "height": 168.15625,
+        "width": 359
+      },
+      "hand": {
+        "top": 259,
+        "bottom": 317.15625,
+        "height": 58.15625,
+        "width": 343
+      },
+      "msg": null,
+      "dock": {
+        "top": 404.15625,
+        "bottom": 490.859375,
+        "height": 86.703125,
+        "width": 359
+      },
+      "tableScroll": 553,
+      "handTile": {
+        "top": 269,
+        "bottom": 317.15625,
+        "height": 48.15625,
+        "width": 34.890625
+      },
+      "overflow": 0
+    },
+    "boardSaved": 75.140625,
+    "handTopSaved": 103.140625
+  },
+  {
+    "width": 375,
+    "height": 667,
+    "mode": "math1",
+    "scene": "dense",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 375
+      },
+      "board": {
+        "top": 55,
+        "bottom": 395,
+        "height": 340,
+        "width": 359
+      },
+      "self": {
+        "top": 446,
+        "bottom": 704.15625,
+        "height": 258.15625,
+        "width": 359
+      },
+      "hand": {
+        "top": 565,
+        "bottom": 623.15625,
+        "height": 58.15625,
+        "width": 343
+      },
+      "msg": {
+        "top": 401,
+        "bottom": 440,
+        "height": 39,
+        "width": 359
+      },
+      "dock": {
+        "top": 710.15625,
+        "bottom": 796.859375,
+        "height": 86.703125,
+        "width": 359
+      },
+      "tableScroll": 758,
+      "handTile": {
+        "top": 575,
+        "bottom": 623.15625,
+        "height": 48.15625,
+        "width": 34.890625
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 375
+      },
+      "board": {
+        "top": 57,
+        "bottom": 329.75,
+        "height": 272.75,
+        "width": 359
+      },
+      "self": {
+        "top": 335.75,
+        "bottom": 593.90625,
+        "height": 258.15625,
+        "width": 359
+      },
+      "hand": {
+        "top": 454.75,
+        "bottom": 512.90625,
+        "height": 58.15625,
+        "width": 343
+      },
+      "msg": null,
+      "dock": {
+        "top": 599.90625,
+        "bottom": 686.609375,
+        "height": 86.703125,
+        "width": 359
+      },
+      "tableScroll": 646,
+      "handTile": {
+        "top": 464.75,
+        "bottom": 512.90625,
+        "height": 48.15625,
+        "width": 34.890625
+      },
+      "overflow": 0
+    },
+    "boardSaved": 67.25,
+    "handTopSaved": 110.25
+  },
+  {
+    "width": 375,
+    "height": 667,
+    "mode": "math2",
+    "scene": "initial",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 375
+      },
+      "board": {
+        "top": 55,
+        "bottom": 297.140625,
+        "height": 242.140625,
+        "width": 359
+      },
+      "self": {
+        "top": 333.140625,
+        "bottom": 501.296875,
+        "height": 168.15625,
+        "width": 359
+      },
+      "hand": {
+        "top": 362.140625,
+        "bottom": 420.296875,
+        "height": 58.15625,
+        "width": 343
+      },
+      "msg": {
+        "top": 303.140625,
+        "bottom": 327.140625,
+        "height": 24,
+        "width": 359
+      },
+      "dock": {
+        "top": 507.296875,
+        "bottom": 594,
+        "height": 86.703125,
+        "width": 359
+      },
+      "tableScroll": 555,
+      "handTile": {
+        "top": 372.140625,
+        "bottom": 420.296875,
+        "height": 48.15625,
+        "width": 34.890625
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 375
+      },
+      "board": {
+        "top": 57,
+        "bottom": 224,
+        "height": 167,
+        "width": 359
+      },
+      "self": {
+        "top": 230,
+        "bottom": 398.15625,
+        "height": 168.15625,
+        "width": 359
+      },
+      "hand": {
+        "top": 259,
+        "bottom": 317.15625,
+        "height": 58.15625,
+        "width": 343
+      },
+      "msg": null,
+      "dock": {
+        "top": 404.15625,
+        "bottom": 490.859375,
+        "height": 86.703125,
+        "width": 359
+      },
+      "tableScroll": 553,
+      "handTile": {
+        "top": 269,
+        "bottom": 317.15625,
+        "height": 48.15625,
+        "width": 34.890625
+      },
+      "overflow": 0
+    },
+    "boardSaved": 75.140625,
+    "handTopSaved": 103.140625
+  },
+  {
+    "width": 375,
+    "height": 667,
+    "mode": "math2",
+    "scene": "dense",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 375
+      },
+      "board": {
+        "top": 55,
+        "bottom": 395,
+        "height": 340,
+        "width": 359
+      },
+      "self": {
+        "top": 446,
+        "bottom": 704.15625,
+        "height": 258.15625,
+        "width": 359
+      },
+      "hand": {
+        "top": 565,
+        "bottom": 623.15625,
+        "height": 58.15625,
+        "width": 343
+      },
+      "msg": {
+        "top": 401,
+        "bottom": 440,
+        "height": 39,
+        "width": 359
+      },
+      "dock": {
+        "top": 710.15625,
+        "bottom": 796.859375,
+        "height": 86.703125,
+        "width": 359
+      },
+      "tableScroll": 758,
+      "handTile": {
+        "top": 575,
+        "bottom": 623.15625,
+        "height": 48.15625,
+        "width": 34.890625
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 375
+      },
+      "board": {
+        "top": 57,
+        "bottom": 329.75,
+        "height": 272.75,
+        "width": 359
+      },
+      "self": {
+        "top": 335.75,
+        "bottom": 593.90625,
+        "height": 258.15625,
+        "width": 359
+      },
+      "hand": {
+        "top": 454.75,
+        "bottom": 512.90625,
+        "height": 58.15625,
+        "width": 343
+      },
+      "msg": null,
+      "dock": {
+        "top": 599.90625,
+        "bottom": 686.609375,
+        "height": 86.703125,
+        "width": 359
+      },
+      "tableScroll": 646,
+      "handTile": {
+        "top": 464.75,
+        "bottom": 512.90625,
+        "height": 48.15625,
+        "width": 34.890625
+      },
+      "overflow": 0
+    },
+    "boardSaved": 67.25,
+    "handTopSaved": 110.25
+  },
+  {
+    "width": 390,
+    "height": 844,
+    "mode": "math1",
+    "scene": "initial",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 390
+      },
+      "board": {
+        "top": 55,
+        "bottom": 448.96875,
+        "height": 393.96875,
+        "width": 374
+      },
+      "self": {
+        "top": 484.96875,
+        "bottom": 655.28125,
+        "height": 170.3125,
+        "width": 374
+      },
+      "hand": {
+        "top": 513.96875,
+        "bottom": 574.28125,
+        "height": 60.3125,
+        "width": 358
+      },
+      "msg": {
+        "top": 454.96875,
+        "bottom": 478.96875,
+        "height": 24,
+        "width": 374
+      },
+      "dock": {
+        "top": 661.28125,
+        "bottom": 771,
+        "height": 109.71875,
+        "width": 374
+      },
+      "tableScroll": 732,
+      "handTile": {
+        "top": 523.96875,
+        "bottom": 574.28125,
+        "height": 50.3125,
+        "width": 36.453125
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 390
+      },
+      "board": {
+        "top": 57,
+        "bottom": 224,
+        "height": 167,
+        "width": 374
+      },
+      "self": {
+        "top": 230,
+        "bottom": 400.3125,
+        "height": 170.3125,
+        "width": 374
+      },
+      "hand": {
+        "top": 259,
+        "bottom": 319.3125,
+        "height": 60.3125,
+        "width": 358
+      },
+      "msg": null,
+      "dock": {
+        "top": 406.3125,
+        "bottom": 516.03125,
+        "height": 109.71875,
+        "width": 374
+      },
+      "tableScroll": 730,
+      "handTile": {
+        "top": 269,
+        "bottom": 319.3125,
+        "height": 50.3125,
+        "width": 36.453125
+      },
+      "overflow": 0
+    },
+    "boardSaved": 226.96875,
+    "handTopSaved": 254.96875
+  },
+  {
+    "width": 390,
+    "height": 844,
+    "mode": "math1",
+    "scene": "dense",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 390
+      },
+      "board": {
+        "top": 55,
+        "bottom": 395,
+        "height": 340,
+        "width": 374
+      },
+      "self": {
+        "top": 446,
+        "bottom": 706.3125,
+        "height": 260.3125,
+        "width": 374
+      },
+      "hand": {
+        "top": 565,
+        "bottom": 625.3125,
+        "height": 60.3125,
+        "width": 358
+      },
+      "msg": {
+        "top": 401,
+        "bottom": 440,
+        "height": 39,
+        "width": 374
+      },
+      "dock": {
+        "top": 712.3125,
+        "bottom": 822.03125,
+        "height": 109.71875,
+        "width": 374
+      },
+      "tableScroll": 783,
+      "handTile": {
+        "top": 575,
+        "bottom": 625.3125,
+        "height": 50.3125,
+        "width": 36.453125
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 390
+      },
+      "board": {
+        "top": 57,
+        "bottom": 329.75,
+        "height": 272.75,
+        "width": 374
+      },
+      "self": {
+        "top": 335.75,
+        "bottom": 596.0625,
+        "height": 260.3125,
+        "width": 374
+      },
+      "hand": {
+        "top": 454.75,
+        "bottom": 515.0625,
+        "height": 60.3125,
+        "width": 358
+      },
+      "msg": null,
+      "dock": {
+        "top": 602.0625,
+        "bottom": 711.78125,
+        "height": 109.71875,
+        "width": 374
+      },
+      "tableScroll": 730,
+      "handTile": {
+        "top": 464.75,
+        "bottom": 515.0625,
+        "height": 50.3125,
+        "width": 36.453125
+      },
+      "overflow": 0
+    },
+    "boardSaved": 67.25,
+    "handTopSaved": 110.25
+  },
+  {
+    "width": 390,
+    "height": 844,
+    "mode": "math2",
+    "scene": "initial",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 390
+      },
+      "board": {
+        "top": 55,
+        "bottom": 448.96875,
+        "height": 393.96875,
+        "width": 374
+      },
+      "self": {
+        "top": 484.96875,
+        "bottom": 655.28125,
+        "height": 170.3125,
+        "width": 374
+      },
+      "hand": {
+        "top": 513.96875,
+        "bottom": 574.28125,
+        "height": 60.3125,
+        "width": 358
+      },
+      "msg": {
+        "top": 454.96875,
+        "bottom": 478.96875,
+        "height": 24,
+        "width": 374
+      },
+      "dock": {
+        "top": 661.28125,
+        "bottom": 771,
+        "height": 109.71875,
+        "width": 374
+      },
+      "tableScroll": 732,
+      "handTile": {
+        "top": 523.96875,
+        "bottom": 574.28125,
+        "height": 50.3125,
+        "width": 36.453125
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 390
+      },
+      "board": {
+        "top": 57,
+        "bottom": 224,
+        "height": 167,
+        "width": 374
+      },
+      "self": {
+        "top": 230,
+        "bottom": 400.3125,
+        "height": 170.3125,
+        "width": 374
+      },
+      "hand": {
+        "top": 259,
+        "bottom": 319.3125,
+        "height": 60.3125,
+        "width": 358
+      },
+      "msg": null,
+      "dock": {
+        "top": 406.3125,
+        "bottom": 516.03125,
+        "height": 109.71875,
+        "width": 374
+      },
+      "tableScroll": 730,
+      "handTile": {
+        "top": 269,
+        "bottom": 319.3125,
+        "height": 50.3125,
+        "width": 36.453125
+      },
+      "overflow": 0
+    },
+    "boardSaved": 226.96875,
+    "handTopSaved": 254.96875
+  },
+  {
+    "width": 390,
+    "height": 844,
+    "mode": "math2",
+    "scene": "dense",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 390
+      },
+      "board": {
+        "top": 55,
+        "bottom": 395,
+        "height": 340,
+        "width": 374
+      },
+      "self": {
+        "top": 446,
+        "bottom": 706.3125,
+        "height": 260.3125,
+        "width": 374
+      },
+      "hand": {
+        "top": 565,
+        "bottom": 625.3125,
+        "height": 60.3125,
+        "width": 358
+      },
+      "msg": {
+        "top": 401,
+        "bottom": 440,
+        "height": 39,
+        "width": 374
+      },
+      "dock": {
+        "top": 712.3125,
+        "bottom": 822.03125,
+        "height": 109.71875,
+        "width": 374
+      },
+      "tableScroll": 783,
+      "handTile": {
+        "top": 575,
+        "bottom": 625.3125,
+        "height": 50.3125,
+        "width": 36.453125
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 390
+      },
+      "board": {
+        "top": 57,
+        "bottom": 329.75,
+        "height": 272.75,
+        "width": 374
+      },
+      "self": {
+        "top": 335.75,
+        "bottom": 596.0625,
+        "height": 260.3125,
+        "width": 374
+      },
+      "hand": {
+        "top": 454.75,
+        "bottom": 515.0625,
+        "height": 60.3125,
+        "width": 358
+      },
+      "msg": null,
+      "dock": {
+        "top": 602.0625,
+        "bottom": 711.78125,
+        "height": 109.71875,
+        "width": 374
+      },
+      "tableScroll": 730,
+      "handTile": {
+        "top": 464.75,
+        "bottom": 515.0625,
+        "height": 50.3125,
+        "width": 36.453125
+      },
+      "overflow": 0
+    },
+    "boardSaved": 67.25,
+    "handTopSaved": 110.25
+  },
+  {
+    "width": 430,
+    "height": 932,
+    "mode": "math1",
+    "scene": "initial",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 430
+      },
+      "board": {
+        "top": 55,
+        "bottom": 519.78125,
+        "height": 464.78125,
+        "width": 414
+      },
+      "self": {
+        "top": 555.78125,
+        "bottom": 731.84375,
+        "height": 176.0625,
+        "width": 414
+      },
+      "hand": {
+        "top": 584.78125,
+        "bottom": 650.84375,
+        "height": 66.0625,
+        "width": 398
+      },
+      "msg": {
+        "top": 525.78125,
+        "bottom": 549.78125,
+        "height": 24,
+        "width": 414
+      },
+      "dock": {
+        "top": 737.84375,
+        "bottom": 859,
+        "height": 121.15625,
+        "width": 414
+      },
+      "tableScroll": 820,
+      "handTile": {
+        "top": 594.78125,
+        "bottom": 650.84375,
+        "height": 56.0625,
+        "width": 40.625
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 430
+      },
+      "board": {
+        "top": 57,
+        "bottom": 224,
+        "height": 167,
+        "width": 414
+      },
+      "self": {
+        "top": 230,
+        "bottom": 406.0625,
+        "height": 176.0625,
+        "width": 414
+      },
+      "hand": {
+        "top": 259,
+        "bottom": 325.0625,
+        "height": 66.0625,
+        "width": 398
+      },
+      "msg": null,
+      "dock": {
+        "top": 412.0625,
+        "bottom": 533.21875,
+        "height": 121.15625,
+        "width": 414
+      },
+      "tableScroll": 818,
+      "handTile": {
+        "top": 269,
+        "bottom": 325.0625,
+        "height": 56.0625,
+        "width": 40.625
+      },
+      "overflow": 0
+    },
+    "boardSaved": 297.78125,
+    "handTopSaved": 325.78125
+  },
+  {
+    "width": 430,
+    "height": 932,
+    "mode": "math1",
+    "scene": "dense",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 430
+      },
+      "board": {
+        "top": 55,
+        "bottom": 414.78125,
+        "height": 359.78125,
+        "width": 414
+      },
+      "self": {
+        "top": 465.78125,
+        "bottom": 731.84375,
+        "height": 266.0625,
+        "width": 414
+      },
+      "hand": {
+        "top": 584.78125,
+        "bottom": 650.84375,
+        "height": 66.0625,
+        "width": 398
+      },
+      "msg": {
+        "top": 420.78125,
+        "bottom": 459.78125,
+        "height": 39,
+        "width": 414
+      },
+      "dock": {
+        "top": 737.84375,
+        "bottom": 859,
+        "height": 121.15625,
+        "width": 414
+      },
+      "tableScroll": 820,
+      "handTile": {
+        "top": 594.78125,
+        "bottom": 650.84375,
+        "height": 56.0625,
+        "width": 40.625
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 430
+      },
+      "board": {
+        "top": 57,
+        "bottom": 313,
+        "height": 256,
+        "width": 414
+      },
+      "self": {
+        "top": 319,
+        "bottom": 585.0625,
+        "height": 266.0625,
+        "width": 414
+      },
+      "hand": {
+        "top": 438,
+        "bottom": 504.0625,
+        "height": 66.0625,
+        "width": 398
+      },
+      "msg": null,
+      "dock": {
+        "top": 591.0625,
+        "bottom": 712.21875,
+        "height": 121.15625,
+        "width": 414
+      },
+      "tableScroll": 818,
+      "handTile": {
+        "top": 448,
+        "bottom": 504.0625,
+        "height": 56.0625,
+        "width": 40.625
+      },
+      "overflow": 0
+    },
+    "boardSaved": 103.78125,
+    "handTopSaved": 146.78125
+  },
+  {
+    "width": 430,
+    "height": 932,
+    "mode": "math2",
+    "scene": "initial",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 430
+      },
+      "board": {
+        "top": 55,
+        "bottom": 519.78125,
+        "height": 464.78125,
+        "width": 414
+      },
+      "self": {
+        "top": 555.78125,
+        "bottom": 731.84375,
+        "height": 176.0625,
+        "width": 414
+      },
+      "hand": {
+        "top": 584.78125,
+        "bottom": 650.84375,
+        "height": 66.0625,
+        "width": 398
+      },
+      "msg": {
+        "top": 525.78125,
+        "bottom": 549.78125,
+        "height": 24,
+        "width": 414
+      },
+      "dock": {
+        "top": 737.84375,
+        "bottom": 859,
+        "height": 121.15625,
+        "width": 414
+      },
+      "tableScroll": 820,
+      "handTile": {
+        "top": 594.78125,
+        "bottom": 650.84375,
+        "height": 56.0625,
+        "width": 40.625
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 430
+      },
+      "board": {
+        "top": 57,
+        "bottom": 224,
+        "height": 167,
+        "width": 414
+      },
+      "self": {
+        "top": 230,
+        "bottom": 406.0625,
+        "height": 176.0625,
+        "width": 414
+      },
+      "hand": {
+        "top": 259,
+        "bottom": 325.0625,
+        "height": 66.0625,
+        "width": 398
+      },
+      "msg": null,
+      "dock": {
+        "top": 412.0625,
+        "bottom": 533.21875,
+        "height": 121.15625,
+        "width": 414
+      },
+      "tableScroll": 818,
+      "handTile": {
+        "top": 269,
+        "bottom": 325.0625,
+        "height": 56.0625,
+        "width": 40.625
+      },
+      "overflow": 0
+    },
+    "boardSaved": 297.78125,
+    "handTopSaved": 325.78125
+  },
+  {
+    "width": 430,
+    "height": 932,
+    "mode": "math2",
+    "scene": "dense",
+    "before": {
+      "top": {
+        "top": 0,
+        "bottom": 47,
+        "height": 47,
+        "width": 430
+      },
+      "board": {
+        "top": 55,
+        "bottom": 414.78125,
+        "height": 359.78125,
+        "width": 414
+      },
+      "self": {
+        "top": 465.78125,
+        "bottom": 731.84375,
+        "height": 266.0625,
+        "width": 414
+      },
+      "hand": {
+        "top": 584.78125,
+        "bottom": 650.84375,
+        "height": 66.0625,
+        "width": 398
+      },
+      "msg": {
+        "top": 420.78125,
+        "bottom": 459.78125,
+        "height": 39,
+        "width": 414
+      },
+      "dock": {
+        "top": 737.84375,
+        "bottom": 859,
+        "height": 121.15625,
+        "width": 414
+      },
+      "tableScroll": 820,
+      "handTile": {
+        "top": 594.78125,
+        "bottom": 650.84375,
+        "height": 56.0625,
+        "width": 40.625
+      },
+      "overflow": 0
+    },
+    "after": {
+      "top": {
+        "top": 0,
+        "bottom": 49,
+        "height": 49,
+        "width": 430
+      },
+      "board": {
+        "top": 57,
+        "bottom": 313,
+        "height": 256,
+        "width": 414
+      },
+      "self": {
+        "top": 319,
+        "bottom": 585.0625,
+        "height": 266.0625,
+        "width": 414
+      },
+      "hand": {
+        "top": 438,
+        "bottom": 504.0625,
+        "height": 66.0625,
+        "width": 398
+      },
+      "msg": null,
+      "dock": {
+        "top": 591.0625,
+        "bottom": 712.21875,
+        "height": 121.15625,
+        "width": 414
+      },
+      "tableScroll": 818,
+      "handTile": {
+        "top": 448,
+        "bottom": 504.0625,
+        "height": 56.0625,
+        "width": 40.625
+      },
+      "overflow": 0
+    },
+    "boardSaved": 103.78125,
+    "handTopSaved": 146.78125
+  }
+]
