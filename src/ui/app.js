@@ -27,7 +27,7 @@ import { VOICE_KEY, parseVoiceSetting, createVoicePlayer } from './voice.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
-const APP_VERSION = '0.6.4';
+const APP_VERSION = '0.7.0-a';
 document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`;
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -732,10 +732,19 @@ function render() {
   app.innerHTML = `
     ${headerHTML()}
     <main class="table">
-      <div class="opponents">
+      <div class="opponents" aria-label="対局卓">
         <div class="area-top">${panelHTML(2)}</div>
         <div class="area-left">${panelHTML(3)}</div>
         <div class="area-right">${panelHTML(1)}</div>
+        <div class="area-center">
+          <div class="board-center" aria-label="現在の局情報">
+            <span class="bc-mode">${modeLabel(rules)}</span>
+            <b class="bc-round">${S.scored && S.lastRound ? S.lastRound.label : handLabel(S.match)}</b>
+            <span class="bc-state">${(S.scored && S.lastRound ? S.lastRound.renchan : S.match.renchan) ? `連荘${S.scored && S.lastRound ? S.lastRound.renchan : S.match.renchan}` : '' }</span>
+            <span class="bc-wall">残り山牌 <strong>${g.wall.length}</strong>枚</span>
+            <span class="bc-parent">親：${nameOf(g.dealer)}</span>
+          </div>
+        </div>
       </div>
       <div class="msg" aria-live="polite">${lastEventText()}</div>
       <section class="self ${g.pending() && g.pending().seat === HUMAN && g.pending().type === 'turn' ? 'active' : ''}">
@@ -749,7 +758,13 @@ function render() {
         <div class="river mine">${riverHTML(HUMAN, 'xs')}</div>
         <div class="melds mine">${meldsHTML(HUMAN, 'm')}</div>
         ${handHTML()}
-        ${S.hintText ? `<div class="hint-box">${S.hintText}</div>` : ''}
+      </section>
+      <section class="study-dock${S.hintOpen ? ' open' : ' idle'}" aria-label="ヒント・数式確認エリア">
+        <div class="study-dock-head">
+          <b>ヒント・数式確認</b>
+          <span>${S.hintOpen ? (S.hintStage === 2 ? '数式確認' : '発見ヒント') : 'ヒントOFF'}</span>
+        </div>
+        ${S.hintText ? `<div class="study-dock-content hint-box">${S.hintText}</div>` : '<p class="study-placeholder">手牌の下にある「ヒント」から、完成数式・役候補を確認できます。</p>'}
       </section>
     </main>
     <footer class="bar">${actionsHTML()}</footer>
