@@ -1,0 +1,149 @@
+{
+  "phase": "isolated-draft-foundation",
+  "baseMain": "1603bdf3da18f93737eb6ec52813b6d6ea616eff",
+  "kickoffHead": "81062b9f2080fe539da2161ba9b25f72fbf0d8ba",
+  "unit": {
+    "passed": 409,
+    "newTests": 30,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 212413.576515
+  },
+  "existingE2E": {
+    "passed": true,
+    "seconds": 902.804,
+    "deviceRounds": 23
+  },
+  "pairedAiMatches": [
+    {
+      "mode": "math1",
+      "length": 4,
+      "played": 4,
+      "decisions": 72,
+      "bytes": 96107,
+      "appendP95Ms": 0.7633549999991374,
+      "appendMaxMs": 1.9754470000007132
+    },
+    {
+      "mode": "math1",
+      "length": 8,
+      "played": 12,
+      "decisions": 357,
+      "bytes": 504498,
+      "appendP95Ms": 1.2585819999985688,
+      "appendMaxMs": 17.68467099999907
+    },
+    {
+      "mode": "math2",
+      "length": 4,
+      "played": 5,
+      "decisions": 170,
+      "bytes": 272469,
+      "appendP95Ms": 1.6245200000012119,
+      "appendMaxMs": 4.076524000000063
+    },
+    {
+      "mode": "math2",
+      "length": 8,
+      "played": 11,
+      "decisions": 327,
+      "bytes": 529359,
+      "appendP95Ms": 1.4482289999941713,
+      "appendMaxMs": 24.673663000001397
+    }
+  ],
+  "browser": [
+    {
+      "mode": "math1",
+      "width": 320,
+      "browser": "154.0.8037.57",
+      "liveUnchanged": true,
+      "schema": 1,
+      "visibility": "private-full",
+      "report": {
+        "valid": true,
+        "rounds": 1,
+        "decisions": 1,
+        "engineEvents": 3,
+        "status": "recording"
+      },
+      "bytes": 7937,
+      "appendMs": 2.5,
+      "keysUnchanged": true,
+      "discards": 1,
+      "beforeDiscard": 25
+    },
+    {
+      "mode": "math1",
+      "width": 390,
+      "browser": "154.0.8037.57",
+      "liveUnchanged": true,
+      "schema": 1,
+      "visibility": "private-full",
+      "report": {
+        "valid": true,
+        "rounds": 1,
+        "decisions": 1,
+        "engineEvents": 3,
+        "status": "recording"
+      },
+      "bytes": 7937,
+      "appendMs": 1.1000000014901161,
+      "keysUnchanged": true,
+      "discards": 1,
+      "beforeDiscard": 25
+    },
+    {
+      "mode": "math2",
+      "width": 320,
+      "browser": "154.0.8037.57",
+      "liveUnchanged": true,
+      "schema": 1,
+      "visibility": "private-full",
+      "report": {
+        "valid": true,
+        "rounds": 1,
+        "decisions": 1,
+        "engineEvents": 3,
+        "status": "recording"
+      },
+      "bytes": 8528,
+      "appendMs": 1.1000000014901161,
+      "keysUnchanged": true,
+      "discards": 1,
+      "beforeDiscard": 38
+    },
+    {
+      "mode": "math2",
+      "width": 390,
+      "browser": "154.0.8037.57",
+      "liveUnchanged": true,
+      "schema": 1,
+      "visibility": "private-full",
+      "report": {
+        "valid": true,
+        "rounds": 1,
+        "decisions": 1,
+        "engineEvents": 3,
+        "status": "recording"
+      },
+      "bytes": 8528,
+      "appendMs": 2.199999999254942,
+      "keysUnchanged": true,
+      "discards": 1,
+      "beforeDiscard": 38
+    }
+  ],
+  "productionIntegration": false,
+  "persistentStorageImplemented": false,
+  "mainMerged": false,
+  "published": false,
+  "webKitSafari": "not executed; browser unavailable",
+  "githubCI": "not yet executed; Draft PR creation/access subject to enforced API destination policy",
+  "sourceSha256": {
+    "src/engine/paifu.js": "17bfe02c5f77e88370b2de232a5dff70c91e4540788780fbbd0c1b6bb7bafab9",
+    "tests/paifu.test.js": "2741f0fd45fc784c508f4ad0855b917c323593b7b9a70a57466c3ab6dbbc7e34",
+    "tests/e2e/paifu.mjs": "2544a559159a892d1de889b3a2af3534251b0418adb43ffbe505f6b3f3ab55bb"
+  },
+  "persistentBrowserStorageWrites": false
+}

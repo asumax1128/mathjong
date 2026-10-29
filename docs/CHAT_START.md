@@ -54,3 +54,8 @@ GitHubリポジトリ https://github.com/asumax1128/mathjong を一次資料と�
 ## 引き継ぎ確認の合格条件
 
 GitHubだけを読んだ新チャットが、現在の正式版・main SHA・PR #11/#18/#20/#21のマージ済み状態・PR #19のDraft状態・公開smokeの未解決事項と保守ブランチ・第4〜6段階の実機受入待ち・9人のAI・優先順位・P3を復元できること。独立復元テストは未実施。
+
+
+## 2026-10-29 追記：Ver.0.8牌譜基盤の先行開発（未統合）
+
+最新指示[docs/50](50-v08-paifu-foundation-kickoff.md)に基づき、Codexは`feature/v08-paifu-foundation`でUIから独立した版付き記録・復元・検証を開発。[調査・スキーマ・API・未決定事項](51-v08-paifu-foundation-schema.md)。通常対局への自動記録接続、保存媒体、公開・共有、Ver.0.9以降の画面は未実装。Ver.0.7の卓UIはClaude Code担当であり、PR #36のブランチには触れない。今回の指示ではDraft保持、mainマージ・Pages公開は禁止。従来の包括公開承認を今回へ流用しない。既存の決定・履歴は保持。
