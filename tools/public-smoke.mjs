@@ -1,6 +1,6 @@
 // 公開サイトの動作確認（Ver.0.6）：既存の GitHub Pages の URL を実際に開き、新しい版が配信されていることと、
 // タイトル → 対戦相手の選択（3人）→ 対局開始 まで操作できることを確かめる。サイトの内容は変更しない（読むだけ）。
-//   node tools/public-smoke.mjs --url https://asumax1128.github.io/mathjong/ --version 0.6.4 [--wait 600] [--shots dir]
+//   node tools/public-smoke.mjs --url https://asumax1128.github.io/mathjong/ --version 0.7.0-a [--wait 600] [--shots dir]
 // 公開サイトではテスト用の機能（window.__mathjong・speed=test）は無効なので、画面の表示（DOM）だけで確認する。
 // 反映待ち：指定の版が配信されるまで、最大 --wait 秒まで繰り返し読み込む（キャッシュを避けるため毎回クエリを変える）。
 import { createRequire } from 'node:module';
@@ -11,7 +11,7 @@ const { chromium } = require('playwright');
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
 const URL0 = opt('--url', 'https://asumax1128.github.io/mathjong/');
-const VERSION = opt('--version', '0.6.4');
+const VERSION = opt('--version', '0.7.0-a');
 const WAIT = Number(opt('--wait', 600));
 const SHOTS = opt('--shots', null);
 
@@ -84,6 +84,16 @@ try {
   const panel = (await page.locator('.panel .name').allInnerTexts()).sort();
   assert.deepEqual(panel, ['ゆうじん', 'たら', 'のっち'].sort(), `対局の名前 ${panel}`);
   assert.ok((await page.locator('.hand .tile').count()) >= 8, '手牌が表示される');
+  assert.equal(await page.locator('.board-center').count(),1,'麻雀卓の中央に局情報がある');
+  assert.equal(await page.locator('.study-dock').count(),1,'手牌の下にヒント・数式確認エリアがある');
+  const handRect=await page.locator('.self .hand').boundingBox();
+  const dockRect=await page.locator('.study-dock').boundingBox();
+  const barRect=await page.locator('.bar').boundingBox();
+  assert.ok(handRect && dockRect && barRect && dockRect.y >= handRect.y + handRect.height - 1 &&
+    dockRect.y + dockRect.height <= barRect.y + 2,'手牌→学習エリア→操作バーの配置');
+  await page.locator('button[data-action="hint"]').tap();
+  assert.equal(await page.locator('.study-dock.open .hint-box .hint-basic').count(),1,'ヒント第1段階が下部エリアに表示');
+  await page.locator('button[data-action="hint"]').tap();
   // 実タップで1枚捨て、AI3人の打牌または正当な終局まで待つ。手牌が出ただけを進行成功にしない。
   const drawn = page.locator('.hand .tile.tap.drawn');
   await drawn.waitFor();
