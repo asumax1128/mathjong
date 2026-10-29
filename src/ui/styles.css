@@ -961,3 +961,13 @@ table.values td.undef { color: #999; font-size: 12px; }
 @media (max-width: 600px) and (max-height: 700px) and (orientation: portrait) {
   .table .area-center { position: sticky; bottom: 0; z-index: 2; }
 }
+
+/* 低い横画面：デスクトップ用の縦長中央パネルを一行の局情報へ切り替える。 */
+@media (orientation: landscape) and (max-height: 500px) {
+  .table .board-center {
+    min-height: 22px; height: 22px; padding: 1px 4px;
+    flex-direction: row; flex-wrap: nowrap; gap: 3px 8px; overflow: hidden;
+  }
+  .table .bc-round { font-size: 14px; }
+  .table .bc-mode, .table .bc-parent { display: none; }
+}
