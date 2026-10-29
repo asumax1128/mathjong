@@ -1,6 +1,8 @@
 # 数雀｜現行ロードマップ（実績と計画を分離）
 
-> **最新公開（2026-10-29）：数雀 Ver.0.6.3**。オーナーが提示したiPhone Safari画面を受けて、新3名の「ゆ／た／の」と「仮表示」の仮画像を一覧から削除、詳細の準備中告知も削除。**12人の一覧は全端末で名前・難易度・特徴・選択チェックのみ。今後の正式イラストはスマホでは詳細を開いた時のみ閲覧できる**（実装上PCも一覧では画像を生成しない）。[PR #28](https://github.com/asumax1128/mathjong/pull/28) HEAD `e7a8171d297d02018376baccec2d7516c614e23c`、必須CI2件Success、mainマージ `9ae78cf97be6add41e8799fd0b066ba2298e5be4`。[Pages run 40786901639](https://github.com/asumax1128/mathjong/actions/runs/40786901639)、[公開通常smoke run 40786948418](https://github.com/asumax1128/mathjong/actions/runs/40786948418)、[初心者の部屋1〜6公開E2E run 40786948313](https://github.com/asumax1128/mathjong/actions/runs/40786948313)はすべてSuccess。[仕様 docs/43](43-ver0.6.3-opponent-list-text-only.md)。既存9人・新3名のAI、数学Ⅰ/Ⅱのルール、保存形式は不変。**Ver.0.6.3のiPhone実機再確認は未報告**。新規イラストの採用・実装は今回の対象外。
+> **最新公開（2026-10-29）：数雀 Ver.0.6.4**。オーナー指示でゆうじんの一覧紹介を**「鳴かずに刻子を育てる」→「刻子大好き」**へ変更。PR [#30](https://github.com/asumax1128/mathjong/pull/30) HEAD `6c77b12a0a84a430f880a95ca2186f06624f6a25` を必須CI2件Success後、main `e0db390858c9c7efe2ecc9558652ed144443d2cd` に正式マージ。[Pages 40791462358](https://github.com/asumax1128/mathjong/actions/runs/40791462358)、[公開通常対局smoke 40791509868](https://github.com/asumax1128/mathjong/actions/runs/40791509868)、[初心者の部屋1〜6公開E2E 40791509859](https://github.com/asumax1128/mathjong/actions/runs/40791509859)はすべてSuccess。表示用 `trait` と `styleLabel` 以外のAI・ルール・保存・選択順は無変更。Ver.0.6.3からの**一覧画像なし・イラストは詳細限定**も維持。[詳細 docs/44](44-ver0.6.4-yujin-tagline.md)。**Ver.0.6.4のiPhone Safari実機受入は未報告**。
+
+> **前版の公開記録（2026-10-29）：数雀 Ver.0.6.3**。オーナーが提示したiPhone Safari画面を受けて、新3名の「ゆ／た／の」と「仮表示」の仮画像を一覧から削除、詳細の準備中告知も削除。**12人の一覧は全端末で名前・難易度・特徴・選択チェックのみ。今後の正式イラストはスマホでは詳細を開いた時のみ閲覧できる**（実装上PCも一覧では画像を生成しない）。[PR #28](https://github.com/asumax1128/mathjong/pull/28) HEAD `e7a8171d297d02018376baccec2d7516c614e23c`、必須CI2件Success、mainマージ `9ae78cf97be6add41e8799fd0b066ba2298e5be4`。[Pages run 40786901639](https://github.com/asumax1128/mathjong/actions/runs/40786901639)、[公開通常smoke run 40786948418](https://github.com/asumax1128/mathjong/actions/runs/40786948418)、[初心者の部屋1〜6公開E2E run 40786948313](https://github.com/asumax1128/mathjong/actions/runs/40786948313)はすべてSuccess。[仕様 docs/43](43-ver0.6.3-opponent-list-text-only.md)。既存9人・新3名のAI、数学Ⅰ/Ⅱのルール、保存形式は不変。**Ver.0.6.3のiPhone実機再確認は未報告**。新規イラストの採用・実装は今回の対象外。
 
 > **前版の公開記録（2026-10-29）**：数雀 Ver.0.6.2（12人選択、ゆうじん26歳初級／たら25歳中級／のっち28歳上級、初中上各4人の順に表示）。[PR #27](https://github.com/asumax1128/mathjong/pull/27) HEAD `b1ff774bfcdc3b8408a4d812d2ea7389c0249249`、必須CI2件Success、mainマージ `627081240c3b9c9907adbf96061a6fcd71b81f2d`。[Pages 40781902816](https://github.com/asumax1128/mathjong/actions/runs/40781902816)、[公開通常対局smoke 40782005883](https://github.com/asumax1128/mathjong/actions/runs/40782005883)、[公開初心者教材E2E 40782005997](https://github.com/asumax1128/mathjong/actions/runs/40782005997)すべてSuccess。**Ver.0.6.2のiPhone実機表示確認は未実施**。ゲームルール、AI判断・係数、旧9人の内部ID、保存形式は不変。[変更仕様docs/42](42-ver0.6.2-trio-profiles.md)。
 
@@ -30,12 +32,13 @@
 | **2** | **初心者の部屋** | PR #20/#21で全6段階をmain反映、Pages成功。PR #22修正ブランチの公開入口smokeは3件成功。**第1〜3段階のみ実機7/7合格、第4〜6段階は未受入**。PR #19はDraft維持 | API復旧後にPR #22/#23を安全条件付きで処理。直接URL E2E追加ブランチを検証・公開し、実際のPagesで実行する。その後iPhone受入。HANDOFF 4.3参照 |
 | **3** | **戦績・対戦記録** | 未実装 | 指標と端末内保存/削除・復元条件を設計 |
 | **4** | **新キャラクター3人** | **Ver.0.6.1 iPhone8/8受入、Ver.0.6.2の年齢・難易度整理と公開、Ver.0.6.3の仮表示除去をmain統合済み** | Ver.0.6.3のiPhone表示確認、正式イラストは別途採用（スマホ一覧では表示しない） |
-| **5** | **デフォルメイラスト** | 未制作 | 一覧でデフォルメ、詳細では通常頭身という将来構想の扱いを再確認 |
+| **5** | **キャラクターイラスト** | 未制作 | 正式採用後は**一覧には一切表示しない**。スマホは詳細を開いた時のみ表示（PCも一覧は画像なし） |
 
-### main反映済みの文言修正（PR #18）
+### main反映済みの文言修正（PR #18、#30）
 
 - かなた：一覧一言 **「冷静に待ちを見る」**
 - かおる：一覧一言 **「ヨイショの達人」**
+- ゆうじん：一覧一言 **「刻子大好き」**（旧「鳴かずに刻子を育てる」、PR #30、Ver.0.6.4）
 - ふくやま：表示名 **「シャカ」**（内部ID `fukuyama` 維持）
 
 表示変更は[PR #18](https://github.com/asumax1128/mathjong/pull/18)でCI2件成功後に**mainマージ済み**。公開サイトの配信・iPhone表示は別途確認する。
