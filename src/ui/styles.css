@@ -977,3 +977,18 @@ table.values td.undef { color: #999; font-size: 12px; }
 @media (min-width: 820px) and (orientation: landscape) and (max-height: 500px) {
   .table .opponents { grid-template-areas: "left center right" "left top right"; }
 }
+
+/* Ver.0.7: 低い横画面は卓内容を独立スクロールする。
+   牌やヒント・宣言ボタンを重ねるより、中央局情報と河の閲覧を確実にする。 */
+@media (orientation: landscape) and (max-height: 500px) {
+  #app:has(> .bar) > .table {
+    overflow-y: auto; overflow-x: clip; min-height: 0; overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  #app:has(> .bar) > .table .opponents {
+    flex: 0 0 auto; overflow: visible; min-height: min-content; grid-auto-rows: min-content;
+    align-content: start;
+  }
+  .table .area-center { position: relative; bottom: auto; }
+  .table .study-dock, .table .study-dock.open { flex-shrink: 0; }
+}
