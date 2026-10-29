@@ -6529,8 +6529,9 @@ async function v07BeginnerRoom2(browser) {
 // ---- Ver.0.7：麻雀卓と下部ヒント・数式確認エリアの画面検査 ----
 async function v07TableHintDock(browser) {
   for (const [width, height] of [[320,568],[375,667],[390,844],[430,932],[844,390],[768,1024],[1366,768]]) {
-    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 820, hasTouch: width < 820 });
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1000, hasTouch: width < 1000 });
     const page = await ctx.newPage(), errors = watchErrors(page);
+    const press = (locator) => width < 1000 ? locator.tap() : locator.click();
     await page.goto(LOCAL + '?mode=math1&seed=7007&speed=test');
     await page.waitForSelector('.hand .tile');
     assert.equal(await page.locator('.board-center .bc-round').count(), 1, '中央の局名');
@@ -6550,16 +6551,16 @@ async function v07TableHintDock(browser) {
       assert.ok(a.scroll <= 1, label + ' 横スクロールなし');
     }
     await geometry('OFF');
-    await page.locator('button[data-action="hint"]').tap();
+    await press(page.locator('button[data-action="hint"]'));
     assert.equal(await page.locator('.study-dock.open .hint-box .hint-basic').count(), 1, '発見ヒントを下部へ移動');
     assert.equal(await page.locator('.self .hint-box').count(), 0, '手牌にヒントを重複表示しない');
     await geometry('発見');
     if (await page.locator('[data-action="fh-confirm"]').count()) {
-      await page.locator('[data-action="fh-confirm"]').tap();
+      await press(page.locator('[data-action="fh-confirm"]'));
       assert.equal(await page.locator('.study-dock.open .fh').count(), 1, '数式確認を下部に表示');
       await geometry('数式確認');
     }
-    await page.locator('button[data-action="hint"]').tap();
+    await press(page.locator('button[data-action="hint"]'));
     assert.equal(await page.locator('.study-dock.idle').count(), 1, 'ヒントを閉じても学習エリアを残す');
     assert.deepEqual(errors, [], 'コンソール/資源エラーなし');
     if (SHOTS) await page.screenshot({ path: SHOTS + '/v07-dock-' + width + 'x' + height + '.png' });
