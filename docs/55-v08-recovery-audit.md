@@ -10,7 +10,7 @@
 
 対象：記録漏れ（特にゼロevent pass・鳴き保留/取消し）、物理ID/配牌/山/ツモ/リーチ/和了/精算、400点、全判断復元、改ざん/破損/未知版、CAS/削除/途中commit、Worker期限/キュー、秘密情報、leave/flush/stopSaving/新試合の参照。
 
-## 2. 確認済み指摘：P3を1件修正
+## 2. 確認済み指摘：P3を2件修正（開始HEADで1件・今回の試作で1件）
 
 ### P3-A：fixture snapshotに不存在の物理牌を追加できる
 
@@ -22,7 +22,18 @@
 - 修正：**新しい牌譜検証モジュールだけ**に、初期wall/handsの配列型・全IDの整数/範囲・枚数・一意性を追加。既存Gameやルール/AIを変更しない。保存スキーマ/DB版も変えない。
 - 検証：新規監査テストを隔離した修正前HEADで実行すると、拒否を期待する2件が失敗。修正後は数学ⅠⅡ・builder/import両方で不正IDを拒否し、正常seed/snapshotの往復は成功。
 
-監査担当による修正後の再確認でも、正常記録は維持され、不正IDは拒否された。追加の確定P0/P1/P2は発見されていない。これを網羅的な欠陥不存在の証明とは扱わない。
+監査担当による修正後の再確認でも、正常記録は維持され、不正IDは拒否された。
+
+### P3-B：旧receiptが不変でも、異なる対局のretry候補を示していた
+
+- 対象：第5段階で追加した`src/ui/paifu-recovery.js`のbaseline-unchanged分岐（中間コミット`c07dd68`）。開始監査HEADにはこのモジュール自体がなく、既存不具合と混同しない。
+- 再現：同じIDで数学Ⅰの旧記録/receiptと、数学Ⅱの合法な希望記録を渡す。DBは数学Ⅰの旧receiptから変わっていない。
+- 実際：旧receipt一致だけを根拠にrequiresUserDecision:falseと再試行token候補を返した。旧内容の不変は確認できても、希望する履歴がその続きとは証明していない。
+- 影響：助言の不備。実書込み・token採用・再開は元から実装していないため、実際の上書き/データ損失は発生しない。監査担当と協議しP3。
+- 修正：新しいprefix判定器を足す代わりに保守的に、希望内容が未保存のbaseline-unchangedは常にユーザー判断とし、retry候補tokenを返さない。観測receipt自体は参考情報だが、書込許可を意味しない。
+- テスト：同一ID/別モードの独立反例を追加し、既存のbaselineテストも強化。読取後の別タブ更新を、テスト側が別途明示取得した古いtokenによるCASが拒否することも確認する。
+
+追加の確定P0/P1/P2は発見されていない。これを網羅的な欠陥不存在の証明とは扱わない。
 
 ### 指摘と区別した設計限界
 
@@ -56,7 +67,7 @@ sessionは失敗したsnapshotと直前receiptを保持する。後から増え�
 |---|---|---|
 | attempt-content-present | 希望した全内容が期待する次revisionで存在する | 検証済みコピーの読取り利用は可能。元writeの成功/所有権を断定せず、自動再開しない |
 | already-acknowledged | 既知receiptと内容が同一で、希望内容も既にある | 追加書込みは不要。新しいtransactionが成功したとは言わない |
-| baseline-unchanged | 既知receiptの全項目が変わらず、希望内容は未保存 | CAS付き明示retryの候補tokenを返すだけ。実行は別の明示操作 |
+| baseline-unchanged | 既知receiptの全項目が変わらず、希望内容は未保存 | 履歴の続きかは未証明なのでユーザー判断。再試行token候補を返さない |
 | same-content-other-writer | 同内容でもCAS競合/想定外revision | writer/競合の判断が必要。勝手にtokenを採用しない |
 | conflicting-content | 別の正当な内容が存在 | ユーザー判断。上書き/マージ/切捨てなし |
 | changed-under-known-token | 同じtokenのreceiptが既知値と異なる | 契約外の変更としてユーザー判断 |
@@ -69,7 +80,7 @@ sessionは失敗したsnapshotと直前receiptを保持する。後から増え�
 
 - session.inspectRecovery()はin-flightが終わってから、失敗snapshotをWorkerへ渡す。結果を得てもsavedVersion/保存token/pausedを進めず、retrySavingの再照合待ちを解除しない。
 - **今回は照合と安全な分類まで**。ユーザー選択UI、token採用、同じセッションへの書込み再開、prefixの自動マージ/新ID化は実装しない。readによるコピーの復旧可能性とwriter再開を混同しない。
-- 結果は読取snapshot時点の観測。照合中/照合後にも別タブは更新/削除できる。将来のretryは必ず観測tokenを使うCASで行い、変更済みなら拒否する。
+- 結果は読取snapshot時点の観測。照合中/照合後にも別タブは更新/削除できる。将来のretryは内容/履歴/権限を別途判断したうえで、必ず観測tokenを使うCASで行い、変更済みなら拒否する。retryWithExpectedTokenは今回常にnullで、照合結果が書込の許可や安全性を保証するものではない。
 - 初回createで行がない場合も、削除意図を無視してnull tokenで自動再作成しない。新しい記録IDの作成はユーザー/接続側の別判断。
 - ページ終了でRAM上の失敗snapshot/receiptが消えた場合、証拠を推測で補完しない。DBに残った検証済みrecording prefixは読めるが、未保存判断や元writeの帰属は復元できない。
 - 新RPCは牌譜行に対して読取専用の追加操作であり、保存行/牌譜/DB版は不変。下位loadPrivateは初回open時に空の専用DB/ストアを初期化することがあるが、復旧照合が牌譜行を追加/更新/削除することはない。writePerformed:falseも牌譜行の変更なしを指す。エラーに本文や例外全文を含めず、ネット送信・AI入力・公開共有も追加しない。

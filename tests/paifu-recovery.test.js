@@ -18,8 +18,8 @@ const error=(r,c)=>{assert.equal(r.ok,false);assert.equal(r.error.code,c);};
 test('復旧照合: 希望snapshotの存在を確認するが、元transactionの成功/所有権/自動再開と混同しない',async()=>{
  const store=backing(),r=await inspect(evidence(),store);assert.equal(r.kind,'attempt-content-present');assert.equal(r.contentPresent,true);assert.equal(r.originalWriteConfirmed,false);assert.equal(r.writePerformed,false);assert.equal(r.automaticResume,false);assert.equal(r.retryWithExpectedToken,null);assert.equal(store.calls,1);for(const k of ['record','json','wall','hands'])assert.equal(k in r,false);
 });
-test('復旧照合: 確認済み旧receiptが全項目不変ならCAS付き再試行案だけ返す',async()=>{
- const r=await inspect(evidence(),backing(old,baseline));assert.equal(r.kind,'baseline-unchanged');assert.equal(r.retryWithExpectedToken,baseline.token);assert.equal(r.contentPresent,false);assert.equal(r.requiresUserDecision,false);assert.equal(r.writePerformed,false);
+test('復旧照合: 旧receipt不変だけでは再試行を許可せず、変更する内容はユーザー判断',async()=>{
+ const r=await inspect(evidence(),backing(old,baseline));assert.equal(r.kind,'baseline-unchanged');assert.equal(r.retryWithExpectedToken,null);assert.equal(r.contentPresent,false);assert.equal(r.requiresUserDecision,true);assert.equal(r.writePerformed,false);
 });
 test('復旧照合: 希望内容が既存ackと同じなら追加書込みを必要としない',async()=>{
  const r=await inspect(evidence({record:old}),backing(old,baseline));assert.equal(r.kind,'already-acknowledged');assert.equal(r.contentPresent,true);assert.equal(r.retryWithExpectedToken,null);
@@ -64,7 +64,7 @@ test('復旧照合: 非同期処理中の元evidence変更を受けず、投稿s
  const e=structuredClone(evidence()),pending=inspect(e,backing());e.id='changed';e.record.id='changed';e.acknowledged.token='d'.repeat(32);assert.equal((await pending).kind,'attempt-content-present');
 });
 test('復旧照合: 読取後の別writer変更はCASで拒否（照合結果は永久ロックではない）',async()=>{
- let current=baseline;const store={loadPrivate:async()=>{const r={ok:true,record:old,metadata:baseline};current=newMeta;return r;}};const r=await inspect(evidence(),store);assert.equal(r.kind,'baseline-unchanged');assert.notEqual(r.retryWithExpectedToken,current.token); // A write must use this stale-safe token and would conflict.
+ let current=baseline;const store={loadPrivate:async()=>{const r={ok:true,record:old,metadata:baseline};current=newMeta;return r;}};const r=await inspect(evidence(),store);assert.equal(r.kind,'baseline-unchanged');assert.equal(r.retryWithExpectedToken,null);assert.equal(r.requiresUserDecision,true);assert.notEqual(baseline.token,current.token); // A separate, explicit write using the old token would conflict.
 });
 test('session照合: inspectは保存成功version/自動retryを進めず、失敗時snapshotを使う',async()=>{
  let saves=0,seen;const store={save:async()=>{saves++;return {ok:false,error:{code:'outcome-unknown'}};},inspectRecovery:async e=>{seen=e;return {ok:true,kind:'attempt-content-present',writePerformed:false};}};
@@ -72,4 +72,8 @@ test('session照合: inspectは保存成功version/自動retryを進めず、失
 });
 test('session照合: 不要時/利用不可/閉鎖後を明示し、GameもDBも操作しない',async()=>{
  const s=createPaifuSession({id:'recover',rules,players,match},{store:{save:async()=>({ok:false,error:{code:'outcome-unknown'}})}});error(await s.inspectRecovery(),'reconciliation-not-needed');s.roundStarted(new Game({rules,players,seed:1}));await s.flush();error(await s.inspectRecovery(),'unavailable');s.dispose();error(await s.inspectRecovery(),'closed');
+});
+
+test('復旧監査P3: 同一IDの別モード/別対局を、旧receiptだけで安全なretry候補にしない',async()=>{
+ const changed=createPaifu({id:'recover',rules:rulesFor('math2'),players,match:createMatch()});const r=await inspect(evidence({record:changed}),backing(old,baseline));assert.equal(r.kind,'baseline-unchanged');assert.equal(r.requiresUserDecision,true);assert.equal(r.retryWithExpectedToken,null);assert.equal(r.writePerformed,false);
 });

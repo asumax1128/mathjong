@@ -32,8 +32,8 @@ export async function inspectPaifuRecovery(evidence,{store}={}){
  try{wantedDigest=await sha(wanted);}catch{return fail('unavailable');}
  let loaded;
  try{loaded=await store.loadPrivate(id);}catch{return fail('read-error');}
- const result=(kind,observed,contentPresent,requiresUserDecision,retryToken=null)=>Object.freeze({ok:true,kind,id,version,
-  failureCode,contentPresent,requiresUserDecision,retryWithExpectedToken:retryToken,originalWriteConfirmed:false,
+ const result=(kind,observed,contentPresent,requiresUserDecision)=>Object.freeze({ok:true,kind,id,version,
+  failureCode,contentPresent,requiresUserDecision,retryWithExpectedToken:null,originalWriteConfirmed:false,
   writePerformed:false,automaticResume:false,wantedDigest,observed:observed?Object.freeze(structuredClone(observed)):null});
  if(!loaded?.ok){
   if(loaded?.error?.code==='not-found')return result(baseline?'missing-after-ack':'missing-initial',null,false,true);
@@ -53,7 +53,9 @@ export async function inspectPaifuRecovery(evidence,{store}={}){
  const present=actualDigest===wantedDigest&&observed.bytes===wantedBytes&&actual===wanted;
  if(baseline&&observed.token===baseline.token){
   if(!sameReceipt(observed,baseline))return result('changed-under-known-token',observed,present,true);
-  return result(present?'already-acknowledged':'baseline-unchanged',observed,present,false,present?null:baseline.token);
+  // Receipt equality does not prove that a different attempted archive extends this history.
+  // Inspection alone never authorises a replacement, even with an unchanged token.
+  return result(present?'already-acknowledged':'baseline-unchanged',observed,present,!present);
  }
  if(present){
   const expectedRevision=baseline?baseline.revision+1:1;
