@@ -971,3 +971,9 @@ table.values td.undef { color: #999; font-size: 12px; }
   .table .bc-round { font-size: 14px; }
   .table .bc-mode, .table .bc-parent { display: none; }
 }
+
+/* 横画面で卓の縦幅が極端に狭い場合は、局情報を先頭行にする。
+   隠れた対面プレイヤーの河は卓内スクロールで確認可能。 */
+@media (min-width: 820px) and (orientation: landscape) and (max-height: 500px) {
+  .table .opponents { grid-template-areas: "left center right" "left top right"; }
+}
