@@ -1,0 +1,206 @@
+[
+  {
+    "mode": "math1",
+    "width": 320,
+    "seat": 1,
+    "id": 39,
+    "slotId": 39,
+    "tileId": 39,
+    "slot": {
+      "width": 22,
+      "height": 30
+    },
+    "face": {
+      "width": 22,
+      "height": 30
+    },
+    "matrix": "matrix(1, 0, 0, 1, -11, -15)"
+  },
+  {
+    "mode": "math1",
+    "width": 320,
+    "seat": 2,
+    "id": 39,
+    "slotId": 39,
+    "tileId": 39,
+    "slot": {
+      "width": 30,
+      "height": 22
+    },
+    "face": {
+      "width": 30,
+      "height": 22
+    },
+    "matrix": "matrix(0, -1, 1, 0, -11, -15)"
+  },
+  {
+    "mode": "math1",
+    "width": 320,
+    "seat": 3,
+    "id": 39,
+    "slotId": 39,
+    "tileId": 39,
+    "slot": {
+      "width": 22,
+      "height": 30
+    },
+    "face": {
+      "width": 22,
+      "height": 30
+    },
+    "matrix": "matrix(-1, 0, 0, -1, -11, -15)"
+  },
+  {
+    "mode": "math1",
+    "width": 1024,
+    "seat": 1,
+    "id": 39,
+    "slotId": 39,
+    "tileId": 39,
+    "slot": {
+      "width": 26,
+      "height": 35
+    },
+    "face": {
+      "width": 26,
+      "height": 35
+    },
+    "matrix": "matrix(1, 0, 0, 1, -13, -17.5)"
+  },
+  {
+    "mode": "math1",
+    "width": 1024,
+    "seat": 2,
+    "id": 39,
+    "slotId": 39,
+    "tileId": 39,
+    "slot": {
+      "width": 35,
+      "height": 26
+    },
+    "face": {
+      "width": 35,
+      "height": 26
+    },
+    "matrix": "matrix(0, -1, 1, 0, -13, -17.5)"
+  },
+  {
+    "mode": "math1",
+    "width": 1024,
+    "seat": 3,
+    "id": 39,
+    "slotId": 39,
+    "tileId": 39,
+    "slot": {
+      "width": 26,
+      "height": 35
+    },
+    "face": {
+      "width": 26,
+      "height": 35
+    },
+    "matrix": "matrix(-1, 0, 0, -1, -13, -17.5)"
+  },
+  {
+    "mode": "math2",
+    "width": 320,
+    "seat": 1,
+    "id": 51,
+    "slotId": 51,
+    "tileId": 51,
+    "slot": {
+      "width": 22,
+      "height": 30
+    },
+    "face": {
+      "width": 22,
+      "height": 30
+    },
+    "matrix": "matrix(1, 0, 0, 1, -11, -15)"
+  },
+  {
+    "mode": "math2",
+    "width": 320,
+    "seat": 2,
+    "id": 51,
+    "slotId": 51,
+    "tileId": 51,
+    "slot": {
+      "width": 30,
+      "height": 22
+    },
+    "face": {
+      "width": 30,
+      "height": 22
+    },
+    "matrix": "matrix(0, -1, 1, 0, -11, -15)"
+  },
+  {
+    "mode": "math2",
+    "width": 320,
+    "seat": 3,
+    "id": 51,
+    "slotId": 51,
+    "tileId": 51,
+    "slot": {
+      "width": 22,
+      "height": 30
+    },
+    "face": {
+      "width": 22,
+      "height": 30
+    },
+    "matrix": "matrix(-1, 0, 0, -1, -11, -15)"
+  },
+  {
+    "mode": "math2",
+    "width": 1024,
+    "seat": 1,
+    "id": 51,
+    "slotId": 51,
+    "tileId": 51,
+    "slot": {
+      "width": 26,
+      "height": 35
+    },
+    "face": {
+      "width": 26,
+      "height": 35
+    },
+    "matrix": "matrix(1, 0, 0, 1, -13, -17.5)"
+  },
+  {
+    "mode": "math2",
+    "width": 1024,
+    "seat": 2,
+    "id": 51,
+    "slotId": 51,
+    "tileId": 51,
+    "slot": {
+      "width": 35,
+      "height": 26
+    },
+    "face": {
+      "width": 35,
+      "height": 26
+    },
+    "matrix": "matrix(0, -1, 1, 0, -13, -17.5)"
+  },
+  {
+    "mode": "math2",
+    "width": 1024,
+    "seat": 3,
+    "id": 51,
+    "slotId": 51,
+    "tileId": 51,
+    "slot": {
+      "width": 26,
+      "height": 35
+    },
+    "face": {
+      "width": 26,
+      "height": 35
+    },
+    "matrix": "matrix(-1, 0, 0, -1, -13, -17.5)"
+  }
+]

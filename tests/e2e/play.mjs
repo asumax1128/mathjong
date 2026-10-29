@@ -398,12 +398,12 @@ async function publicMode(browser) {
   // ?round=3 で第3局（親は対面）から始まる。round 1 から3局進めたときと同じ山。
   await page.goto(`${PUBLIC}?seed=123&round=3`);
   await page.waitForSelector('.panel.seat-2 .oya');
-  assert.match(await page.locator('.top .info').innerText(), /東3局/);
+  assert.match(await page.locator('.board-center').innerText(), /東3局/);
   // 不正な値は無視される（エラーにならない）。seed が不正なら再現 URL ではないのでタイトル画面から（Ver.0.4-A）
   await page.goto(`${PUBLIC}?seed=abc&round=-1&speed=%3Cscript%3E&len=9&hand=-2&dealer=7`);
   await page.waitForSelector('.title-screen');
   await chooseAndStart(page);
-  assert.match(await page.locator('.top .info').innerText(), /東1局/);
+  assert.match(await page.locator('.board-center').innerText(), /東1局/);
   // seed が正しくても、ほかの値が不正なら別の局面として黙って始めない（エラー画面）。Ver.0.4-A の最終修正
   await page.goto(`${PUBLIC}?seed=77&round=-1&len=9&hand=-2&dealer=7&renchan=abc`);
   await page.waitForSelector('.replay-error');
@@ -2344,7 +2344,8 @@ async function v03Rules(browser) {
     assert.equal(st.hand0, 6);
     assert.equal(st.status, 'ポン後：捨てる牌を選択');
     assert.equal(await page.locator('.melds.mine .meld.pon .tile').count(), 3, '公開刻子を表示');
-    assert.match(await page.locator('.msg').innerText(), /あなた がポン/);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game.events.at(-1).type), 'pon', '成立イベントは維持');
+    assert.equal(await page.locator('.msg').count(), 0, '実況行は表示しない');
     // 打牌（=-√3）→ 上家（seat3）は飛ばされ、下家の手番
     const t1 = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'v:-√3'); });
     await page.locator(`.hand .tile[data-id="${t1}"]`).tap();
@@ -2477,7 +2478,7 @@ async function v03Rules(browser) {
     assert.equal(st.max, 180);
     assert.equal(st.n, 124);
     assert.ok(st.labels.every((l) => /^\d+°$/.test(l)), st.labels.join());
-    assert.equal(await page.locator('.top .mode').innerText(), '数Ⅰ');
+    assert.equal(await page.locator('.board-center .bc-mode').innerText(), '数学Ⅰ');
     await page.locator('button[data-action="hint"]').tap();
     await page.locator('.hint-tools [data-action="table"]').tap();
     assert.equal(await page.locator('.values tr').count(), 10, '値表は0°〜180°の9行');
@@ -2493,7 +2494,7 @@ async function v03Rules(browser) {
     // 縦組みの分数（分子 π・分母 6）、0 と 2π は別の牌
     const frac = await page.locator('.gallery.sz-row-l .tile[aria-label="π/6"] .afrac').evaluate((e) => ({ num: e.querySelector('.num').textContent, den: e.querySelector('.den').textContent, dir: getComputedStyle(e).flexDirection }));
     assert.deepEqual(frac, { num: 'π', den: '6', dir: 'column' });
-    assert.equal(await page.locator('.top .mode').innerText(), '数Ⅱ');
+    assert.equal(await page.locator('.board-center .bc-mode').innerText(), '数学Ⅱ');
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -2805,11 +2806,11 @@ const matchState = (page) => page.evaluate(() => {
   const { S } = window.__mathjong;
   const m = S.match;
   return {
-    screen: S.screen, modal: S.modal, label: m && document.querySelector('.top .hand-label') ? document.querySelector('.top .hand-label').textContent : null,
+    screen: S.screen, modal: S.modal, label: m && document.querySelector('.board-center .hand-label') ? document.querySelector('.board-center .hand-label').textContent : null,
     hand: m && m.hand, renchan: m && m.renchan, played: m && m.played, over: m && m.over, length: m && m.length, scores: m && m.scores.slice(),
     sum: m ? m.scores.reduce((a, b) => a + b, 0) : null, dealer: S.dealer, round: S.round, ai: S.ai, mode: window.__mathjong.rules.config.mode,
     chars: S.matchSettings ? S.matchSettings.chars.slice() : null, seats: S.matchSettings ? S.matchSettings.seats.slice() : null,
-    info: (document.querySelector('.top .info') || {}).textContent || '',
+    info: (document.querySelector('.board-center') || {}).textContent || '',
   };
 });
 // 流局させる（テスト用：山を空にして、手番の人がツモ牌を捨てる。宣言はすべて見送る）
@@ -3539,7 +3540,8 @@ async function v05Riichi(browser) {
     assert.deepEqual(st.riichi, [true, false, false, false]);
     assert.equal(await page.locator('.self .riichi-badge').count(), 1, '自分の表示にリーチ');
     assert.equal(await page.locator('.river.mine .tile.riichi-decl').count(), 1, '宣言牌に印');
-    assert.match(await page.locator('.msg').innerText(), /リーチ/);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game.events.filter(e => e.type === 'riichi' && e.seat === 0).length), 1, 'リーチ成立は1回');
+    assert.equal(await page.locator('.msg').count(), 0, '実況行は表示しない');
     // 他家は（強制的に）ツモ切り → 自分の番：ツモ切りだけ
     await apForce(page, 1); await apForce(page, 2); await apForce(page, 3);
     await riWaitTurn(page);
@@ -6651,6 +6653,66 @@ async function v07TableHintDock(browser) {
   console.log('✓ Ver.0.7：11画面・卓と局情報の非重複・縦の学習ドック・横タブレット62/38・数学ⅠⅡ・2段階・スクロール維持・2回タップ');
 }
 
+// 省スペース卓：実Gameの合法操作だけで全他家が2回鳴き、12枚以上捨てた状態を作る。
+// 牌を複製して見栄えだけ作ると、物理ID・面子との対応の検査が空振りになるため使わない。
+async function v07CompactTable(browser) {
+  for (const mode of ['math1', 'math2']) for (const [width, height] of [[320,568],[375,667],[390,844],[430,932],
+    [568,320],[844,390],[768,1024],[1024,768],[1180,820],[1366,1024],[1366,768]]) {
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + `?mode=${mode}&seed=1&speed=slow`);
+    await page.locator('.hand .tile').first().waitFor();
+    const data = await page.evaluate(async () => {
+      const { tileLabel } = await import(new URL('src/ui/render.js', location.href));
+      const m = window.__mathjong;
+      clearTimeout(m.S.timer); m.S.timer = null; m.fx.clear();
+      const old = m.S.game;
+      const g = new old.constructor({ rules: m.rules, seed: 1, dealer: 0, players: old.players });
+      for (let i = 0; i < 1000 && ![1,2,3].every(s => g.melds[s].length === 2 && g.rivers[s].length >= 12); i++) {
+        const p = g.pending(); if (!p) throw new Error('密な卓の生成前に終局');
+        if (p.type === 'claim') g.respond(p.seat, p.pon ? { type:'pon' } : p.chi.length ? { type:'chi', option:0 } : { type:'pass' });
+        else g.discard(p.seat, g.drawn ?? g.hands[p.seat].at(-1));
+      }
+      g.checkInvariants(); m.S.game = g; m.render();
+      const box = e => { const b=e.getBoundingClientRect(); return {left:b.left,right:b.right,top:b.top,bottom:b.bottom,width:b.width,height:b.height}; };
+      return { panels:[1,2,3].map(seat => {
+        const p = document.querySelector(`.seat-${seat}`), river=p.querySelector('.river');
+        return { seat, melds:g.melds[seat].length, discards:g.rivers[seat].length, panel:box(p),
+          ids:[...river.querySelectorAll('.tile')].map(e=>Number(e.dataset.id)), expected:g.rivers[seat].map(r=>r.id),
+          groups:[...p.querySelectorAll('.meld')].map((e,i)=>({claimed:Number(e.dataset.claimed),expected:g.melds[seat][i].claimed,
+            labels:[...e.querySelectorAll('.tile')].map(t=>t.getAttribute('aria-label')),
+            expectedLabels:g.melds[seat][i].tiles.map(id=>tileLabel(m.rules.types[g.typeOf(id)])),
+            box:box(e)})),
+          tiles:[...p.querySelectorAll('.seat-tile')].map(e=>({slot:box(e),face:box(e.firstElementChild),transform:getComputedStyle(e.firstElementChild).transform})) };
+      }), board:box(document.querySelector('.opponents')), center:box(document.querySelector('.board-center')),
+        handWidth:document.querySelector('.hand .tile').getBoundingClientRect().width,
+        events:g.events.length, tiles:g.tileType.length, narration:document.querySelectorAll('.msg').length,
+        duplicateTopInfo:document.querySelectorAll('.top .info').length, overflow:document.documentElement.scrollWidth-innerWidth };
+    });
+    assert.equal(data.narration,0); assert.equal(data.duplicateTopInfo,0);
+    assert.equal(data.tiles,mode==='math1'?124:168); assert.ok(data.overflow<=1);
+    for (const p of data.panels) {
+      assert.equal(p.melds,2); assert.ok(p.discards>=12); assert.deepEqual(p.ids,p.expected,'河の全物理IDと順序を維持');
+      for (const group of p.groups) {
+        assert.equal(group.claimed,group.expected); assert.equal(group.labels.length,3);
+        assert.deepEqual(group.labels,group.expectedLabels,'公開面子の数式牌3枚の内容・順序を維持');
+        assert.ok(group.box.left>=p.panel.left && group.box.right<=p.panel.right,`${mode} ${width}: 公開面子が席の幅に収まる`);
+      }
+      for (const t of p.tiles) {
+        assert.ok(Math.abs(t.face.width-t.slot.width)<1 && Math.abs(t.face.height-t.slot.height)<1,'回転後の実寸を枠が確保する');
+        assert.ok(t.face.left>=p.panel.left && t.face.right<=p.panel.right,'回転した牌の横のはみ出しなし');
+        const matrix=t.transform.match(/matrix\(([^)]+)\)/)[1].split(',').slice(0,4).map(Number);
+        assert.deepEqual(matrix,({1:[0,-1,1,0],2:[-1,0,0,-1],3:[0,1,-1,0]})[p.seat],'下家-90°・対面180°・上家90°');
+      }
+    }
+    const invariant = await page.evaluate(() => {const m=window.__mathjong; m.render();m.S.game.checkInvariants();return m.S.game.events.length;});
+    assert.equal(invariant,data.events,'表示・回転でゲームを変えない');
+    if (SHOTS) await page.screenshot({path:`${SHOTS}/v07-compact-${mode}-${width}x${height}-dense.png`});
+    assert.deepEqual(errors,[]); await ctx.close();
+  }
+  console.log('✓ 省スペース卓：数学ⅠⅡ×11画面・実況なし・3席の回転実寸・鳴き2回と長い河・全物理ID・描画の不変性');
+}
+
 // 公開モードではサーバーも転送先も作らない。接続失敗をローカル成功で隠さない。
 const server = EXTERNAL ? null : await startServer(0, { base: BASE, host: '127.0.0.1' });
 if (server) {
@@ -6668,7 +6730,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock };
+    const fns = { handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07CompactTable };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -6721,6 +6783,7 @@ try {
   await v07BeginnerRoom(browser);
   await v07BeginnerRoom2(browser);
   await v07TableHintDock(browser);
+  await v07CompactTable(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
