@@ -99,6 +99,13 @@ async function playDevice(browser, dev, seed, rounds, stats, { autopass = false,
   // 操作バーが画面内（下端のホームインジケーター領域を除く）に収まっている
   const bar = await page.locator('.bar').boundingBox();
   assert.ok(bar && bar.y + bar.height <= dev.viewport.height + 0.5, `${dev.name}: 操作バーが画面外`);
+  assert.equal(await page.locator('.board-center').count(), 1, '中央の局情報パネルがある');
+  const handRect = await page.locator('.self .hand').boundingBox();
+  const dockRect = await page.locator('.study-dock').boundingBox();
+  assert.ok(handRect && dockRect && dockRect.y >= handRect.y + handRect.height - 1,
+    `${dev.name}: ヒント専用エリアは手牌より下`);
+  assert.ok(dockRect.y + dockRect.height <= bar.y + 2,
+    `${dev.name}: ヒント専用エリアは操作バーより上`);
   // 牌が iOS のダブルタップ拡大を起こさない設定
   assert.equal(await page.locator('.hand .tile').first().evaluate((el) => getComputedStyle(el).touchAction), 'manipulation');
   // 手牌のタップ領域（幅30px以上）
@@ -481,6 +488,8 @@ async function v02aFeatures(browser) {
   // (1) 役候補ヒント：最大3件、エンジンの yakuCandidates（公開情報）と一致、必要牌は表示しない
   await page.locator('button[data-action="hint"]').tap();
   await page.waitForSelector('.hint-yaku');
+  assert.equal(await page.locator('.study-dock.open .hint-box .hint-basic').count(), 1, '第1段階ヒントは手牌下の専用エリアに表示');
+  assert.equal(await page.locator('.self .hint-box').count(), 0, '手牌内にヒントを重複表示しない');
   const shown = await page.locator('.yaku-cands li b').allInnerTexts();
   const expected = await page.evaluate(async (base) => {
     const { yakuCandidates } = await import(`${base}src/engine/yakuhint.js`);
@@ -2166,10 +2175,10 @@ async function chiAutoPass(browser) {
   // (12) バージョン表示：ヘッダー・ページタイトル・再現情報
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.6.4');
-    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.6.4');
+    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.7.0-a');
+    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.7.0-a');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.6\.4 ・ エンジン v0\.5\.0-a/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.7\.0-a ・ エンジン v0\.5\.0-a/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
