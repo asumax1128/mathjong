@@ -13,6 +13,9 @@ on:
       - 'tests/paifu-save-state.test.js'
       - 'tests/e2e/paifu-lifecycle.mjs'
       - 'docs/56-v08-session-lifecycle.md'
+      - 'tests/paifu-integration-harness.mjs'
+      - 'tests/paifu-integration-contract.test.js'
+      - 'docs/57-v08-integration-readiness.md'
       - 'tests/paifu-recovery.test.js'
       - 'tests/paifu-audit.test.js'
       - 'tests/e2e/paifu-recovery.mjs'
@@ -62,6 +65,8 @@ jobs:
           node --check tests/paifu-lifecycle.test.js
           node --check tests/paifu-save-state.test.js
           node --check tests/e2e/paifu-lifecycle.mjs
+          node --check tests/paifu-integration-harness.mjs
+          node --check tests/paifu-integration-contract.test.js
           node --check src/ui/paifu-session.js
           node --check tests/paifu-session.test.js
           node --check tests/e2e/paifu-session.mjs

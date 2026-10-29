@@ -151,3 +151,8 @@ PR #37の開始HEAD `3f1344f`と専用CI [40860681346](https://github.com/asumax
 ## 2026-10-30 JST 追記：Ver.0.8 第6段階のセッション資源・保存状態
 
 [docs/56](56-v08-session-lifecycle.md)を参照。active最大1＋終了中最大1の独立調停と、私有データを含まない保存状態の純粋な説明関数を追加。飽和時はゲームを止めず新試合の記録だけ見送り、未保存損失を隠さない。読取り照合は事実確認のみで、自動retry/上書き/削除/token採用/再開なし。通常対局・app.js・卓UIへ未接続。既存エンジン/12人AI/得点/保存形式/URLとPR #36は不変。Draft #37維持、mainマージ・Pages公開・Ver.0.9以降は禁止。従来の履歴/CIを新HEADの実績へ流用しない。Safari/総ピークRAM/OS kill/ユーザー判断による保全・復旧は別ゲート。
+
+
+## 2026-10-30 JST 追記：Ver.0.8 第7段階・統合準備のみ
+
+[docs/57](57-v08-integration-readiness.md)に現app.jsの意味的接続点、試合token/Game/sessionの分離、遅いimport/記録見送り/旧callbackの検査、保存表示、Safari/全体E2E/性能の受入票、別統合PRの手順を記録。追加コードはテスト専用契約試作と独立検査だけで、製品module/app.js/卓HTML/CSS/PR #36/既存エンジン/AI/保存形式は不変。再戦はmanager.startに終了調停を任せ、事前endで飽和判定を迂回しない。Ver.0.7新卓の承認・統合後に最新mainから別統合PRを作る。PR #37はDraftのまま直接mainマージ・Pages公開禁止。起動直後未readyのUX、実接続・実表示・明示復旧・全tab調停・Safari/ピークRAM・8MiB超は未完成。過去のCI/実機合格を新HEADや接続後の実績へ流用しない。
