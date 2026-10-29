@@ -6531,20 +6531,23 @@ async function v07TableHintDock(browser) {
   for (const [width, height] of [[320,568],[375,667],[390,844],[430,932],[844,390],[768,1024],[1366,768]]) {
     const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1000, hasTouch: width < 1000 });
     const page = await ctx.newPage(), errors = watchErrors(page);
+    const shortLandscape = width > height && height <= 500;
     const press = (locator) => width < 1000 ? locator.tap() : locator.click();
     await page.goto(LOCAL + '?mode=math1&seed=7007&speed=test');
     await page.waitForSelector('.hand .tile');
     assert.equal(await page.locator('.board-center .bc-round').count(), 1, '中央の局名');
     assert.match(await page.locator('.board-center').innerText(), /東|南/);
     assert.equal(await page.locator('.study-dock.idle').count(), 1, 'ヒントOFFの学習エリア');
-    const topBoard = await page.evaluate(() => {
-      const panel = document.querySelector('.opponents').getBoundingClientRect();
+    if (shortLandscape) await page.locator('.board-center').scrollIntoViewIfNeeded();
+    const topBoard = await page.evaluate((landscape) => {
+      const panel = document.querySelector(landscape ? '.table' : '.opponents').getBoundingClientRect();
       const center = document.querySelector('.board-center').getBoundingClientRect();
       return { inView: center.top >= panel.top - 1 && center.bottom <= panel.bottom + 1,
         panel: {top:panel.top,bottom:panel.bottom}, center: {top:center.top,bottom:center.bottom} };
-    });
+    }, shortLandscape);
     assert.ok(topBoard.inView, '中央局情報が他家の盤面から隠れない ' + width + 'x' + height + ' ' + JSON.stringify(topBoard));
     async function geometry(stage) {
+      if (shortLandscape) await page.locator('.study-dock').scrollIntoViewIfNeeded();
       const a = await page.evaluate(() => {
         const box = (s) => { const e=document.querySelector(s); if (!e) return null;
           const b=e.getBoundingClientRect(); return { top:b.top,bottom:b.bottom,height:b.height }; };
