@@ -68,3 +68,8 @@
 ## 2026-10-29 追記：Ver.0.8牌譜基盤の先行開発（未統合）
 
 最新指示[docs/50](50-v08-paifu-foundation-kickoff.md)に基づき、Codexは`feature/v08-paifu-foundation`でUIから独立した版付き記録・復元・検証を開発。[調査・スキーマ・API・未決定事項](51-v08-paifu-foundation-schema.md)。通常対局への自動記録接続、保存媒体、公開・共有、Ver.0.9以降の画面は未実装。Ver.0.7の卓UIはClaude Code担当であり、PR #36のブランチには触れない。今回の指示ではDraft保持、mainマージ・Pages公開は禁止。従来の包括公開承認を今回へ流用しない。既存の決定・履歴は保持。
+
+
+## 2026-10-29 追記：Ver.0.8 第2段階の保存基盤（Draft #37）
+
+PR #37の開始HEAD `3f1344f`と専用CI [40860681346](https://github.com/asumax1128/mathjong/actions/runs/40860681346)のSuccessを確認後、独立IndexedDB保存アダプターを追加。[DB構造・API・容量・異常系・性能・未完成事項](52-v08-paifu-indexeddb.md)。既存localStorage/エンジン/AI/UI/再現URLは不変。自動記録・自動保存への接続はしない。PR #36に触れず、PR #37はDraft、mainマージ・Pages公開は禁止。新HEADのチェックは開始HEADのSuccessと区別する。既存履歴は保持。

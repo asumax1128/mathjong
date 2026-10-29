@@ -3,6 +3,10 @@ on:
   pull_request:
     paths:
       - 'src/engine/**'
+      - 'src/ui/paifu-storage.js'
+      - 'tests/paifu-storage.test.js'
+      - 'tests/e2e/paifu-storage.mjs'
+      - 'docs/52-v08-paifu-indexeddb.md'
       - 'tests/paifu.test.js'
       - 'tests/e2e/paifu.mjs'
       - 'docs/51-v08-paifu-foundation-schema.md'
@@ -24,6 +28,9 @@ jobs:
           node --check src/engine/paifu.js
           node --check tests/paifu.test.js
           node --check tests/e2e/paifu.mjs
+          node --check src/ui/paifu-storage.js
+          node --check tests/paifu-storage.test.js
+          node --check tests/e2e/paifu-storage.mjs
       - name: All unit tests
         run: npm test
       - name: Install browser
@@ -32,5 +39,7 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Recorder in actual browser, no production hooks
         run: node tests/e2e/paifu.mjs
+      - name: Native IndexedDB storage, rollback and failure isolation
+        run: node tests/e2e/paifu-storage.mjs
       - name: Existing AI, beginner room, riichi and match regression
         run: node tests/e2e/play.mjs --only v06TrioIntegration,v07BeginnerRoom2,v05Riichi,v04End
