@@ -6537,6 +6537,13 @@ async function v07TableHintDock(browser) {
     assert.equal(await page.locator('.board-center .bc-round').count(), 1, '中央の局名');
     assert.match(await page.locator('.board-center').innerText(), /東|南/);
     assert.equal(await page.locator('.study-dock.idle').count(), 1, 'ヒントOFFの学習エリア');
+    const topBoard = await page.evaluate(() => {
+      const panel = document.querySelector('.opponents').getBoundingClientRect();
+      const center = document.querySelector('.board-center').getBoundingClientRect();
+      return { inView: center.top >= panel.top - 1 && center.bottom <= panel.bottom + 1,
+        panel: {top:panel.top,bottom:panel.bottom}, center: {top:center.top,bottom:center.bottom} };
+    });
+    assert.ok(topBoard.inView, '中央局情報が他家の盤面から隠れない ' + width + 'x' + height + ' ' + JSON.stringify(topBoard));
     async function geometry(stage) {
       const a = await page.evaluate(() => {
         const box = (s) => { const e=document.querySelector(s); if (!e) return null;
