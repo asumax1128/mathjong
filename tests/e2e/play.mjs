@@ -6526,6 +6526,48 @@ async function v07BeginnerRoom2(browser) {
   console.log('✓ 初心者の部屋 第4〜6段階：チー・ポン・役の制限・リーチ・ロン・ツモ・卒業試験、再開・一覧・やり直し・保存不可、320/375/390/430px');
 }
 
+// ---- Ver.0.7：麻雀卓と下部ヒント・数式確認エリアの画面検査 ----
+async function v07TableHintDock(browser) {
+  for (const [width, height] of [[320,568],[375,667],[390,844],[430,932],[844,390],[768,1024],[1366,768]]) {
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 820, hasTouch: width < 820 });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?mode=math1&seed=7007&speed=test');
+    await page.waitForSelector('.hand .tile');
+    assert.equal(await page.locator('.board-center .bc-round').count(), 1, '中央の局名');
+    assert.match(await page.locator('.board-center').innerText(), /東|南/);
+    assert.equal(await page.locator('.study-dock.idle').count(), 1, 'ヒントOFFの学習エリア');
+    async function geometry(stage) {
+      const a = await page.evaluate(() => {
+        const box = (s) => { const e=document.querySelector(s); if (!e) return null;
+          const b=e.getBoundingClientRect(); return { top:b.top,bottom:b.bottom,height:b.height }; };
+        return {hand:box('.self .hand'),dock:box('.study-dock'),bar:box('.bar'),scroll:document.documentElement.scrollWidth-innerWidth};
+      });
+      const label = width + 'x' + height + ' ' + stage;
+      assert.ok(a.hand && a.dock && a.bar, label + ' 必須エリア');
+      assert.ok(a.dock.top >= a.hand.bottom-2, label + ' 学習エリアは手牌より下 ' + JSON.stringify(a));
+      assert.ok(a.dock.bottom <= a.bar.top+2, label + ' 学習エリアはバーより上 ' + JSON.stringify(a));
+      assert.ok(a.bar.bottom <= height+2, label + ' バーが画面内 ' + JSON.stringify(a));
+      assert.ok(a.scroll <= 1, label + ' 横スクロールなし');
+    }
+    await geometry('OFF');
+    await page.locator('button[data-action="hint"]').tap();
+    assert.equal(await page.locator('.study-dock.open .hint-box .hint-basic').count(), 1, '発見ヒントを下部へ移動');
+    assert.equal(await page.locator('.self .hint-box').count(), 0, '手牌にヒントを重複表示しない');
+    await geometry('発見');
+    if (await page.locator('[data-action="fh-confirm"]').count()) {
+      await page.locator('[data-action="fh-confirm"]').tap();
+      assert.equal(await page.locator('.study-dock.open .fh').count(), 1, '数式確認を下部に表示');
+      await geometry('数式確認');
+    }
+    await page.locator('button[data-action="hint"]').tap();
+    assert.equal(await page.locator('.study-dock.idle').count(), 1, 'ヒントを閉じても学習エリアを残す');
+    assert.deepEqual(errors, [], 'コンソール/資源エラーなし');
+    if (SHOTS) await page.screenshot({ path: SHOTS + '/v07-dock-' + width + 'x' + height + '.png' });
+    await ctx.close();
+  }
+  console.log('✓ Ver.0.7 下部学習エリア：スマホ縦横・iPad・PCで表示・発見・数式確認・操作バー');
+}
+
 // 公開モードではサーバーも転送先も作らない。接続失敗をローカル成功で隠さない。
 const server = EXTERNAL ? null : await startServer(0, { base: BASE, host: '127.0.0.1' });
 if (server) {
@@ -6543,7 +6585,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2 };
+    const fns = { chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -6595,6 +6637,7 @@ try {
   await v06TrioIntegration(browser);
   await v07BeginnerRoom(browser);
   await v07BeginnerRoom2(browser);
+  await v07TableHintDock(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));
