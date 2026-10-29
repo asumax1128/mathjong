@@ -134,6 +134,10 @@ function initialCheck(p, r, beforeMatch) {
   same(s.melds, [[], [], [], []], 'round.initial.melds');
   same(s.rivers, [[], [], [], []], 'round.initial.rivers');
   requireThat(s.drawn === s.hands[s.dealer].at(-1), 'round.initial.drawn', 'last tile in dealer hand required');
+  requireThat(Array.isArray(s.wall) && Array.isArray(s.hands) && s.hands.length === 4 && s.hands.every(Array.isArray), 'round.initial.tiles', 'tile arrays required');
+  const physical = [...s.wall, ...s.hands.flat()];
+  requireThat(physical.length === fresh.tileType.length && physical.every(id => Number.isInteger(id) && id >= 0 && id < fresh.tileType.length)
+    && new Set(physical).size === fresh.tileType.length, 'round.initial.tiles', 'invalid physical tile domain/count');
   restore(p, s, null, r.setup).checkInvariants();
   if (r.setup === 'seed') same(s, captureGame(fresh), 'round.initial.seed');
   else requireThat(r.setup === 'snapshot' && p.settings.origin === 'fixture', 'round.setup', 'non-seed setup only for explicit fixtures');

@@ -1,7 +1,7 @@
 // Opt-in private storage on a dedicated module Worker. Never imported by app.js.
 // Structured clone snapshots inputs at submission; no JSON/verification is done here.
 export const PAIFU_WORKER_PROTOCOL = 1;
-export const PAIFU_WORKER_METHODS = Object.freeze(['save','loadPrivate','verify','list','remove','clearAll']);
+export const PAIFU_WORKER_METHODS = Object.freeze(['save','loadPrivate','verify','list','remove','clearAll','inspectRecovery']);
 const writes = new Set(['save','remove','clearAll']);
 const uint = (n, min, max) => Number.isSafeInteger(n) && n >= min && n <= max;
 const fail = (code, retryable = false) => ({ok:false,error:{code,retryable}});

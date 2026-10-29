@@ -6,6 +6,11 @@ on:
       - 'src/ui/paifu-storage.js'
       - 'src/ui/paifu-worker-store.js'
       - 'src/ui/paifu-session.js'
+      - 'src/ui/paifu-recovery.js'
+      - 'tests/paifu-recovery.test.js'
+      - 'tests/paifu-audit.test.js'
+      - 'tests/e2e/paifu-recovery.mjs'
+      - 'docs/55-v08-recovery-audit.md'
       - 'tests/paifu-session.test.js'
       - 'tests/e2e/paifu-session.mjs'
       - 'docs/54-v08-auto-recording-connection.md'
@@ -42,6 +47,10 @@ jobs:
           node --check src/ui/paifu-storage.js
           node --check tests/paifu-storage.test.js
           node --check tests/e2e/paifu-storage.mjs
+          node --check src/ui/paifu-recovery.js
+          node --check tests/paifu-recovery.test.js
+          node --check tests/paifu-audit.test.js
+          node --check tests/e2e/paifu-recovery.mjs
           node --check src/ui/paifu-session.js
           node --check tests/paifu-session.test.js
           node --check tests/e2e/paifu-session.mjs
@@ -65,6 +74,8 @@ jobs:
         run: node tests/e2e/paifu-worker.mjs
       - name: Independent recording lifecycle and real Worker persistence
         run: node tests/e2e/paifu-session.mjs
+      - name: Read-only recovery audit, lost acknowledgements and multiple pages
+        run: node tests/e2e/paifu-recovery.mjs
       - name: Diagnostic performance comparison (no skipped validation)
         run: node tests/e2e/paifu-performance.mjs --output paifu-performance.json
       - name: Preserve synthetic benchmark results

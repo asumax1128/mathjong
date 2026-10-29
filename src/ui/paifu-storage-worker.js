@@ -1,4 +1,5 @@
 // Private Worker endpoint. Uses the UNCHANGED full validator and atomic IndexedDB adapter.
+import {inspectPaifuRecovery} from './paifu-recovery.js';
 import {createPaifuStore} from './paifu-storage.js';
 import {PAIFU_WORKER_PROTOCOL as protocol,PAIFU_WORKER_METHODS} from './paifu-worker-store.js';
 const writes=new Set(['save','remove','clearAll']);
@@ -24,7 +25,7 @@ export function attachPaifuStorageWorker(scope,{createStore=createPaifuStore}={}
     if(m.type==='init'){
       if(store||!m.config||!Number.isSafeInteger(m.config.maxPending)||m.config.maxPending<1||m.config.maxPending>8){send({type:'fatal'});return;}
       const {maxPending,...config}=m.config;limit=maxPending;
-      try{store=createStore(config);send({type:'ready'});}catch{send({type:'fatal'});}return;
+      try{const backend=createStore(config);store={...backend,inspectRecovery:evidence=>inspectPaifuRecovery(evidence,{store:backend})};send({type:'ready'});}catch{send({type:'fatal'});}return;
     }
     if(m.type!=='request'||!store||!Number.isSafeInteger(m.id)||m.id<1||!PAIFU_WORKER_METHODS.includes(m.method)||!Array.isArray(m.args)){
       send({type:'result',id:m.id,result:fail('invalid-argument')});return;

@@ -9,6 +9,7 @@ export function createPaifuSession(config,{store=createPaifuWorkerStore(),interv
   now=()=>performance.now(),schedule=fn=>setTimeout(fn,0),cancel=id=>clearTimeout(id),recorder=paifu}={}){
   let record=null,phase='active',version=0,savedVersion=0,savedStatus=null,token=null,gameRef=null,settled=false,ticket=null;
   let totalDecisions=0,requested=0,scheduled=null,inFlight=null,saveError=null,recordError=null,stopped=false,disposed=false,lastRequested=0;
+  let lastReceipt=null,lastAttempt=null;
   const tickets=new WeakMap();
   function clock(){const n=now();if(!Number.isFinite(n)||n<lastRequested)throw Error('clock');return n;}
   function cancelScheduled(){if(scheduled!==null){try{cancel(scheduled);}catch{/* no external callbacks escape */}scheduled=null;}}
@@ -29,10 +30,12 @@ export function createPaifuSession(config,{store=createPaifuWorkerStore(),interv
   function write(){
     if(disposed||stopped||saveError||inFlight||!record||requested<=savedVersion)return;
     const snapshot=record,target=version,expectedToken=token;
+    lastAttempt=Object.freeze({id:snapshot.id,record:snapshot,version:target,expectedToken,acknowledged:lastReceipt});
     // Defer even a synchronously throwing injected store until inFlight has been assigned.
     inFlight=Promise.resolve().then(()=>store.save(snapshot,{expectedToken})).then(result=>{
       if(result?.ok===true){
         if(result.metadata?.id!==snapshot.id||!/^[a-f0-9]{32}$/.test(result.metadata?.token??'')){block('outcome-unknown');return;}
+        lastReceipt=Object.freeze(structuredClone(result.metadata));lastAttempt=null;
         token=result.metadata.token;savedVersion=target;savedStatus=snapshot.status;
       }else{
         const code=SAVE_CODES.has(result?.error?.code)?result.error.code:'outcome-unknown';
@@ -135,6 +138,15 @@ export function createPaifuSession(config,{store=createPaifuWorkerStore(),interv
       return {ok:true,stopped:true,uncertain:saveError?.code==='outcome-unknown'};
     },
     privateRecord:()=>record,
+    privateRecoveryEvidence:()=>lastAttempt&&['outcome-unknown','conflict'].includes(saveError?.code)?Object.freeze({...lastAttempt,failureCode:saveError.code}):null,
+    async inspectRecovery(){
+      if(disposed)return failure('closed');
+      if(inFlight)await inFlight;
+      const evidence=api.privateRecoveryEvidence();
+      if(!evidence)return failure('reconciliation-not-needed');
+      if(typeof store.inspectRecovery!=='function')return failure('unavailable');
+      try{return await store.inspectRecovery(evidence);}catch{return failure('read-error');}
+    },
     status:()=>Object.freeze({id:record?.id??null,phase,version,savedVersion,savedStatus,dirty:version>savedVersion,
       recordStatus:record?.status??null,rounds:record?.rounds.length??0,decisions:totalDecisions,
       saving:disposed?'disposed':stopped?'stopped':saveError?'paused':inFlight?'saving':scheduled!==null?'scheduled':'idle',

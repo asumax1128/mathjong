@@ -129,3 +129,8 @@ PR #37をDraftで維持し、専用CIを追加実装後のHEADで確認する。
 ## 2026-10-29 追記：Ver.0.8 第4段階の接続設計・独立制御
 
 第3段階HEAD `fcdfdaf`とディレクター完了判定を確認し、[接続点・failure isolation・保存頻度・独立制御モジュール・未完成事項](54-v08-auto-recording-connection.md)を追加。全判断のメモリ記録と、Worker保存時点の集約を分離する。app.js/卓UI/既存エンジン/12人AI/保存形式/URLは変更せず、通常対局へ未接続。PR #37はDraft、mainマージ・Pages公開禁止、PR #36には触れない。過去のCIを新HEADへ流用せず、新HEADで専用CIを確認する。既存履歴は保持。
+
+
+## 2026-10-29 追記：Ver.0.8 第5段階の監査・読取専用復旧照合
+
+固定HEAD `215af87`を実装履歴なしの別Codexエージェントで読取レビューし、fixture/importの不存在物理ID受理P3を再現。新牌譜validatorのみで厳密化し、既存Game/ルール/AI/得点は維持。[監査・修正・読取照合・テスト・限界](55-v08-recovery-audit.md)を参照。outcome-unknown/CAS競合のID/token/digest/全内容を読み直すが、元writeの成功証明・token採用・自動retry/上書き/削除/再開はしない。app.js/卓UI/既存保存形式/URLは不変。通常対局未接続、PR #37 Draft維持、mainマージ・公開禁止。別人/別モデルの外部監査やSafari合格とは扱わず、過去CIを新HEADへ流用しない。
