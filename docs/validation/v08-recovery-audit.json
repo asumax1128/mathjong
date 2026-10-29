@@ -1,0 +1,172 @@
+{
+  "stage": 5,
+  "auditHead": "215af8778671bcf9422042f52da0527cba7217b7",
+  "independentReview": {
+    "reviewer": "separate Codex agent independent_paifu_audit, no implementation history",
+    "differentHumanOrModel": false,
+    "fixedHeadRepros": true,
+    "followupReview": true,
+    "independentlyExecutedRecoveryTests": 25,
+    "limits": "source/doc/targeted Node checks; parent performed full regression; no Safari"
+  },
+  "findings": [
+    {
+      "id": "P3-A",
+      "severity": "P3",
+      "atAuditHead": true,
+      "file": "src/engine/paifu.js",
+      "line": 137,
+      "description": "phantom IDs in explicit snapshot fixtures accepted",
+      "status": "fixed",
+      "oldGuardTestExit": 1
+    },
+    {
+      "id": "P3-B",
+      "severity": "P3",
+      "atAuditHead": false,
+      "intermediateCommit": "c07dd68",
+      "file": "src/ui/paifu-recovery.js",
+      "description": "unchanged receipt alone advertised a no-decision retry hint for a divergent archive",
+      "status": "fixed; no retry hints; user decision required",
+      "oldGuardTestExit": 1
+    }
+  ],
+  "confirmedUnresolvedP0P1P2": 0,
+  "unit": {
+    "passed": 499,
+    "baseline": 470,
+    "added": 29,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 170351.131408
+  },
+  "recoveryNative": {
+    "checks": 11,
+    "browser": "Chromium 154.0.8037.57",
+    "execution": {
+      "name": "recovery-final",
+      "exit": 0,
+      "seconds": 4.914,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu-recovery.mjs"
+      ]
+    },
+    "faults": "intentional lost-ack and abort injections inside real Worker/IDB",
+    "multiPage": true,
+    "freeze": "Chromium CDP frozen/active, not iPhone background",
+    "sessionCycles": 31
+  },
+  "otherRegressions": [
+    {
+      "name": "storage",
+      "exit": 0,
+      "seconds": 7.381,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu-storage.mjs"
+      ]
+    },
+    {
+      "name": "worker",
+      "exit": 0,
+      "seconds": 25.576,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu-worker.mjs"
+      ]
+    },
+    {
+      "name": "session",
+      "exit": 0,
+      "seconds": 41.974,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu-session.mjs"
+      ]
+    },
+    {
+      "name": "foundation",
+      "exit": 0,
+      "seconds": 3.071,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu.mjs"
+      ]
+    },
+    {
+      "name": "full-play",
+      "exit": 0,
+      "seconds": 837.806,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/play.mjs"
+      ]
+    }
+  ],
+  "fullPlayE2ERerun": true,
+  "fullPlaySummary": {
+    "rounds": 23,
+    "wins": [
+      0,
+      3,
+      12,
+      8
+    ],
+    "draws": 0,
+    "tsumo": 0,
+    "ron": 0,
+    "ronDeclined": 1,
+    "chi": 7,
+    "chiPassed": 15,
+    "chiOverriddenByRon": 0,
+    "discards": 118,
+    "yaku": {
+      "三関制覇": 12,
+      "三象限巡り": 7,
+      "リーチ": 16,
+      "同関一色": 1,
+      "第2象限一色": 2,
+      "象限三角揃い": 3,
+      "第1象限一色": 2,
+      "余角対": 1
+    },
+    "pon": 4,
+    "autoPassed": 7,
+    "seconds": 837.343
+  },
+  "recoveryWrites": false,
+  "tokenAdoptionOrResume": false,
+  "privateDataPubliclyShared": false,
+  "appConnected": false,
+  "mainMerged": false,
+  "published": false,
+  "webKitExecutablePresent": false,
+  "safari": "not executed",
+  "sourceSha256": {
+    "src/engine/paifu.js": "0f7d823a8906f7a86e2f4c82fed5e21272f038dfe2b6f7de389b954673068861",
+    "src/ui/paifu-storage.js": "1838450f83097e65f15bb8e40314338977eb1f4037eed2986f78504a404707cf",
+    "src/ui/paifu-worker-store.js": "d759d123c02f69ace556c64ba989442e70f2350ecb1ba01f2b616fc9b58db49d",
+    "src/ui/paifu-storage-worker.js": "16d031f10d183161637ce0837b2d920a6c657553ae1a61adb8d30829f48d2990",
+    "src/ui/paifu-session.js": "5e6b8e2eeca602d1254856ab0b45895acf87b91057f5fefc332277fdf76c842b",
+    "src/ui/paifu-recovery.js": "11bc3c89dd778eec94baa35ad5f12f7a4948419d32b03b7b34428aa1306373d8",
+    "tests/paifu-audit.test.js": "1d379710ddcbd42b3e969a44fe522b030d9ca5f85c4c3fc84a05690b44b5bdbf",
+    "tests/paifu-recovery.test.js": "3161fa59925bfbe82bafda206d65c31c58b40726dafd575904d7ebdae5433826",
+    "tests/e2e/paifu-recovery.mjs": "d2060ba701e66bc2480fa42460d632bb8316dcb205c7ea5ebc698a9d1a8817fc",
+    "src/ui/app.js": "3c6bc2e4a43bd4ffc8a53744a8ea2be01efd0126821dd9b94385cb7d5e3aa361",
+    "src/ui/styles.css": "282bbc29f15f3ae1bb7c47ed8bef969b28ff3bcc5d36d1eaca2ee08948486381",
+    "tests/e2e/play.mjs": "6042c59382eef2bcbcfe3ffdb0518586c33b0972ecb69385503b019a7c644464"
+  }
+}

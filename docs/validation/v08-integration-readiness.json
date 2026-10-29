@@ -1,0 +1,220 @@
+{
+  "stage": 7,
+  "baseHead": "d7b3f3e74b25df8fb09abbc43452f6d5c3f8d511",
+  "mainAtStart": "1603bdf3da18f93737eb6ec52813b6d6ea616eff",
+  "unit": {
+    "passed": 563,
+    "baseline": 544,
+    "added": 19,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 148114.251243,
+    "finalTargetedContractPassed": 19,
+    "note": "test-only settlement option handoff clarified after full run; targeted 19 rerun; exact final HEAD all-unit check required in CI"
+  },
+  "appReference": {
+    "sha256": "3c6bc2e4a43bd4ffc8a53744a8ea2be01efd0126821dd9b94385cb7d5e3aa361",
+    "positions": {
+      "startMatch": 1602,
+      "startRound": 143,
+      "newGame": 153,
+      "autoPass": 218,
+      "aiApply": 255,
+      "humanApply": 287,
+      "settlement": 271,
+      "next": 1375,
+      "reset": 1381,
+      "again": 1385,
+      "leaveGame": 1582,
+      "visibilitychange": 376,
+      "pagehide": 377,
+      "debugGoRound": 1572
+    },
+    "futureRemapRequiredAfterNewTable": true
+  },
+  "executed": {
+    "prototypeOnlyContractTests": true,
+    "actualGameAndMatchUsed": true,
+    "workerFailureReached": true,
+    "idbSecurityErrorGetterReached": true,
+    "browserRegressions": [
+      {
+        "name": "lifecycle",
+        "exit": 0,
+        "seconds": 6.214,
+        "command": [
+          "node",
+          "--require",
+          "/workspace/.mathjong-tools/playwright-system.cjs",
+          "tests/e2e/paifu-lifecycle.mjs"
+        ]
+      },
+      {
+        "name": "recovery",
+        "exit": 0,
+        "seconds": 4.578,
+        "command": [
+          "node",
+          "--require",
+          "/workspace/.mathjong-tools/playwright-system.cjs",
+          "tests/e2e/paifu-recovery.mjs"
+        ]
+      },
+      {
+        "name": "storage",
+        "exit": 0,
+        "seconds": 7.384,
+        "command": [
+          "node",
+          "--require",
+          "/workspace/.mathjong-tools/playwright-system.cjs",
+          "tests/e2e/paifu-storage.mjs"
+        ]
+      },
+      {
+        "name": "worker",
+        "exit": 0,
+        "seconds": 25.319,
+        "command": [
+          "node",
+          "--require",
+          "/workspace/.mathjong-tools/playwright-system.cjs",
+          "tests/e2e/paifu-worker.mjs"
+        ]
+      },
+      {
+        "name": "session",
+        "exit": 0,
+        "seconds": 39.885,
+        "command": [
+          "node",
+          "--require",
+          "/workspace/.mathjong-tools/playwright-system.cjs",
+          "tests/e2e/paifu-session.mjs"
+        ]
+      },
+      {
+        "name": "foundation",
+        "exit": 0,
+        "seconds": 3.068,
+        "command": [
+          "node",
+          "--require",
+          "/workspace/.mathjong-tools/playwright-system.cjs",
+          "tests/e2e/paifu.mjs"
+        ]
+      },
+      {
+        "name": "related",
+        "exit": 0,
+        "seconds": 117.212,
+        "command": [
+          "node",
+          "--require",
+          "/workspace/.mathjong-tools/playwright-system.cjs",
+          "tests/e2e/play.mjs",
+          "--only",
+          "v06TrioIntegration,v07BeginnerRoom2,v05Riichi,v04End"
+        ]
+      }
+    ],
+    "browser": "system Chromium 154.0.8037.57 via external launch helper",
+    "independentExternalAudit": false,
+    "faultTests": [
+      {
+        "fault": "pre-end-bypasses-skip",
+        "exit": 1,
+        "testOnlyModel": true
+      },
+      {
+        "fault": "stale-scope",
+        "exit": 1,
+        "testOnlyModel": true
+      }
+    ]
+  },
+  "plannedIntegrationCases": [
+    {
+      "id": "I1",
+      "actualConnectorExecuted": false
+    },
+    {
+      "id": "I2",
+      "actualConnectorExecuted": false
+    },
+    {
+      "id": "I3",
+      "actualConnectorExecuted": false
+    },
+    {
+      "id": "I4",
+      "actualConnectorExecuted": false
+    },
+    {
+      "id": "I5",
+      "actualConnectorExecuted": false
+    },
+    {
+      "id": "I6",
+      "actualConnectorExecuted": false
+    },
+    {
+      "id": "I7",
+      "actualConnectorExecuted": false
+    },
+    {
+      "id": "I8",
+      "actualConnectorExecuted": false
+    },
+    {
+      "id": "I9",
+      "actualConnectorExecuted": false
+    },
+    {
+      "id": "I10",
+      "actualConnectorExecuted": false
+    },
+    {
+      "id": "I11",
+      "actualConnectorExecuted": false
+    },
+    {
+      "id": "I12",
+      "actualConnectorExecuted": false
+    }
+  ],
+  "limits": {
+    "appConnected": false,
+    "productionFilesChanged": false,
+    "realUiRecordingFailureInjection": false,
+    "fullPlayRerun": false,
+    "WebKitBinaryPresent": false,
+    "Safari": "not executed",
+    "merged": false,
+    "published": false,
+    "pendingStartupUXDecision": true,
+    "note": "model tests and current UI baseline are distinct; no post-integration guarantee"
+  },
+  "sourceSha256": {
+    "src/ui/app.js": "3c6bc2e4a43bd4ffc8a53744a8ea2be01efd0126821dd9b94385cb7d5e3aa361",
+    "src/ui/styles.css": "282bbc29f15f3ae1bb7c47ed8bef969b28ff3bcc5d36d1eaca2ee08948486381",
+    "src/engine/game.js": "00829ff686841fcc537e5f0abf849523533c1226b5011147c3378f4bc94cb937",
+    "src/engine/ai.js": "cecbe61073eb01b70abdcde3820067db4bf83db40872238e6feb1f8285d1f76f",
+    "src/engine/character-ai.js": "9a5924ed499c1830b3f649d5dbeb78e67b4b210b6eb09cd19768b7a4ae4c536d",
+    "src/engine/character-ai-trio.js": "21a6de9e5b974cfffeb627ebc00655eac218c8b5b1626b7b6a21afd7148217e6",
+    "src/engine/rules.js": "36ec353dc0b7369e6bef77d40df8c590a9b6f1033bc7d2b0b314d3bcabb3f465",
+    "src/engine/match.js": "65dd13304384b95d4793ecedd0a91fad6f57d91926fab4305f31c7f199fed61d",
+    "src/engine/paifu.js": "0f7d823a8906f7a86e2f4c82fed5e21272f038dfe2b6f7de389b954673068861",
+    "src/ui/paifu-session.js": "5e6b8e2eeca602d1254856ab0b45895acf87b91057f5fefc332277fdf76c842b",
+    "src/ui/paifu-lifecycle.js": "b971c659649bce69f9554f38530434d31c6352bb674e0f798fac8baa2b0ff39d",
+    "src/ui/paifu-save-state.js": "2b3ec725cee5eb58b029c0be3da040dcbf30105c3d5165478da73b1e47cc94a2",
+    "src/ui/paifu-storage.js": "1838450f83097e65f15bb8e40314338977eb1f4037eed2986f78504a404707cf",
+    "src/ui/paifu-worker-store.js": "d759d123c02f69ace556c64ba989442e70f2350ecb1ba01f2b616fc9b58db49d",
+    "src/ui/paifu-recovery.js": "11bc3c89dd778eec94baa35ad5f12f7a4948419d32b03b7b34428aa1306373d8",
+    "src/ui/replay.js": "a64c3e9441dbf0e37cdab3ef7d3e64b69b658b7d707c86eac82af36de606fa7b",
+    "tests/e2e/play.mjs": "6042c59382eef2bcbcfe3ffdb0518586c33b0972ecb69385503b019a7c644464",
+    "tests/paifu-integration-harness.mjs": "be0faf76db84be1773f8a450f554d1253bc9dd2eeb43834cb00aa76ddb203a5a",
+    "tests/paifu-integration-contract.test.js": "5a4ea04aa8559ada72e135d5c5bfd1f3d741d8f1aed9eb946e2af62b8b9975d4",
+    ".github/workflows/paifu-foundation.yml": "199a41071c37a0c4475a465d76b0f32ed6e5f7ff749526f3883de67a49429bc2"
+  }
+}

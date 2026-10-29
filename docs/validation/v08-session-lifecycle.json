@@ -1,0 +1,157 @@
+{
+  "stage": 6,
+  "baseHead": "a85d44d7e1c9168e66488bee90147ec25dc88593",
+  "unit": {
+    "passed": 544,
+    "baseline": 499,
+    "added": 45,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 155165.44609
+  },
+  "browser": {
+    "name": "Chromium",
+    "version": "154.0.8037.57",
+    "systemBinaryHelper": true,
+    "separateExecutionModesVerified": false,
+    "lifecycleChecks": 12,
+    "recoveryChecks": 11,
+    "storageChecks": 21,
+    "workerChecks": 14,
+    "sessionChecks": 13,
+    "foundationConditions": 4,
+    "relatedGroups": [
+      "v06TrioIntegration",
+      "v07BeginnerRoom2",
+      "v05Riichi",
+      "v04End"
+    ]
+  },
+  "executions": [
+    {
+      "name": "lifecycle",
+      "exit": 0,
+      "seconds": 8.003,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu-lifecycle.mjs"
+      ]
+    },
+    {
+      "name": "recovery",
+      "exit": 0,
+      "seconds": 6.879,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu-recovery.mjs"
+      ]
+    },
+    {
+      "name": "storage",
+      "exit": 0,
+      "seconds": 9.342,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu-storage.mjs"
+      ]
+    },
+    {
+      "name": "worker",
+      "exit": 0,
+      "seconds": 26.917,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu-worker.mjs"
+      ]
+    },
+    {
+      "name": "session",
+      "exit": 0,
+      "seconds": 41.409,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu-session.mjs"
+      ]
+    },
+    {
+      "name": "foundation",
+      "exit": 0,
+      "seconds": 3.021,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu.mjs"
+      ]
+    },
+    {
+      "name": "related",
+      "exit": 0,
+      "seconds": 116.3,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/play.mjs",
+        "--only",
+        "v06TrioIntegration,v07BeginnerRoom2,v05Riichi,v04End"
+      ]
+    }
+  ],
+  "faultTests": [
+    {
+      "fault": "resource-cap",
+      "exit": 1,
+      "isolatedOnly": true
+    },
+    {
+      "fault": "unknown-state",
+      "exit": 1,
+      "isolatedOnly": true
+    }
+  ],
+  "limits": {
+    "active": 1,
+    "closing": 1,
+    "finishedMetadata": 8,
+    "retireTimeoutMs": 35000,
+    "scope": "one shared manager per realm; not a global/tab lock"
+  },
+  "verificationLimits": {
+    "quota": "logical capacity and injected errors, not actual disk exhaustion",
+    "background": "Chromium CDP frozen/active, not actual Safari/OS background",
+    "sessionCycles": 31,
+    "safari": "not executed",
+    "WebKit": "binary not present",
+    "fullPlayRerun": false,
+    "crossTabCoordinationImplemented": false,
+    "privateCopyPreservationImplemented": false,
+    "appConnected": false,
+    "merged": false,
+    "published": false
+  },
+  "sourceSha256": {
+    "src/ui/paifu-lifecycle.js": "b971c659649bce69f9554f38530434d31c6352bb674e0f798fac8baa2b0ff39d",
+    "src/ui/paifu-save-state.js": "2b3ec725cee5eb58b029c0be3da040dcbf30105c3d5165478da73b1e47cc94a2",
+    "tests/paifu-lifecycle.test.js": "c17ac1a113f9e30f7f5ec4ed01b940c03d826c00263e84f8363b0f59d9d6ec42",
+    "tests/paifu-save-state.test.js": "c519012162471204b37ed27fcf7b9dc4bb4f2fec7b743ad40a776d49f384932b",
+    "tests/e2e/paifu-lifecycle.mjs": "db08f213afaf68af28d4282548f4ab0b7be6aaf6092d26757b6f162db1adb810",
+    "src/ui/paifu-session.js": "5e6b8e2eeca602d1254856ab0b45895acf87b91057f5fefc332277fdf76c842b",
+    "src/ui/paifu-storage.js": "1838450f83097e65f15bb8e40314338977eb1f4037eed2986f78504a404707cf",
+    "src/ui/paifu-recovery.js": "11bc3c89dd778eec94baa35ad5f12f7a4948419d32b03b7b34428aa1306373d8",
+    "src/ui/app.js": "3c6bc2e4a43bd4ffc8a53744a8ea2be01efd0126821dd9b94385cb7d5e3aa361",
+    "src/ui/styles.css": "282bbc29f15f3ae1bb7c47ed8bef969b28ff3bcc5d36d1eaca2ee08948486381",
+    "tests/e2e/play.mjs": "6042c59382eef2bcbcfe3ffdb0518586c33b0972ecb69385503b019a7c644464",
+    ".github/workflows/paifu-foundation.yml": "35badd6eb7805246ba918df50eaecfb1771cf1df2927672cf087387d33b3301c"
+  }
+}

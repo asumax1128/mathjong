@@ -1,0 +1,156 @@
+{
+  "stage": 4,
+  "baseHead": "fcdfdaffb20660eb06e187f491bbe141fc031140",
+  "unit": {
+    "passed": 470,
+    "baseline": 438,
+    "added": 32,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 161218.178882
+  },
+  "sessionBrowser": {
+    "checks": 13,
+    "browser": "154.0.8037.57",
+    "matrix": [
+      {
+        "mode": "math1",
+        "length": 4,
+        "ids": [
+          "kanata",
+          "mitsuki",
+          "aoto",
+          "ousuke"
+        ],
+        "rounds": 4,
+        "decisions": 72,
+        "observationP95Ms": 1.0999999977648258,
+        "observationMaxMs": 3.300000000745058
+      },
+      {
+        "mode": "math1",
+        "length": 8,
+        "ids": [
+          "ousuke",
+          "natsuki",
+          "yuki",
+          "fukuyama"
+        ],
+        "rounds": 12,
+        "decisions": 357,
+        "observationP95Ms": 1.300000000745058,
+        "observationMaxMs": 3.800000000745058
+      },
+      {
+        "mode": "math2",
+        "length": 4,
+        "ids": [
+          "fukuyama",
+          "kaoru",
+          "asuma",
+          "yujin"
+        ],
+        "rounds": 5,
+        "decisions": 170,
+        "observationP95Ms": 1.6000000014901161,
+        "observationMaxMs": 5.300000000745058
+      },
+      {
+        "mode": "math2",
+        "length": 8,
+        "ids": [
+          "yujin",
+          "tara",
+          "nocchi",
+          "kanata"
+        ],
+        "rounds": 11,
+        "decisions": 327,
+        "observationP95Ms": 1.300000000745058,
+        "observationMaxMs": 5.599999997764826
+      }
+    ]
+  },
+  "browserExecutions": [
+    {
+      "name": "session",
+      "exit": 0,
+      "seconds": 48.262,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu-session.mjs"
+      ]
+    },
+    {
+      "name": "storage",
+      "exit": 0,
+      "seconds": 7.999,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu-storage.mjs"
+      ]
+    },
+    {
+      "name": "worker",
+      "exit": 0,
+      "seconds": 26.921,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu-worker.mjs"
+      ]
+    },
+    {
+      "name": "foundation",
+      "exit": 0,
+      "seconds": 3.087,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/paifu.mjs"
+      ]
+    },
+    {
+      "name": "related",
+      "exit": 0,
+      "seconds": 102.188,
+      "command": [
+        "node",
+        "--require",
+        "/workspace/.mathjong-tools/playwright-system.cjs",
+        "tests/e2e/play.mjs",
+        "--only",
+        "v06TrioIntegration,v07BeginnerRoom2,v05Riichi,v04End"
+      ]
+    }
+  ],
+  "legacyIndexedDbChecks": 21,
+  "legacyWorkerChecks": 14,
+  "foundationCases": 4,
+  "fullPlayE2ERerun": false,
+  "existingGameConnected": false,
+  "privateDataPubliclyShared": false,
+  "mainMerged": false,
+  "published": false,
+  "protectedExistingSourceChanged": false,
+  "sourceSha256": {
+    "src/ui/paifu-session.js": "15e92381e1a301ede1185cfd94addbd3239919b246e1f7b358fd0f316740fc0c",
+    "tests/paifu-session.test.js": "0ef1febe2bbc8444181d8f1351282cb0563566c37b0c7a46a7672b9e21473bad",
+    "tests/e2e/paifu-session.mjs": "1a57b234323b25f38965543a8ad1d278ce9ea3fd1efd13f3091262d2125e7832"
+  },
+  "safari": "not executed; Chromium 154 only",
+  "limitations": [
+    "manual reconciliation for uncertain/conflict writes not implemented",
+    "no app.js or page lifecycle connection",
+    "no cross-tab deletion coordinator",
+    "no final storage frequency approval or notification UI",
+    "no >8MiB chunking",
+    "foreground tick and successful saves required; no absolute 30 second loss bound"
+  ]
+}

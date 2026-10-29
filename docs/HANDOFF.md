@@ -121,3 +121,38 @@
 - 新規AIはsrc/engine/character-ai-trio.js、窓口はcharacters.js。旧9人は元のcharacter-ai.jsを呼び、旧モジュール・係数・?ai=既定3人を変更しない。
 - のっちは完了局の公開行動の件数だけを持つ。新しい試合・再戦で0へ戻す。再現URLは従来どおり山・配牌・親・局状態を復元し、前の局の公開行動集計や持ち点は復元しない。
 - 実装者自身の再確認であり、独立した別担当者の監査ではない。公開・実機受入・GitHub CIの未確認を区別する。
+
+
+## 2026-10-29 追記：Ver.0.8牌譜基盤の先行開発（未統合）
+
+最新指示[docs/50](50-v08-paifu-foundation-kickoff.md)に基づき、Codexは`feature/v08-paifu-foundation`でUIから独立した版付き記録・復元・検証を開発。[調査・スキーマ・API・未決定事項](51-v08-paifu-foundation-schema.md)。通常対局への自動記録接続、保存媒体、公開・共有、Ver.0.9以降の画面は未実装。Ver.0.7の卓UIはClaude Code担当であり、PR #36のブランチには触れない。今回の指示ではDraft保持、mainマージ・Pages公開は禁止。従来の包括公開承認を今回へ流用しない。既存の決定・履歴は保持。
+
+
+## 2026-10-29 追記：Ver.0.8 第2段階の保存基盤（Draft #37）
+
+PR #37の開始HEAD `3f1344f`と専用CI [40860681346](https://github.com/asumax1128/mathjong/actions/runs/40860681346)のSuccessを確認後、独立IndexedDB保存アダプターを追加。[DB構造・API・容量・異常系・性能・未完成事項](52-v08-paifu-indexeddb.md)。既存localStorage/エンジン/AI/UI/再現URLは不変。自動記録・自動保存への接続はしない。PR #36に触れず、PR #37はDraft、mainマージ・Pages公開は禁止。新HEADのチェックは開始HEADのSuccessと区別する。既存履歴は保持。
+
+
+## 2026-10-29 追記：Ver.0.8 第3段階 Worker復旧・独立試作
+
+第2段階HEAD `cf1a419`から未コミット6ファイルとログを回収・アーカイブし、保全コミット`2e7a1f8`をPR #37へpush。[復旧・性能比較・API・検証結果・制限](53-v08-worker-recovery-performance.md)を参照。既存DB/牌譜/保存キー/再現URLと全復元検証を保持した専用Worker＋有界FIFOを試作。総完了時間は短縮せず、画面側の重い処理を減らす方式。通常対局未接続、PR #37 Draft維持、mainマージ・Pages公開禁止。PR #36/卓UI/既存エンジン/AI/得点は変更しない。新HEADのCIを確認し、過去のSuccessを流用しない。既存履歴は保持。
+
+
+## 2026-10-29 追記：Ver.0.8 第4段階の接続設計・独立制御
+
+第3段階HEAD `fcdfdaf`とディレクター完了判定を確認し、[接続点・failure isolation・保存頻度・独立制御モジュール・未完成事項](54-v08-auto-recording-connection.md)を追加。全判断のメモリ記録と、Worker保存時点の集約を分離する。app.js/卓UI/既存エンジン/12人AI/保存形式/URLは変更せず、通常対局へ未接続。PR #37はDraft、mainマージ・Pages公開禁止、PR #36には触れない。過去のCIを新HEADへ流用せず、新HEADで専用CIを確認する。既存履歴は保持。
+
+
+## 2026-10-29 追記：Ver.0.8 第5段階の監査・読取専用復旧照合
+
+固定HEAD `215af87`を実装履歴なしの別Codexエージェントで読取レビューし、fixture/importの不存在物理ID受理P3を再現。新牌譜validatorのみで厳密化し、既存Game/ルール/AI/得点は維持。[監査・修正・読取照合・テスト・限界](55-v08-recovery-audit.md)を参照。outcome-unknown/CAS競合のID/token/digest/全内容を読み直すが、元writeの成功証明・token採用・自動retry/上書き/削除/再開はしない。app.js/卓UI/既存保存形式/URLは不変。通常対局未接続、PR #37 Draft維持、mainマージ・公開禁止。別人/別モデルの外部監査やSafari合格とは扱わず、過去CIを新HEADへ流用しない。
+
+
+## 2026-10-30 JST 追記：Ver.0.8 第6段階のセッション資源・保存状態
+
+[docs/56](56-v08-session-lifecycle.md)を参照。active最大1＋終了中最大1の独立調停と、私有データを含まない保存状態の純粋な説明関数を追加。飽和時はゲームを止めず新試合の記録だけ見送り、未保存損失を隠さない。読取り照合は事実確認のみで、自動retry/上書き/削除/token採用/再開なし。通常対局・app.js・卓UIへ未接続。既存エンジン/12人AI/得点/保存形式/URLとPR #36は不変。Draft #37維持、mainマージ・Pages公開・Ver.0.9以降は禁止。従来の履歴/CIを新HEADの実績へ流用しない。Safari/総ピークRAM/OS kill/ユーザー判断による保全・復旧は別ゲート。
+
+
+## 2026-10-30 JST 追記：Ver.0.8 第7段階・統合準備のみ
+
+[docs/57](57-v08-integration-readiness.md)に現app.jsの意味的接続点、試合token/Game/sessionの分離、遅いimport/記録見送り/旧callbackの検査、保存表示、Safari/全体E2E/性能の受入票、別統合PRの手順を記録。追加コードはテスト専用契約試作と独立検査だけで、製品module/app.js/卓HTML/CSS/PR #36/既存エンジン/AI/保存形式は不変。再戦はmanager.startに終了調停を任せ、事前endで飽和判定を迂回しない。Ver.0.7新卓の承認・統合後に最新mainから別統合PRを作る。PR #37はDraftのまま直接mainマージ・Pages公開禁止。起動直後未readyのUX、実接続・実表示・明示復旧・全tab調停・Safari/ピークRAM・8MiB超は未完成。過去のCI/実機合格を新HEADや接続後の実績へ流用しない。

@@ -1,0 +1,79 @@
+{
+  "stage": 2,
+  "baseHead": "3f1344fe133593a823e9c9416c3868df6a716e59",
+  "initialCi": {
+    "run": 40860681346,
+    "head": "3f1344fe133593a823e9c9416c3868df6a716e59",
+    "status": "Success"
+  },
+  "unit": {
+    "passed": 426,
+    "baseline": 409,
+    "added": 17,
+    "failed": 0,
+    "skipped": 0,
+    "durationMs": 138426.91269
+  },
+  "nativeIndexedDb": {
+    "passed": true,
+    "checks": 21,
+    "browser": "Chromium 154.0.8037.57",
+    "quotaTest": "injected API exception, not real disk exhaustion",
+    "safari": "not executed; denial and old API faults injected"
+  },
+  "foundationE2E": {
+    "passed": true,
+    "cases": 4
+  },
+  "relatedE2E": {
+    "passed": true,
+    "checks": [
+      "v06TrioIntegration",
+      "v07BeginnerRoom2",
+      "v05Riichi",
+      "v04End"
+    ]
+  },
+  "fullPlayE2ERerun": false,
+  "metrics": [
+    {
+      "mode": "math1",
+      "length": 4,
+      "rounds": 4,
+      "bytes": 1098423,
+      "saveMs": 208,
+      "loadMs": 162.69999999925494
+    },
+    {
+      "mode": "math2",
+      "length": 8,
+      "rounds": 8,
+      "bytes": 4284847,
+      "saveMs": 698,
+      "loadMs": 563.8999999985099
+    }
+  ],
+  "database": {
+    "name": "mathjong-paifu",
+    "version": 1,
+    "stores": [
+      "records",
+      "index"
+    ],
+    "maxRecords": 20,
+    "maxJsonBytes": 33554432,
+    "perRecordCodecLimit": 8388608,
+    "timeoutPerWaitMs": 5000,
+    "automaticEviction": false,
+    "automaticMigration": false
+  },
+  "mainGameConnected": false,
+  "mainMerged": false,
+  "published": false,
+  "protectedExistingSourceChanged": false,
+  "sourceSha256": {
+    "src/ui/paifu-storage.js": "1838450f83097e65f15bb8e40314338977eb1f4037eed2986f78504a404707cf",
+    "tests/paifu-storage.test.js": "fb4dcc0bbaf4492c1aa6c7ace2caed5dde16f669c4c6ca6d5240b4e48f6ecf60",
+    "tests/e2e/paifu-storage.mjs": "992cbd5856d6ac25f911353f74b1a5e4e08bac9978561d250a93e84f52ec0ad5"
+  }
+}

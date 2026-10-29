@@ -1,0 +1,106 @@
+name: Paifu foundation (Draft, no deploy)
+on:
+  pull_request:
+    paths:
+      - 'src/engine/**'
+      - 'src/ui/paifu-storage.js'
+      - 'src/ui/paifu-worker-store.js'
+      - 'src/ui/paifu-session.js'
+      - 'src/ui/paifu-recovery.js'
+      - 'src/ui/paifu-lifecycle.js'
+      - 'src/ui/paifu-save-state.js'
+      - 'tests/paifu-lifecycle.test.js'
+      - 'tests/paifu-save-state.test.js'
+      - 'tests/e2e/paifu-lifecycle.mjs'
+      - 'docs/56-v08-session-lifecycle.md'
+      - 'tests/paifu-integration-harness.mjs'
+      - 'tests/paifu-integration-contract.test.js'
+      - 'docs/57-v08-integration-readiness.md'
+      - 'tests/paifu-recovery.test.js'
+      - 'tests/paifu-audit.test.js'
+      - 'tests/e2e/paifu-recovery.mjs'
+      - 'docs/55-v08-recovery-audit.md'
+      - 'tests/paifu-session.test.js'
+      - 'tests/e2e/paifu-session.mjs'
+      - 'docs/54-v08-auto-recording-connection.md'
+      - 'src/ui/paifu-storage-worker.js'
+      - 'tests/paifu-worker-store.test.js'
+      - 'tests/paifu-storage-fixtures.mjs'
+      - 'tests/e2e/paifu-worker.mjs'
+      - 'tests/e2e/paifu-performance.mjs'
+      - 'docs/53-v08-worker-recovery-performance.md'
+      - 'tests/paifu-storage.test.js'
+      - 'tests/e2e/paifu-storage.mjs'
+      - 'docs/52-v08-paifu-indexeddb.md'
+      - 'tests/paifu.test.js'
+      - 'tests/e2e/paifu.mjs'
+      - 'docs/51-v08-paifu-foundation-schema.md'
+      - '.github/workflows/paifu-foundation.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax
+        run: |
+          node --check src/engine/paifu.js
+          node --check tests/paifu.test.js
+          node --check tests/e2e/paifu.mjs
+          node --check src/ui/paifu-storage.js
+          node --check tests/paifu-storage.test.js
+          node --check tests/e2e/paifu-storage.mjs
+          node --check src/ui/paifu-recovery.js
+          node --check tests/paifu-recovery.test.js
+          node --check tests/paifu-audit.test.js
+          node --check tests/e2e/paifu-recovery.mjs
+          node --check src/ui/paifu-lifecycle.js
+          node --check src/ui/paifu-save-state.js
+          node --check tests/paifu-lifecycle.test.js
+          node --check tests/paifu-save-state.test.js
+          node --check tests/e2e/paifu-lifecycle.mjs
+          node --check tests/paifu-integration-harness.mjs
+          node --check tests/paifu-integration-contract.test.js
+          node --check src/ui/paifu-session.js
+          node --check tests/paifu-session.test.js
+          node --check tests/e2e/paifu-session.mjs
+          node --check src/ui/paifu-worker-store.js
+          node --check src/ui/paifu-storage-worker.js
+          node --check tests/paifu-worker-store.test.js
+          node --check tests/paifu-storage-fixtures.mjs
+          node --check tests/e2e/paifu-worker.mjs
+          node --check tests/e2e/paifu-performance.mjs
+      - name: All unit tests
+        run: npm test
+      - name: Install browser
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Recorder in actual browser, no production hooks
+        run: node tests/e2e/paifu.mjs
+      - name: Native IndexedDB storage, rollback and failure isolation
+        run: node tests/e2e/paifu-storage.mjs
+      - name: Native Worker, bounded queue and termination recovery
+        run: node tests/e2e/paifu-worker.mjs
+      - name: Independent recording lifecycle and real Worker persistence
+        run: node tests/e2e/paifu-session.mjs
+      - name: Read-only recovery audit, lost acknowledgements and multiple pages
+        run: node tests/e2e/paifu-recovery.mjs
+      - name: Bounded session lifecycle and private-safe save state
+        run: node tests/e2e/paifu-lifecycle.mjs
+      - name: Diagnostic performance comparison (no skipped validation)
+        run: node tests/e2e/paifu-performance.mjs --output paifu-performance.json
+      - name: Preserve synthetic benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: paifu-performance-${{ github.sha }}
+          path: paifu-performance.json
+          if-no-files-found: error
+      - name: Existing AI, beginner room, riichi and match regression
+        run: node tests/e2e/play.mjs --only v06TrioIntegration,v07BeginnerRoom2,v05Riichi,v04End
