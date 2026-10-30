@@ -117,6 +117,7 @@ export function unseenCounts(rules, view) {
   for (const h of view.hand) u[h.type]--;
   for (const r of view.rivers) for (const t of r) u[t]--;
   for (const ms of view.melds) for (const m of ms) for (const t of m.tiles) u[t]--;
+  if (view.doraIndicators) for(const d of view.doraIndicators) u[d.type]--;
   return u;
 }
 
@@ -320,12 +321,12 @@ export function decide(game, seat, personality, rng, level = 'intermediate', inf
 //              （残り0枚の待ちでツモ切りに縛られるのを避ける）。
 // 判断材料は自分の手牌と公開情報（unseenCounts）だけ。
 export function riichiDecision(game, seat, tileId, level) {
-  if (!game.riichiEnabled || game.riichi[seat] || game.melds[seat].length) return false;
+  if (!game.riichiEnabled || game.riichi[seat] || !game.isClosed(seat)) return false;
   const rules = game.rules;
   const view = game.viewFor(seat);
   const counts = viewCounts(rules, view);
   counts[game.typeOf(tileId)]--;
-  const waits = game.waitsOf(counts);
+  const waits = game.waitsOf(counts, game.exposedMelds(seat), game.isClosed(seat));
   if (!waits.length) return false;
   if (level === 'beginner') return true;
   const unseen = unseenCounts(rules, view);
