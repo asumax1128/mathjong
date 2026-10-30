@@ -79,12 +79,10 @@ export const LEGACY_V02_CONFIG = {
     { id: 'sankan', name: '三関制覇', points: 1, closedOnly: false, enabled: true },
     { id: 'doukan', name: '同関一色', points: 2, closedOnly: false, enabled: true },
     { id: 'yokaku', name: '余角対', points: 2, closedOnly: false, enabled: true },
-    { id: 'sanshougen', name: '三象限巡り', points: 2, closedOnly: false, enabled: true },
-    { id: 'shougen1', name: '第1象限一色', points: 3, closedOnly: false, enabled: true },
-    { id: 'shougen2', name: '第2象限一色', points: 3, closedOnly: false, enabled: true },
-    { id: 'shougen3', name: '第3象限一色', points: 3, closedOnly: false, enabled: true },
-    { id: 'shougen4', name: '第4象限一色', points: 3, closedOnly: false, enabled: true },
-    { id: 'shougenSankaku', name: '象限三角揃い', points: 4, closedOnly: false, enabled: true },
+    { id: 'sanshougen', name: '三象限巡', points: 2, closedOnly: false, enabled: true },
+    // 象限一色（docs/65）：旧「第1〜第4象限一色」（各3点・同時に2つは成立しない）を1つの役に統合。点数・軸上の角度の扱いは従来どおり
+    { id: 'shougen', name: '象限一色', points: 3, closedOnly: false, enabled: true },
+    { id: 'shougenSankaku', name: '象限三角', points: 4, closedOnly: false, enabled: true },
     { id: 'douchi', name: '同値三連', points: 4, closedOnly: false, enabled: true },
     { id: 'doukaku', name: '同角三関', points: 16, yakuman: true, closedOnly: false, enabled: true, provisional: true },
     { id: 'sanjuu', name: '三重同式', points: 16, yakuman: true, closedOnly: false, enabled: true, provisional: true },
@@ -116,8 +114,8 @@ const KOUTSU_YAKU = [
   { id: 'tanIsshoku', name: '正接一色', points: 16, yakuman: true, closedOnly: false, enabled: true, category: 'koutsu', fn: 'tan', provisional: true },
 ];
 
-// 数学Ⅰでは 0°〜180° しかないため、第3・第4象限を使う役は成立しない（tests/modes.test.js で全組合せを確認）
-const MATH1_IMPOSSIBLE = ['sanshougen', 'shougen3', 'shougen4'];
+// 数学Ⅰでは 0°〜180° しかないため、3つの象限を使う三象限巡は成立しない（象限一色は第1・第2象限で成立する）（tests/modes.test.js で全組合せを確認）
+const MATH1_IMPOSSIBLE = ['sanshougen'];
 
 export const MODES = {
   math1: { id: 'math1', label: '数学Ⅰ', unit: 'deg', maxDeg: 180, functionCopies: 12 },

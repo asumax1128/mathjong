@@ -161,7 +161,7 @@ test('4-D：鳴いた手は役が必要（形が完成しても役なしなら�
   assert.equal(p.done, true);
   const r = g.result;
   assert.equal(r.how, 'ron');
-  assert.ok(r.analysis.yaku.some((y) => y.id === 'shougen1'));
+  assert.ok(r.analysis.yaku.some((y) => y.id === 'shougen'));
   assert.equal(r.analysis.closed, false);
   assert.deepEqual(p.settlement.deltas, settle(r, g.dealer));
   assert.equal(p.settlement.scores.reduce((a, b) => a + b, 0), 400);

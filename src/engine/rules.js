@@ -113,10 +113,8 @@ export function createRules(config = DEFAULT_CONFIG) {
     yokaku: (ms) => ms.some((a, i) => ms.some((b, j) => i !== j && a.fn === 'sin' && b.fn === 'cos'
       && a.deg >= 0 && b.deg >= 0 && a.deg + b.deg === 90 && a.value === b.value)),
     sanshougen: (ms) => ms.every((m) => m.quadrant > 0) && new Set(ms.map((m) => m.quadrant)).size === 3,
-    shougen1: (ms) => ms.every((m) => m.quadrant === 1),
-    shougen2: (ms) => ms.every((m) => m.quadrant === 2),
-    shougen3: (ms) => ms.every((m) => m.quadrant === 3),
-    shougen4: (ms) => ms.every((m) => m.quadrant === 4),
+    // 象限一色：3組の角度がすべて同じ象限（第1〜第4のどれか）。軸上の角度（quadrant 0：0°・90°・180°・270°・360°）は含まない
+    shougen: (ms) => ms.every((m) => m.quadrant > 0) && new Set(ms.map((m) => m.quadrant)).size === 1,
     shougenSankaku: (ms) => {
       const degs = ms.map((m) => m.deg).sort((a, b) => a - b).join(',');
       return Object.values(QUADRANT_ANGLES).some((q) => q.join(',') === degs);

@@ -79,9 +79,11 @@ test('P3-1：数学Ⅱの条件文は弧度法（度数法が残らない）、�
   const m2 = makeConfig({ mode: 'math2' });
   assert.match(condOf(m2, 'yokaku'), /sin θ と cos\(π\/2−θ\) の2組を含む（0≦θ≦π\/2）/);
   assert.match(condOf(m1, 'yokaku'), /sin θ と cos\(90°−θ\) の2組を含む（0°≦θ≦90°）/);
-  assert.match(condOf(m2, 'shougen1'), /第1象限（π\/6・π\/4・π\/3）/);
-  assert.match(condOf(m1, 'shougen2'), /第2象限（120°・135°・150°）/);
-  assert.match(condOf(m2, 'shougen3'), /第3象限（7π\/6・5π\/4・4π\/3）/);
+  // docs/65：象限一色（統合）。モードにある象限だけを列挙
+  assert.match(condOf(m2, 'shougen'), /第1象限（π\/6・π\/4・π\/3）／第2象限（2π\/3・3π\/4・5π\/6）／第3象限（7π\/6・5π\/4・4π\/3）／第4象限（5π\/3・7π\/4・11π\/6）/);
+  assert.match(condOf(m1, 'shougen'), /第1象限（30°・45°・60°）／第2象限（120°・135°・150°）。/);
+  assert.match(condOf(m1, 'shougen'), /軸上の角度（0°・90°・180°）を含むと不可/);
+  assert.match(condOf(m2, 'shougen'), /軸上の角度（0・π\/2・π・3π\/2・2π）を含むと不可/);
   assert.match(condOf(m2, 'sanshougen'), /（0・π\/2・π・3π\/2・2π を含まない）/);
   assert.match(condOf(m2, 'doukaku'), /（π\/2・3π\/2 は tan がないので不可）/);
   assert.match(condOf(m1, 'doukaku'), /（90° は tan がないので不可）/, '数学Ⅰに 270° はない');

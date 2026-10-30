@@ -376,6 +376,9 @@ button.danger { background: #b42318; color: #fff; border-color: #b42318; }
 .match-log li { padding: 2px 0; }
 .match-log .ml-label { display: inline-block; min-width: 5.5em; font-weight: 700; }
 .match-log .ml-4r, .result h2.four-riichi small { color: #8a3b12; }
+.match-log .ml-riichi, .match-log .ml-pot, .match-log .ml-yame { margin-left: 6px; font-size: 11px; padding: 0 4px; border-radius: 4px; background: #efe8d6; color: #4a3b12; white-space: nowrap; }
+.match-log .ml-yame { background: #fde2c8; color: #7a2e00; }
+.deposit-line { margin: 4px 0; }
 .reveal { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 0; border-bottom: 1px solid #e5dfcd; }
 .reveal .who { font-size: 12px; width: 100%; }
 .reveal .tiles { display: inline-flex; gap: 1px; flex-wrap: wrap; }
@@ -1105,6 +1108,9 @@ table.values td.undef { color: #999; font-size: 12px; }
 .mj-table .bc-rule { padding: 0 .3em; border-radius: 3px; background: rgba(214, 178, 94, .25); color: var(--gold); font-size: .85em; white-space: nowrap; }
 .mj-table .bc-draws strong { color: #fff; font-size: 1.1em; }
 .mj-table .bc-draws.low strong { color: #ffb4a8; }
+/* 供託（リーチ宣言料・docs/65）。0点のときは控えめに */
+.mj-table .bc-pot strong { color: var(--gold); font-size: 1.1em; }
+.mj-table .bc-pot.zero { color: var(--ink-dim); }
 /* 暗カン：槓子（4枚）。鳴きではないので枠の色を変える */
 .meld.ankan { background: rgba(120, 190, 230, .28); box-shadow: 0 0 0 1px rgba(150, 205, 240, .7) inset; }
 .actions button.kan { background: #1f6f6a; color: #fff; border-color: #2b8a84; font-weight: 700; }
@@ -1126,6 +1132,8 @@ table.values td.undef { color: #999; font-size: 12px; }
 .self-info .si-label { color: var(--gold); font-weight: 700; }
 .self-info .si-wait { display: inline-flex; align-items: center; gap: 2px; }
 .self-info .si-wait small { font-size: 10px; color: var(--ink-dim); }
+.self-info .si-wait.no-yaku { opacity: .55; }
+.self-info .si-wait.no-yaku small { color: #ffb4a8; }
 .self-info .si-furiten { display: inline-flex; align-items: center; gap: 4px; color: #ffb4a8; white-space: nowrap; }
 .self-info .si-furiten b { color: #fff; background: #b42318; padding: 0 4px; border-radius: 3px; }
 .self-info .si-blocked { display: inline-flex; align-items: center; gap: 2px; color: #ffd27a; white-space: nowrap; }

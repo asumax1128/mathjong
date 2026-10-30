@@ -524,8 +524,9 @@ async function v02aFeatures(browser) {
   const yakuArea = await page.locator('.hint-yaku').innerText();
   assert.equal(await page.locator('.hint-yaku .tile').count(), 0, 'ヒントに牌を表示しない');
   assert.ok(!/[°√]|sin|cos|tan/.test(yakuArea), `ヒントに必要牌の情報がある: ${yakuArea}`);
-  // 既存のヒント（完成面子・あと1枚）は維持
-  assert.match(await page.locator('.hint-basic').innerText(), /完成している数式：\d+通り.*あと1枚で完成する組み合わせ：\d+通り/s); // Ver.0.3-B の表記
+  // 既存のヒント（完成面子）は維持。docs/65：「あと1枚で完成する組み合わせ」は削除（仕様の変更）
+  assert.match(await page.locator('.hint-basic').innerText(), /完成している数式：\d+通り/);
+  assert.doesNotMatch(await page.locator('.hint-basic').innerText(), /あと1枚で完成する組み合わせ/);
 
   // (2) 役ガイド：有効な役・特殊和了すべて、得点・鳴き可否は設定データと一致、数式例あり
   await page.locator('.hint-tools [data-action="guide"]').tap();
@@ -2558,7 +2559,9 @@ async function v03Rules(browser) {
     await page.locator('button[data-action="guide"]').first().tap();
     const ids = await page.locator('.gy').evaluateAll((els) => els.map((e) => e.dataset.yaku));
     for (const id of ['toitoi', 'sanankou', 'sinIsshoku', 'cosIsshoku', 'tanIsshoku', 'kyukaku']) assert.ok(ids.includes(id), `${mode} ${id}`);
-    assert.equal(ids.includes('shougen3'), mode === 'math2');
+    // docs/65：象限一色は両モード（統合）、三象限巡は数学Ⅱだけ
+    assert.ok(ids.includes('shougen') && !ids.includes('shougen3'));
+    assert.equal(ids.includes('sanshougen'), mode === 'math2');
     assert.equal(await page.locator('.gy[data-yaku="toitoi"] .formula.koutsu').count(), 3);
     assert.match(await page.locator('.gy[data-yaku="sanankou"]').innerText(), /ロンで最後の刻子を完成させた場合も成立/);
     // 監査 P3-1：条件文の角度表記はモードに合わせる（数学Ⅰ＝度数法、数学Ⅱ＝弧度法）
@@ -6449,7 +6452,7 @@ async function v07BeginnerRoom2(browser) {
     await tap('bp-continue');
     assert.equal(await count('button[data-action="bp-ron"]'), 1);
     await tap('bp-ron');
-    assert.match(await page.locator('.bp-result').innerText(), /第1象限一色/);
+    assert.match(await page.locator('.bp-result').innerText(), /象限一色/); // docs/65：役名の統合
     assert.match(await page.locator('.br-panel').innerText(), /ロン ＞ ポン ＞ チー/);
     assert.equal(await page.locator('button[data-action="br-next"]').innerText(), '第5段階へ進む');
     await tap('br-next');
@@ -7205,7 +7208,9 @@ async function v09FuritenWaits(browser) {
     await page.evaluate(() => window.__r2.until0({ 1: '30' }));
     let st = await r2State(page);
     assert.deepEqual([st.pending.seat, st.pending.type, st.pending.ron, st.ron], [0, 'claim', true, 1], '30° でロンできる');
-    assert.equal(st.info, null, 'フリテンでなければ表示しない（リーチ前は待ちも出さない）');
+    // docs/65：リーチ前でも聴牌なら待ちを表示する（以前は「リーチ前は待ちを出さない」。仕様の変更）。フリテンではない
+    assert.match(st.info, /^聴牌 待ち/);
+    assert.doesNotMatch(st.info, /フリテン/);
     await page.locator('button[data-action="pass"]').tap();
     await page.evaluate(() => { clearTimeout(window.__mathjong.S.timer); window.__mathjong.S.timer = null; });
     await page.evaluate(() => window.__r2.until0({ 2: '150' }));
@@ -8128,6 +8133,240 @@ async function v11Layout(browser) {
   console.log('✓ 1局戦・四家立直の画面：8画面でタイトルの3択（44px以上・文字切れなし・重ならない）、四家立直の結果・最終結果（各局の結果）が収まりボタンを押せる');
 }
 
+// ---- docs/65：リーチ宣言料（供託）・アガリやめ・ヒント・役名・リーチ前の待ち ----
+const depState = (page) => page.evaluate(() => {
+  const { S } = window.__mathjong, m = S.match;
+  const tag = (s) => { const e = document.querySelector(`.seat-tag.seat-${s} .score`); return e ? Number(e.textContent.replace(/[^\d-]/g, '')) : null; };
+  const pot = document.querySelector('.board-center .bc-pot');
+  return { scores: m.scores.slice(), pot: (m.pot || []).reduce((a, e) => a + e.points, 0), tags: [0, 1, 2, 3].map(tag), potText: pot ? pot.innerText.replace(/\s+/g, ' ') : null,
+    over: m.over, endReason: m.endReason, hand: m.hand, renchan: m.renchan, log: m.log.map((e) => ({ riichi: e.riichi, potWon: e.potWon, potAfter: e.potAfter, refunded: e.refunded, potReturned: e.potReturned || null, agariYame: !!e.agariYame })) };
+});
+
+async function v12Deposit(browser) {
+  for (const mode of ['math1', 'math2']) {
+    // (1) 4局戦：人と AI 2人がリーチ → 局の途中は名札の持ち点が −5・卓の中央に供託15 → 流局で持ち越し → 次の局の和了者が獲得
+    const { ctx, page, errors } = await v3Page(browser, mode, { query: '&round=1&dealer=0&hand=0&renchan=0&len=4&newrules=2' });
+    await frScene(page, 0, [FR_X, FR_X, FR_X, '=1/√3']);
+    let st = await depState(page);
+    assert.equal(st.potText, '供託 0点', '供託0点も表示（現行ルール）');
+    await frRiichiUI(page);
+    // 席1・2 はリーチ、席3 はツモ切り（リーチしない）
+    await page.evaluate(() => {
+      const m = window.__mathjong, g = m.S.game; clearTimeout(m.S.timer); m.S.timer = null;
+      for (let i = 0; i < 10 && g.pending() && g.pending().seat !== 0; i++) { const p = g.pending(); if (p.type === 'claim') g.respond(p.seat, { type: 'pass' }); else g.discard(p.seat, g.drawn, { riichi: p.seat !== 3 && !g.riichi[p.seat] }); }
+      m.render(); clearTimeout(m.S.timer); m.S.timer = null;
+    });
+    st = await depState(page);
+    assert.deepEqual(st.tags, [95, 95, 95, 100], `${mode}：名札は宣言料を引いた持ち点`);
+    assert.equal(st.potText, '供託 15点');
+    assert.deepEqual(st.scores, [100, 100, 100, 100], '試合の状態は局の精算まで変えない');
+    await forceDraw(page);
+    await page.waitForSelector('.overlay .result');
+    let text = await frResultText(page);
+    assert.match(text, /リーチ宣言料：あなた・下家 [^・]+・対面 \S+ 各−5点（供託へ）/);
+    assert.match(text, /供託 15点は次の局へ持ち越し/);
+    st = await depState(page);
+    assert.deepEqual([st.scores, st.pot], [[95, 95, 95, 100], 15]);
+    assert.equal(st.scores.reduce((a, b) => a + b, 0) + st.pot, 400, '持ち点＋供託＝400');
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.hand .tile');
+    assert.equal((await depState(page)).potText, '供託 15点', '次の局に持ち越し');
+    // 東2局（親は下家）：自分がツモ和了 → 供託15点を獲得
+    await page.evaluate(([hands, x]) => {
+      const k = (v) => (v.startsWith('=') ? `v:${v.slice(1)}` : /^\d+$/.test(v) ? `a:${v}` : `f:${v}`);
+      const keys = []; const dealer = 1;
+      for (let r = 0; r < 8; r++) for (let j = 0; j < 4; j++) keys.push(k(hands[(dealer + j) % 4][r]));
+      const m = window.__mathjong; m.S.nextPresetWall = [...keys, ...[x, x, x, '=1'].map(k)]; m.startRound();
+      clearTimeout(m.S.timer); m.S.timer = null;
+      const g = m.S.game;
+      for (let i = 0; i < 20 && g.pending() && g.pending().seat !== 0; i++) { const p = g.pending(); if (p.type === 'claim') g.respond(p.seat, { type: 'pass' }); else g.discard(p.seat, g.drawn); }
+      m.step(true);
+    }, [[TSUMO_HAND, V3_O1, V3_O2, V3_O3], '=-1/√3']);
+    await page.waitForSelector('button[data-action="tsumo"]');
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.waitForSelector('.overlay .result');
+    text = await frResultText(page);
+    assert.match(text, /あなたが供託 15点を獲得/);
+    st = await depState(page);
+    assert.equal(st.pot, 0);
+    assert.equal(st.scores.reduce((a, b) => a + b, 0), 400);
+    assert.equal(st.log[1].potWon, 15);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+
+    // (2) 四家立直：その局の宣言料を返し、前の局からの持ち越しは残す（1局戦は終了時に元の宣言者へ返還）
+    {
+      const { ctx, page, errors } = await v3Page(browser, mode, { query: '&round=1&dealer=0&hand=0&renchan=0&len=1&newrules=2' });
+      await page.evaluate(() => { const { S } = window.__mathjong; S.match.pot = [{ seat: 2, label: '東1局', hand: 0, renchan: 0, played: -1, points: 5 }]; S.match.scores[2] -= 5; S.scores = S.match.scores; });
+      await frScene(page, 0, [FR_X, FR_X, FR_X, FR_X]);
+      await frRiichiUI(page);
+      await frAiUntilMe(page);
+      await page.waitForSelector('.overlay .result');
+      const text = await frResultText(page);
+      assert.match(text, /四家立直：この局の宣言料を返還（あなた \+5・下家 \S+ \+5・対面 \S+ \+5・上家 \S+ \+5）/);
+      assert.match(text, /試合終了：残った供託を宣言者へ返還（対面 \S+ \+5）/);
+      assert.match(text, /この局のリーチ宣言料は宣言者へ返します/);
+      const st = await depState(page);
+      assert.deepEqual([st.scores, st.pot, st.over], [[100, 100, 100, 100], 0, true]);
+      assert.deepEqual(st.log[0].refunded, [5, 5, 5, 5]);
+      assert.deepEqual(st.log[0].potReturned, [0, 0, 5, 0]);
+      await page.locator('button[data-action="next"]').tap();
+      await page.waitForSelector('.overlay .final');
+      assert.match(await page.locator('.overlay .final').innerText(), /リーチ宣言料 5点（供託）/);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  }
+  // (3) 過去の版（newrules=1）は宣言料なし：供託の表示なし・名札は持ち点そのまま
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { query: '&round=1&dealer=0&hand=0&renchan=0&len=4&newrules=1' });
+    await frScene(page, 0, [FR_X, FR_X, FR_X, FR_X]);
+    await frRiichiUI(page);
+    const st = await depState(page);
+    assert.deepEqual([st.potText, st.tags[0]], [null, 100]);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ リーチ宣言料（数学Ⅰ・Ⅱ）：名札は −5・卓の中央に供託、流局で持ち越し、次の和了者が獲得、四家立直は返還（持ち越しは残る）、試合終了時に宣言者へ返還、合計400、過去の版は宣言料なし');
+}
+
+async function v12AgariYame(browser) {
+  // 最終の親（自分）がツモ和了：単独1位ならアガリやめ（4局戦の東4局・8局戦の南4局）、2位以下・同点の1位なら連荘
+  const dealerTsumo = (page) => page.evaluate(([hands, x]) => {
+    const k = (v) => (v.startsWith('=') ? `v:${v.slice(1)}` : /^\d+$/.test(v) ? `a:${v}` : `f:${v}`);
+    const keys = [];
+    for (let r = 0; r < 8; r++) for (let j = 0; j < 4; j++) keys.push(k(hands[j][r]));
+    const m = window.__mathjong; m.S.nextPresetWall = [...keys, k('=1')]; m.startRound(); clearTimeout(m.S.timer); m.S.timer = null; m.step(true);
+  }, [[TSUMO_HAND, V3_O1, V3_O2, V3_O3]]);
+  for (const [mode, len, hand, label] of [['math1', 4, 3, '東4局'], ['math2', 8, 7, '南4局']]) {
+    for (const kind of ['top', 'second', 'tie']) {
+      const { ctx, page, errors } = await v3Page(browser, mode, { query: `&round=${hand + 1}&dealer=0&hand=${hand}&renchan=0&len=${len}&newrules=2` });
+      await dealerTsumo(page);
+      await page.waitForSelector('button[data-action="tsumo"]');
+      // 和了点 B（ドラの加点を含む。エンジンの _endWin と同じ数え方）
+      const B = await page.evaluate(() => {
+        const g = window.__mathjong.S.game, a = g.tsumoAnalysis(0);
+        return a.points + g.deadWall.indicators.reduce((n, d) => n + g.hands[0].filter((id) => g.typeOf(id) === d.type).length, 0);
+      });
+      // 和了前の持ち点（合計400）：親ツモは自分 +6B・子 各 −2B。second＝和了後も下家が上（2位）、tie＝和了後に下家と同点の1位
+      if (kind !== 'top') await page.evaluate(([kind, B]) => {
+        const { S } = window.__mathjong, extra = kind === 'second' ? 10 : 0;
+        S.match.scores = [100, 100 + 8 * B + extra, 100 - 4 * B - extra / 2, 100 - 4 * B - extra / 2]; S.scores = S.match.scores;
+      }, [kind, B]);
+      await page.locator('button[data-action="tsumo"]').tap();
+      await page.waitForSelector('.overlay .result');
+      const st = await depState(page);
+      const text = await frResultText(page);
+      assert.equal(st.scores.reduce((a, b) => a + b, 0), 400);
+      if (kind === 'top') {
+        assert.deepEqual([st.over, st.endReason, st.log.at(-1).agariYame], [true, 'agari-yame', true], `${len}局戦 ${kind}`);
+        assert.match(text, new RegExp(`${label}の親が和了し、精算後に単独1位なのでアガリやめ：試合終了です`));
+        assert.equal(await page.locator('button[data-action="next"]').innerText(), '最終結果へ');
+        await page.locator('button[data-action="next"]').tap();
+        await page.waitForSelector('.overlay .final');
+        const fin = await page.locator('.overlay .final').innerText();
+        assert.match(fin, /終了の理由：オーラスの親が和了して単独1位（アガリやめ）/);
+        assert.match(fin, /あなたは 1位/);
+        await page.evaluate(() => { document.querySelector('.match-log').open = true; });
+        assert.match(await page.locator('.match-log').innerText(), /アガリやめ/);
+      } else {
+        assert.deepEqual([st.over, st.renchan, st.log.at(-1).agariYame], [false, 1, false], `${len}局戦 ${kind}：連荘 ${JSON.stringify(st.scores)}`);
+        assert.match(text, /連荘[\s\S]*親が単独1位ではないため、アガリやめにならず続行/);
+        if (kind === 'tie') assert.equal(st.scores[0], Math.max(...st.scores));
+      }
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  }
+  // 過去の版（newrules なし）はアガリやめなし：単独1位でも連荘（従来どおり）
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { query: '&round=4&dealer=0&hand=3&renchan=0&len=4' });
+    await dealerTsumo(page);
+    await page.waitForSelector('button[data-action="tsumo"]');
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.waitForSelector('.overlay .result');
+    const st = await depState(page);
+    assert.deepEqual([st.over, st.renchan], [false, 1]);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ アガリやめ：4局戦の東4局（数学Ⅰ）・8局戦の南4局（数学Ⅱ）で親が単独1位なら終了、2位・同点の1位は連荘、最終結果・履歴の表示、過去の版は従来どおり');
+}
+
+async function v12WaitsAndYaku(browser) {
+  for (const mode of ['math1', 'math2']) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + `?mode=${mode}&seed=7&speed=slow&newrules=2`);
+    await page.locator('.hand .tile').first().waitFor();
+    await r2Scene(page, TENPAI2);
+    // (1) 自分の番：未選択は待ちなし → 捨てる候補（ツモ牌 −√3）を選ぶと「捨てると待ち 30°・150°」→ 聴牌にならない牌を選ぶと消える
+    let st = await r2State(page);
+    assert.equal(st.info, null);
+    await page.locator('.hand .tile.drawn').tap();
+    st = await r2State(page);
+    assert.match(st.info, /^捨てると待ち/);
+    assert.equal(st.waits.length, 2);
+    const cosId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'f:cos'); });
+    await page.locator(`.hand .tile[data-id="${cosId}"]`).tap();
+    assert.equal((await r2State(page)).info, null, '聴牌にならない牌では表示しない');
+    // (2) 捨てた後（他家の番）：聴牌の待ちと見えていない残り枚数
+    await page.locator('.hand .tile.drawn').tap(); await page.locator('.hand .tile.drawn').tap();
+    await page.evaluate(() => { clearTimeout(window.__mathjong.S.timer); window.__mathjong.S.timer = null; window.__mathjong.render(); });
+    st = await r2State(page);
+    assert.match(st.info, /^聴牌 待ち/);
+    assert.deepEqual(st.waits.map((w) => w.left), await page.evaluate(() => {
+      const { S, rules } = window.__mathjong, g = S.game, v = g.viewFor(0);
+      return g.shapeWaits(0).map((t) => `残${4 - v.hand.filter((h) => h.type === t).length - v.rivers.flat().filter((x) => x === t).length - v.melds.flat().flatMap((m) => m.tiles).filter((x) => x === t).length - v.doraIndicators.filter((d) => d.type === t).length}`);
+    }), '残り枚数は公開情報だけ');
+    // (3) 役ガイド：新しい役名（三象限巡・象限一色・象限三角）、旧名はない
+    await page.locator('button[data-action="guide"]').first().tap();
+    const guide = await page.locator('.gy').evaluateAll((els) => els.map((e) => e.querySelector('.gy-head b').textContent));
+    assert.ok(guide.includes('象限一色') && guide.includes('象限三角'));
+    assert.equal(guide.includes('三象限巡'), mode === 'math2');
+    for (const old of ['三象限巡り', '象限三角揃い', '第1象限一色', '第2象限一色', '第3象限一色', '第4象限一色']) assert.ok(!guide.includes(old), old);
+    assert.match(await page.locator('.gy[data-yaku="shougen"]').innerText(), mode === 'math1' ? /第1象限（30°・45°・60°）／第2象限（120°・135°・150°）/ : /第4象限（5π\/3・7π\/4・11π\/6）/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ リーチ前の待ち（数学Ⅰ・Ⅱ）：捨てる候補を選ぶとその後の待ち・聴牌の待ちと残り枚数（公開情報）・役ガイドの新しい役名（三象限巡・象限一色・象限三角）');
+}
+
+// 8画面：卓の中央の供託・手牌の上の待ち（リーチ前）が収まり、ほかの表示と重ならない
+async function v12Layout(browser) {
+  for (const [width, height] of V09_SIZES) {
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    const label = `${width}x${height}`;
+    await page.goto(LOCAL + '?mode=math2&seed=7&speed=slow&newrules=2');
+    await page.locator('.hand .tile').first().waitFor();
+    await r2Scene(page, TENPAI2);
+    await page.evaluate(() => {
+      const m = window.__mathjong; m.S.match.pot = [{ seat: 1, label: '東1局', hand: 0, renchan: 0, played: -1, points: 5 }]; m.S.match.scores[1] -= 5;
+      m.S.game.discard(0, m.S.game.drawn); m.render(); clearTimeout(m.S.timer); m.S.timer = null; // 他家の番（8枚・聴牌）で止める
+    });
+    const d = await page.evaluate(() => {
+      const b = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height }; };
+      const q = (s) => document.querySelector(s);
+      const bc = q('.board-center');
+      return { center: b(bc), items: [...bc.children].map((e) => ({ cls: e.className, ...b(e) })), pot: q('.bc-pot').innerText.replace(/\s+/g, ' '),
+        info: b(q('.self-info')), infoText: q('.self-info').innerText, hand: b(q('.self .hand')), self: b(q('.table .self')), bar: b(q('footer.bar')),
+        overflow: document.documentElement.scrollWidth - innerWidth, infoOverflow: q('.self-info').scrollWidth - q('.self-info').clientWidth };
+    });
+    const ov = (a, c) => Math.min(a.r, c.r) - Math.max(a.l, c.l) > 0.75 && Math.min(a.b, c.b) - Math.max(a.t, c.t) > 0.75;
+    assert.equal(d.pot, '供託 5点');
+    for (const it of d.items.filter((x) => x.w > 0)) assert.ok(it.t >= d.center.t - 0.5 && it.b <= d.center.b + 0.5 && it.l >= d.center.l - 0.5 && it.r <= d.center.r + 0.5, `卓の中央に収まる ${it.cls} ${label} ${JSON.stringify([it, d.center])}`);
+    assert.match(d.infoText, /聴牌 待ち/);
+    assert.ok(d.info.t >= d.self.t - 0.5 && d.info.b <= d.hand.t + 1, '待ちは手牌の上 ' + label);
+    assert.ok(!ov(d.info, d.bar), '操作バーと重ならない ' + label);
+    assert.ok(d.overflow <= 1 && d.infoOverflow <= 1, '横にはみ出さない ' + label);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v12-layout-${label}.png` });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 供託・リーチ前の待ちの画面：8画面で卓の中央に収まり、待ちは手牌の上・操作バーと重ならない・横スクロールなし');
+}
+
 async function chooseAndStartFromSelect(page, ids) {
   const cur = await page.locator('.opp-card.selected').evaluateAll((es) => es.map((e) => e.dataset.id));
   for (const id of cur) if (!ids.includes(id)) await page.locator(`.opp-check[data-id="${id}"]`).click();
@@ -8153,7 +8392,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -8220,6 +8459,10 @@ try {
   await v11OneRoundEnd(browser);
   await v11FourRiichi(browser);
   await v11Layout(browser);
+  await v12Deposit(browser);
+  await v12AgariYame(browser);
+  await v12WaitsAndYaku(browser);
+  await v12Layout(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
