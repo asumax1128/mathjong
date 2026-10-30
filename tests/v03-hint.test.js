@@ -88,13 +88,14 @@ test('ヒント：同程度の近さなら数式系を優先、明らかに近�
   assert.equal(yakuCandidates(r, v4)[0].missing, 0);
 });
 
-test('ヒント：数学Ⅰでは 180°を超える角度を使う役（第3・4象限・三象限巡り）を出さない', () => {
+// docs/65：役名の変更（三象限巡り→三象限巡）・象限一色の統合（数学Ⅰでは第1・第2象限の例だけ）
+test('ヒント：数学Ⅰでは 180°を超える角度を使う役（三象限巡）・例を出さない', () => {
   const r = M1;
   for (let seed = 1; seed <= 15; seed++) {
     const g = new Game({ rules: r, seed, players: [0, 1, 2, 3].map(() => ({ kind: 'ai', personality: 'speed' })) });
     for (let s = 0; s < 4; s++) {
       const cs = yakuCandidates(r, g.viewFor(s), { limit: 99 });
-      for (const c of cs) assert.ok(!['shougen3', 'shougen4', 'sanshougen'].includes(c.id), c.name);
+      for (const c of cs) assert.ok(c.id !== 'sanshougen', c.name);
       for (const c of cs) if (c.example) for (const mi of c.example) {
         const m = r.melds[mi];
         if (m.kind === 'formula') assert.ok(m.deg <= 180);

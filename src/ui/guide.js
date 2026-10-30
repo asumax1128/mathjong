@@ -20,8 +20,13 @@ export function guideCondition(text, { unit = 'deg', degs = [] } = {}) {
   return text
     .replace(/\{a:(\d+)\}/g, (_, d) => angleLabel(Number(d), unit))
     .replace(/\{list:([\d,]+)\}/g, (_, l) => l.split(',').map((d) => angleLabel(Number(d), unit)).join('・'))
-    .replace(/\{tanUndefined\}/g, () => degs.filter((d) => d % 180 === 90).map((d) => angleLabel(d, unit)).join('・'));
+    .replace(/\{tanUndefined\}/g, () => degs.filter((d) => d % 180 === 90).map((d) => angleLabel(d, unit)).join('・'))
+    .replace(/\{axes\}/g, () => (degs.length ? degs : [0, 90, 180, 270, 360]).filter((d) => d % 90 === 0).map((d) => angleLabel(d, unit)).join('・'))
+    // {quadrants}：そのモードにある象限と角度（数学Ⅰは第1・第2象限、数学Ⅱは第1〜第4象限）
+    .replace(/\{quadrants\}/g, () => Object.entries(QUADRANTS).filter(([, q]) => q.every((d) => !degs.length || degs.includes(d)))
+      .map(([n, q]) => `第${n}象限（${q.map((d) => angleLabel(d, unit)).join('・')}）`).join('／'));
 }
+const QUADRANTS = { 1: [30, 45, 60], 2: [120, 135, 150], 3: [210, 225, 240], 4: [300, 315, 330] };
 
 export const YAKU_GUIDE = {
   sankan: {
@@ -40,24 +45,12 @@ export const YAKU_GUIDE = {
     condition: '3組の角度が、それぞれ異なる3つの象限にある（{list:0,90,180,270,360} を含まない）。',
     example: ['sin30=1/2', 'cos135=-1/√2', 'tan240=√3'],
   },
-  shougen1: {
-    condition: '3組の角度がすべて第1象限（{list:30,45,60}）。同じ角度を重ねてもよい。',
+  shougen: {
+    condition: '3組の角度がすべて同じ1つの象限にある：{quadrants}。どの象限でも同じ点数。同じ角度を重ねてもよい。軸上の角度（{axes}）を含むと不可。',
     example: ['sin30=1/2', 'cos30=√3/2', 'sin60=√3/2'],
   },
-  shougen2: {
-    condition: '3組の角度がすべて第2象限（{list:120,135,150}）。同じ角度を重ねてもよい。',
-    example: ['sin120=√3/2', 'cos120=-1/2', 'sin150=1/2'],
-  },
-  shougen3: {
-    condition: '3組の角度がすべて第3象限（{list:210,225,240}）。同じ角度を重ねてもよい。',
-    example: ['sin210=-1/2', 'cos210=-√3/2', 'tan225=1'],
-  },
-  shougen4: {
-    condition: '3組の角度がすべて第4象限（{list:300,315,330}）。同じ角度を重ねてもよい。',
-    example: ['sin300=-√3/2', 'cos300=1/2', 'cos330=√3/2'],
-  },
   shougenSankaku: {
-    condition: '1つの象限の3つの角度を1回ずつ使う（例：{list:30,45,60}）。その象限の象限一色も同時に成立。',
+    condition: '1つの象限の3つの角度を1回ずつ使う（例：{list:30,45,60}）。象限一色も同時に成立。',
     example: ['sin30=1/2', 'cos45=1/√2', 'tan60=√3'],
   },
   douchi: {

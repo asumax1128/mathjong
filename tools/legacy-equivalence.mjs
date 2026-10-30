@@ -15,6 +15,10 @@ const { decide, applyAction } = await import(ROOT + '/src/engine/ai.js');
 const { decideCharacter, CHARACTER_ROSTER, newPublicHistory } = await import(ROOT + '/src/engine/characters.js');
 const { createRng } = await import(ROOT + '/src/engine/rng.js');
 const ids = Object.values(CHARACTER_ROSTER).flat().map((c) => c.id);
+// docs/65：役の表記の変更（三象限巡り→三象限巡、第1〜第4象限一色→象限一色（統合・同じ3点）、象限三角揃い→象限三角）。
+// 進行（AI の行動・記録・点数・公開ビュー）の同一性を比べるため、結果の役の id・名前だけを新しい表記にそろえてから比べる（main 側にも同じ変換をかける）
+const YAKU_RENAME = { 三象限巡り: '三象限巡', 第1象限一色: '象限一色', 第2象限一色: '象限一色', 第3象限一色: '象限一色', 第4象限一色: '象限一色', 象限三角揃い: '象限三角' };
+const yakuName = (k, v) => (k === 'name' && YAKU_RENAME[v] ? YAKU_RENAME[v] : k === 'id' && /^shougen[1-4]$/.test(v) ? 'shougen' : v);
 const h = createHash('sha256');
 let games = 0, events = 0, ankanKeys = 0;
 for (const mode of ['math1', 'math2']) {
@@ -33,7 +37,7 @@ for (const mode of ['math1', 'math2']) {
       h.update(JSON.stringify(a));
       applyAction(g, p.seat, a);
     }
-    h.update(JSON.stringify(g.events)); h.update(JSON.stringify(g.result)); h.update(JSON.stringify(g.viewFor(0)));
+    h.update(JSON.stringify(g.events)); h.update(JSON.stringify(g.result, yakuName)); h.update(JSON.stringify(g.viewFor(0)));
     games++; events += g.events.length;
   }
 }

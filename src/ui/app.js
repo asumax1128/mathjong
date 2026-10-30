@@ -9,10 +9,11 @@ import { matchInfo } from '../engine/ai-levels.js';
 import { createRng } from '../engine/rng.js';
 import { trigExact } from '../engine/exact.js';
 import { tileHTML, formulaHTML, backHTML, valueHTML, angleHTML, angleText } from './render.js';
-import { yakuCandidates, warmUp, claimForSeat, unseenFromView } from '../engine/yakuhint.js';
+import { yakuCandidates, warmUp, claimForSeat } from '../engine/yakuhint.js';
+import { tenpaiWaitsView } from './waits-view.js';
 import { hintKey } from './hintstate.js';
 import { analyzeFormulas, initialSelection, assignColors, exposedSummary } from '../engine/formulahint.js';
-import { createMatch, applyRoundResult, dealerOf, handLabel, ranks, matchAt, START_POINTS } from '../engine/match.js';
+import { createMatch, applyRoundResult, dealerOf, handLabel, ranks, matchAt, START_POINTS, RIICHI_DEPOSIT, potTotal } from '../engine/match.js';
 import { reconcileOrder, defaultOrder } from './handorder.js';
 import { createHandDrag } from './handdrag.js';
 import { autoTsumogiriDue, autoTsumogiriTile } from './auto-tsumogiri.js';
@@ -314,7 +315,7 @@ function finishRound() {
     S.lastRound = { label: handLabel(S.match), renchan: S.match.renchan, dealer: S.dealer };
     // 通し局数が MAX_ROUND に達したら試合を終える（出力する round・renchan を再現 URL の範囲内に保つ。
     // 終了の理由は S.match.endReason に残る：'normal'＝通常終了、'round-limit'＝上限による打ち切り）
-    S.match = applyRoundResult(S.match, g.result, { round: S.round, maxRound: MAX_ROUND });
+    S.match = applyRoundResult(S.match, g.result, { round: S.round, maxRound: MAX_ROUND, riichi: g.riichi });
     S.scores = S.match.scores;
     S.history.push({ round: S.round, result: g.result.type === 'win' ? { ...g.result, analysis: undefined } : g.result });
   }
@@ -588,6 +589,12 @@ function riverHTML(seat, size) {
 }
 const riverRows = (seat) => layoutRiverRows(seat, S.game.rivers[seat].length);
 const boardShape = () => layoutBoardShape(S.game.rivers.map((r) => r.length));
+// リーチ宣言料（現行ルール・docs/65）：局の途中は、この局のリーチの宣言料を引いた持ち点と、供託（持ち越し＋この局の宣言料）を表示する。
+// 局の精算（finishRound）の後は試合の状態（S.match）そのもの
+const depositOf = () => (S.match && S.match.riichiDeposit) || 0;
+const roundDeposits = () => (S.scored || !S.game ? [] : [0, 1, 2, 3].filter((s) => S.game.riichi[s]));
+const liveScore = (seat) => S.scores[seat] - (roundDeposits().includes(seat) ? depositOf() : 0);
+const livePot = () => (S.match ? potTotal(S.match) : 0) + roundDeposits().length * depositOf();
 // 席の名札（卓中央の縁）：名前・点数・親・リーチ。自分は門前／鳴き。
 function seatTagHTML(seat) {
   const g = S.game;
@@ -596,8 +603,8 @@ function seatTagHTML(seat) {
   // 鳴き：鳴いた手は役が必要（自分は門前も示す）。リーチは点棒の形で示す（文字は読み上げ用）。
   const state = !g.isClosed(seat) ? '<span class="naki" title="鳴き（役が必要）">鳴</span>' : me ? '<span class="menzen">門前</span>' : '';
   const left = drawsLeft(seat);
-  return `<div class="seat-tag tag-${SEAT_AREA[seat]} seat-${seat}" title="${POS[seat]} ${name} ${S.scores[seat]}点${left === null ? '' : ` 残りツモ${left}回`}"${left === null ? '' : ` data-draws-left="${left}"`}>
-    <span class="pos">${me ? '自分' : POS[seat]}</span><span class="name">${name}</span><span class="score">${S.scores[seat]}<small>点</small></span>${g.dealer === seat ? '<span class="oya">親</span>' : ''}${g.riichi[seat] ? '<span class="riichi-badge" title="リーチ"><span class="sr">リーチ</span></span>' : ''}${state}
+  return `<div class="seat-tag tag-${SEAT_AREA[seat]} seat-${seat}" title="${POS[seat]} ${name} ${liveScore(seat)}点${left === null ? '' : ` 残りツモ${left}回`}"${left === null ? '' : ` data-draws-left="${left}"`}>
+    <span class="pos">${me ? '自分' : POS[seat]}</span><span class="name">${name}</span><span class="score">${liveScore(seat)}<small>点</small></span>${g.dealer === seat ? '<span class="oya">親</span>' : ''}${g.riichi[seat] ? '<span class="riichi-badge" title="リーチ"><span class="sr">リーチ</span></span>' : ''}${state}
   </div>`;
 }
 // 回転したまとまり：中身はその席の人から見た向きで作り、回転後の大きさの枠（rot-box）の中央で回転する
@@ -631,6 +638,7 @@ function boardHTML() {
       <b class="bc-round hand-label">${cur.label}</b>
       <span class="bc-state">${cur.renchan ? `連荘${cur.renchan}` : ''}</span>
       <span class="bc-wall">残り <strong>${g.wall.length}</strong>枚</span>
+      ${depositOf() ? `<span class="bc-pot${livePot() ? '' : ' zero'}" title="供託（リーチ宣言料。次に和了した人がすべて得る）">供託 <strong>${livePot()}</strong>点</span>` : ''}
       ${drawsLeft(HUMAN) === null ? '' : `<span class="bc-draws${drawsLeft(HUMAN) <= 3 ? ' low' : ''}" title="数学Ⅱ（新ルール）：自分の通常ツモはあと${drawsLeft(HUMAN)}回（各24回まで。鳴き・嶺上ツモは数えない）">ツモ残 <strong>${drawsLeft(HUMAN)}</strong>回</span>`}
     </div>
     ${doraHTML()}
@@ -702,14 +710,18 @@ function selfInfoHTML() {
   const g = S.game;
   if (!g.furitenRule) return '';
   const f = g.furitenOf(HUMAN);
-  const waits = g.riichiWaits[HUMAN];
+  const p = g.pending();
+  // 待ち（docs/65）：リーチ中は確定した待ち、リーチ前は聴牌なら待ち・自分の番は捨てる候補を選ぶとその牌を捨てた後の待ち。
+  // 公開情報（自分の view）とその席の riichiWaits だけで計算する（src/ui/waits-view.js）
+  const tw = tenpaiWaitsView(rules, g.viewFor(HUMAN), { selected: S.selected, riichiWaits: g.riichiWaits[HUMAN], myTurn: !!(p && p.seat === HUMAN && p.type === 'turn') });
   const blk = recentRonBlock();
-  if (!waits && !f.furiten && !blk) return '';
+  if (!tw && !f.furiten && !blk) return '';
   let html = '';
-  if (waits) {
+  if (tw) {
     // 残り：自分から見えていない枚数（公開情報と自分の手牌だけから計算。他家の手牌・山のどちらにあるかは分からない）
-    const unseen = unseenFromView(rules, g.viewFor(HUMAN));
-    html += `<span class="si-waits" aria-label="リーチの待ち"><span class="si-label">待ち</span>${waits.map((t) => `<span class="si-wait" title="${typeText(t)}：自分から見えていない残り${Math.max(0, unseen[t])}枚">${tileHTML(T(t), { size: 'xs' })}<small>残${Math.max(0, unseen[t])}</small></span>`).join('')}</span>`;
+    const label = { riichi: '待ち', tenpai: '聴牌 待ち', 'after-discard': '捨てると待ち' }[tw.kind];
+    const aria = { riichi: 'リーチの待ち', tenpai: '聴牌の待ち', 'after-discard': '選んだ牌を捨てた後の待ち' }[tw.kind];
+    html += `<span class="si-waits si-${tw.kind}" aria-label="${aria}"><span class="si-label">${label}</span>${tw.waits.map((w) => `<span class="si-wait${w.winnable ? '' : ' no-yaku'}" title="${typeText(w.type)}：自分から見えていない残り${w.unseen}枚${w.winnable ? '' : '（役がないので和了できません）'}">${tileHTML(T(w.type), { size: 'xs' })}<small>${w.winnable ? `残${w.unseen}` : '役なし'}</small></span>`).join('')}</span>`;
   }
   if (f.furiten || blk) {
     // フリテン：ロンできない（ツモ和了はできる）と短い理由。直前に和了の牌を見送らされたときは、その牌も示す
@@ -996,7 +1008,7 @@ function resultHTML() {
   } else if (r.reason === 'four-riichi') {
     // ruleset 2：四家立直（4人目の宣言牌に誰もロンしなかった）。山切れの流局とは別の表示
     head = '<h2 class="four-riichi">途中流局 <small>四家立直</small></h2>';
-    detail = '<p class="draw-reason four-riichi-reason">4人全員のリーチが成立したため、途中流局です（4人目の宣言牌でロンはありませんでした）。得点の移動はありません（リーチの宣言料もありません）。</p>' + doraResultHTML();
+    detail = '<p class="draw-reason four-riichi-reason">4人全員のリーチが成立したため、途中流局です（4人目の宣言牌でロンはありませんでした）。得点の移動はありません（' + (depositOf() ? 'この局のリーチ宣言料は宣言者へ返します。前の局からの供託は持ち越し' : 'リーチの宣言料もありません') + '）。</p>' + doraResultHTML();
   } else {
     head = '<h2>流局</h2>';
     // 新ルールの数学Ⅱは、山が残っていても次の通常ツモが25回目になる時点で流局する
@@ -1016,20 +1028,38 @@ function resultHTML() {
   const m = S.match;
   const dealerName = (s) => (s === HUMAN ? 'あなた' : `${POS[s]} ${PLAYERS[s].name}`);
   const nextLine = m.over && m.endReason === 'round-limit' ? `<p class="next-round over">${ROUND_LIMIT_NOTE}</p>`
+    : m.over && m.endReason === 'agari-yame' ? `<p class="next-round over agari-yame">${S.lastRound.label}の親が和了し、精算後に<b>単独1位</b>なので<b>アガリやめ</b>：試合終了です。</p>`
     : m.over && m.length === 1 ? '<p class="next-round over">1局戦はこの1局で終わりです（親の和了でも連荘しません）。<b>試合終了</b>です。</p>'
     : m.over ? `<p class="next-round over">${S.lastRound.label}の親番が終わりました。<b>試合終了</b>です。</p>`
     : m.renchan > 0 && r.type === 'win' && r.winner === S.lastRound.dealer
-      ? `<p class="next-round">親が和了したので<b>連荘</b>：次は${handLabel(m)}（連荘${m.renchan}回目）、親は${dealerName(dealerOf(m))}</p>`
+      ? `<p class="next-round">親が和了したので<b>連荘</b>：次は${handLabel(m)}（連荘${m.renchan}回目）、親は${dealerName(dealerOf(m))}${m.agariYame && m.hand === m.length - 1 && m.length > 1 ? '（親が単独1位ではないため、アガリやめにならず続行）' : ''}</p>`
       : `<p class="next-round"><b>親交代</b>：次は${handLabel(m)}、親は${dealerName(dealerOf(m))}</p>`;
   const payout = r.type === 'win' ? `<p class="note payout">精算：${r.how === 'ron' ? `${r.winner === S.lastRound.dealer ? '親' : '子'}のロン（放銃者が${r.winner === S.lastRound.dealer ? 6 : 4}×和了点を支払い）` : `${r.winner === S.lastRound.dealer ? '親のツモ（子3人が 2×和了点ずつ）' : '子のツモ（親 2×和了点、ほかの子 1×和了点）'}`}。和了点 ${r.points}点。</p>` : '';
   const hs = S.hintStats;
   const hints = S.hintsUsed ? `<p class="note hint-stats">この局のヒント：発見 ${hs.discover}回・確認 ${hs.confirm}回・値表 ${hs.table}回</p>` : '';
   return `<div class="result">${head}${detail}
-    <h3>${S.lastRound.label}${S.lastRound.renchan ? `（連荘${S.lastRound.renchan}）` : ''}の精算</h3>${payout}${scores}${nextLine}${hints}
+    <h3>${S.lastRound.label}${S.lastRound.renchan ? `（連荘${S.lastRound.renchan}）` : ''}の精算</h3>${payout}${depositLineHTML()}${scores}${nextLine}${hints}
     <details><summary>全員の手牌を見る</summary>${[0, 1, 2, 3].map(revealHTML).join('')}</details>
     ${reportInfoHTML()}
     <div class="modal-actions"><button data-action="next" class="primary">${m.over ? '最終結果へ' : '次の局へ'}</button>
     <button data-action="close-result">盤面を見る</button></div></div>`;
+}
+
+// 結果画面の供託（リーチ宣言料・docs/65）：この局の宣言料、和了者が得た供託、持ち越し、四家立直・試合終了の返還
+function depositLineHTML() {
+  const e = S.match.log[S.match.log.length - 1];
+  if (!e || !('potWon' in e)) return '';
+  const who = (s) => (s === HUMAN ? 'あなた' : `${POS[s]} ${PLAYERS[s].name}`);
+  const D = S.match.riichiDeposit;
+  const parts = [];
+  if (e.riichi.length) parts.push(`リーチ宣言料：${e.riichi.map(who).join('・')} 各−${D}点（供託へ）`);
+  if (e.potWon) parts.push(`${who(e.result.winner)}が供託 <b>${e.potWon}点</b>を獲得`);
+  const refund = e.refunded.map((x, s) => (x ? `${who(s)} +${x}` : '')).filter(Boolean);
+  if (refund.length) parts.push(`四家立直：この局の宣言料を返還（${refund.join('・')}）`);
+  if (!e.potWon && e.potAfter) parts.push(`供託 <b>${e.potAfter}点</b>は次の局へ持ち越し`);
+  const back = e.potReturned ? e.potReturned.map((x, s) => (x ? `${who(s)} +${x}` : '')).filter(Boolean) : [];
+  if (back.length) parts.push(`試合終了：残った供託を宣言者へ返還（${back.join('・')}）`);
+  return parts.length ? `<p class="note deposit-line">${parts.join('。')}。</p>` : '';
 }
 
 // 結果画面のドラ表示（新ルール）：公開されたドラ表示牌とドラ
@@ -1063,6 +1093,8 @@ function finalHTML() {
       <li class="final-rules">ルール：${RULESET_LABEL[S.matchSettings.ruleset]}</li>
       <li class="final-opps">対戦相手：${opponentsText()}</li>
       ${m.endReason === 'round-limit' ? `<li class="note round-limit-note">${ROUND_LIMIT_NOTE}</li>` : ''}
+      ${m.endReason === 'agari-yame' ? '<li class="agari-yame-note">終了の理由：オーラスの親が和了して単独1位（アガリやめ）</li>' : ''}
+      ${m.riichiDeposit ? `<li class="note">リーチ宣言料 ${m.riichiDeposit}点（供託）。次の和了者がすべて得る。試合終了時に残った供託は宣言者へ返還。</li>` : ''}
       <li class="note">開始時の持ち点は各${START_POINTS}点（合計${START_POINTS * 4}点）。同点は同順位。点数配分は試作段階の暫定値です。</li>
     </ul>
     ${matchLogHTML(m)}
@@ -1077,7 +1109,9 @@ function matchLogHTML(m) {
     const r = e.result;
     const what = r.type === 'draw' ? (r.reason === 'four-riichi' ? '<b class="ml-4r">途中流局（四家立直）</b>' : '流局')
       : `${who(r.winner)}の${r.how === 'ron' ? `ロン（${who(r.from)}から）` : 'ツモ'} ${r.points}点`;
-    return `<li data-kind="${r.type === 'draw' ? r.reason || 'draw' : 'win'}"><span class="ml-label">${e.label}${e.renchan ? `（連荘${e.renchan}）` : ''}</span>${what}</li>`;
+    // 供託（docs/65）：リーチの人数・和了者が得た供託・持ち越し。アガリやめ
+    const dep = 'potWon' in e ? `${e.riichi.length ? `<span class="ml-riichi">リーチ${e.riichi.length}人</span>` : ''}${e.potWon ? `<span class="ml-pot">供託+${e.potWon}</span>` : e.potAfter ? `<span class="ml-pot">供託${e.potAfter}持越</span>` : ''}` : '';
+    return `<li data-kind="${r.type === 'draw' ? r.reason || 'draw' : 'win'}"><span class="ml-label">${e.label}${e.renchan ? `（連荘${e.renchan}）` : ''}</span>${what}${dep}${e.agariYame ? '<span class="ml-yame">アガリやめ</span>' : ''}</li>`;
   }).join('');
   const fr = m.log.filter((e) => e.result.reason === 'four-riichi').length;
   // 1局戦は開いた状態。複数の局は閉じておき、見出しに四家立直の回数を出す
@@ -1263,7 +1297,7 @@ function rulesHTML() {
     <li><b>鳴いた手は役が必要</b>。数式系の役は3組すべてが数式面子のときだけ付きます（刻子を含む混合形には付きません）。刻子を公開した手で付く役は対々和・関数一色です。</li>
     <li><b>優先順位</b>：ロン ＞ ポン ＞ チー。複数のロンはアタマハネ、複数のポンは打牌者から手番順に近い人。ほかの人のロン判断が終わるまでポン・チーは確定しません。</li>
     <li><b>三暗刻</b>は門前の刻子3組。ロンで最後の刻子を完成させた場合も成立します（Ver.0.3 の暫定規則。通常の麻雀とは異なります）。</li>${common}
-    ${c.rules.riichi ? `<li><b>リーチ</b>：門前で、1枚捨てると聴牌（あと1枚で和了）になるとき、自分の番に「リーチ」を押して捨てる牌を選びます（聴牌になる牌だけ選べます）。リーチ後はツモ切りだけで、チー・ポンはできません。ロン・ツモはできます。リーチして和了すると基本点に<b>＋${c.rules.riichiBonus ?? 1}点</b>（役満には加算しません）。親子の精算の倍率は変わりません。リーチ棒・一発・裏ドラはありません。</li>` : ''}
+    ${c.rules.riichi ? `<li><b>リーチ</b>：門前で、1枚捨てると聴牌（あと1枚で和了）になるとき、自分の番に「リーチ」を押して捨てる牌を選びます（聴牌になる牌だけ選べます）。リーチ後はツモ切りだけで、チー・ポンはできません。ロン・ツモはできます。リーチして和了すると基本点に<b>＋${c.rules.riichiBonus ?? 1}点</b>（役満には加算しません）。親子の精算の倍率は変わりません。${depositOf() ? `リーチ宣言料${depositOf()}点（供託）は下の説明のとおり。` : 'リーチ棒（宣言料）はありません。'}一発・裏ドラはありません。</li>` : ''}
     <li><b>チー・ポンの自動パス</b>（対戦画面の手牌の下のボタン・初期値 OFF）：チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。切り替えは次の宣言から反映されます。</li>`
     : `
     <li><b>面子</b>：関数牌＋角度牌＋結果牌で正しい等式（例：sin 30° = 1/2）。</li>
@@ -1278,6 +1312,8 @@ function rulesHTML() {
     ${S.game.furitenRule ? `<li class="nr-rule"><b>フリテン</b>：次の場合はロンできません（ツモ和了はできます）。①待ちの牌のどれかを自分で捨てている（鳴かれて河から移った牌も含む）。②和了できる牌を見送った（自分の次のツモまで）。③リーチ後に和了できる牌を見送った（その局の終わりまで）。フリテンのときは手牌の上に理由を表示します。</li>
     <li class="nr-rule"><b>関数牌はポンできません</b>（sin・cos・tan）。角度牌・結果牌のポン、関数牌の暗カン・刻子での和了はできます。</li>
     <li class="nr-rule"><b>リーチの待ち</b>：リーチすると、待ちの牌と自分から見えていない残り枚数を手牌の上に表示します。</li>` : ''}
+    ${depositOf() ? `<li class="nr-rule"><b>リーチ宣言料</b>：リーチが成立すると持ち点から${depositOf()}点を供託に出します（宣言牌でロンされたときは不成立で出しません）。次に和了した人が供託をすべて得ます。流局では次の局へ持ち越し、四家立直ではその局の宣言料を返します。試合終了時に残った供託は宣言した人へ返します。</li>
+    <li class="nr-rule"><b>アガリやめ</b>：4局戦の東4局・8局戦の南4局で親が和了し、精算後に単独1位なら連荘せずに試合終了。2位以下・同点の1位なら連荘します（1局戦は1局で終了）。</li>` : ''}
     ${S.game.fourRiichiRule ? '<li class="nr-rule"><b>四家立直</b>：4人全員のリーチが成立すると途中流局です（4人目の宣言牌でロンがあればロンが優先）。得点の移動はなく、親は交代します。</li>' : ''}
     ${rules.config.mode === 'math2' ? `<li class="nr-rule"><b>数学Ⅱの通常ツモ</b>：各自${DRAW_CAP}回まで（親の最初のツモを含み、鳴き・嶺上ツモは数えません）。次の通常ツモが${DRAW_CAP + 1}回目になる時点で流局します。残り回数は卓の中央に表示します。</li>` : ''}` : '';
   return `<h2>ルール（暫定）</h2>
@@ -1382,17 +1418,11 @@ function refreshHintIfChanged() {
 function computeHint(view, claim) {
   const g = S.game;
   S.hintComputations = (S.hintComputations || 0) + 1;
-  const ids = g.hands[HUMAN];
-  const types = new Set(ids.map((id) => g.typeOf(id)));
-  const handCounts = rules.countsOf(ids.map((id) => g.typeOf(id)));
-  // あと1枚で完成する組合せ：数式面子は3種のうち2種が手にある、刻子は同じ牌が2枚ある
-  const partial = rules.melds.filter((m) => (m.kind === 'koutsu' ? handCounts[m.type] === 2 : m.tiles.filter((t) => types.has(t)).length === 2)).length;
   // 役候補（公開情報のみ。必要な牌の種類や捨て牌は表示しない）
   const cands = yakuCandidates(rules, view, { claim });
   const candHTML = cands.length
     ? `<ol class="yaku-cands">${cands.map((c) => `<li><b>${c.name}</b><span class="yc-pts">${c.yakuman ? '役満' : `+${c.yakuPoints}`}</span>${c.closedOnly ? '<span class="tag closed">門前限定</span>' : ''}<span class="yc-miss">${c.missing === 0 ? '完成！' : `あと${c.missing}枚`}</span></li>`).join('')}</ol>`
     : '<p class="yc-none">いま狙える役は見つかりません</p>';
-  S.hintPartial = partial;
   S.hintYakuHTML = `<div class="hint-yaku"><span class="hy-title">狙える役（近い順）</span>${candHTML}
       <p class="yc-note" title="「あと◯枚」は目標の完成形に不足する牌の枚数です。和了までのツモ回数や巡数ではありません。">※あと◯枚＝完成形に足りない牌の数（ツモ回数・巡数ではない）</p></div>
     <div class="hint-tools"><button data-action="table" class="small">値表を見る</button><button data-action="guide" class="small">役ガイド</button></div>`;
@@ -1418,7 +1448,7 @@ function buildHintText() {
   }
   let basic = `<div class="hint-basic">
       <div class="hb-row">${g.melds[HUMAN].length ? '手牌内の' : ''}完成している数式：<b>${n}通り</b></div>
-      <div class="hb-row">あと1枚で完成する組み合わせ：<b>${S.hintPartial}通り</b></div>${exLine}${doraLine}
+${exLine}${doraLine}
       ${n > 0 && S.hintStage === 1 ? '<button data-action="fh-confirm" class="small fh-confirm">数式を確認する</button>' : ''}
     </div>`;
   S.hintColors = null;
@@ -1804,7 +1834,7 @@ const drag = createHandDrag(app, {
 // goRound(n, dealer)：テスト用。通し第 n 局（山）を、親の席 dealer で始める（試合の状態もそれに合わせる）
 function goRound(n, dealer = (n - 1) % 4) {
   const hand = Math.max(0, Math.min(S.length - 1, n - 1));
-  S.match = matchAt({ length: S.match ? S.match.length : S.length, hand, startDealer: (((dealer - hand) % 4) + 4) % 4 });
+  S.match = matchAt({ length: S.match ? S.match.length : S.length, hand, startDealer: (((dealer - hand) % 4) + 4) % 4, ...matchRules(S.matchSettings ? S.matchSettings.ruleset : CURRENT_RULESET) });
   S.scores = S.match.scores;
   S.round = n;
   startRound();
@@ -1829,6 +1859,8 @@ function leaveGame(screen) {
   render();
 }
 
+// 試合の規則（docs/65）：現行ルール（ruleset 2）はリーチ宣言料5点（供託）とオーラスのアガリやめ。過去の版の再現は従来の精算
+const matchRules = (ruleset) => (ruleset >= 2 ? { riichiDeposit: RIICHI_DEPOSIT, agariYame: true } : {});
 // 試合を始める。fromUrl：?seed= の再現・テスト用 URL（親番・連荘・親の席を URL から）
 // settings：{ mode, length, chars, seats } 試合の設定（採用元は呼び出し側が決める：選択画面／同じ3人と再戦／設定画面／再現 URL）
 //   chars：選んだ3人のID。seats：席1〜3（下家・対面・上家）の順のID。seats がなければ chars を一様にランダムに並べる（6通り）。
@@ -1858,10 +1890,10 @@ function startMatch({ fromUrl = false, settings = null } = {}) {
     // 検証済みの値（src/ui/replay.js）。従来の ?round=n だけの URL は、親が (n−1) mod 4、親番が n−1（局数の範囲に丸め）。
     // 起家（東1局の親）は、指定された親の席と親番から逆算する（どの組み合わせも矛盾しない）。
     const { round: n, hand: h, dealer, renchan } = RV;
-    S.match = matchAt({ length: cfg.length, hand: h, renchan, startDealer: (((dealer - h) % 4) + 4) % 4 });
+    S.match = matchAt({ length: cfg.length, hand: h, renchan, startDealer: (((dealer - h) % 4) + 4) % 4, ...matchRules(ruleset) });
     S.round = n;
   } else {
-    S.match = createMatch({ length: cfg.length });
+    S.match = createMatch({ length: cfg.length, ...matchRules(ruleset) });
     S.round = 1;
   }
   S.scores = S.match.scores;

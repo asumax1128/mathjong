@@ -42,6 +42,10 @@ test('既存9人：実局面で委譲前後の行動と次のRNG値が一致', (
     }
   }
 });
+// docs/65：役名の変更（三象限巡り→三象限巡、第1〜第4象限一色→象限一色（統合・同じ3点）、象限三角揃い→象限三角）。
+// 実験データ（fixture）はそのまま残し、比べるときに旧表記を新表記へ読み替える（進行・点数は完全一致のまま比べる）
+const YAKU_RENAME={三象限巡り:'三象限巡',第1象限一色:'象限一色',第2象限一色:'象限一色',第3象限一色:'象限一色',第4象限一色:'象限一色',象限三角揃い:'象限三角'};
+const renameYaku=r=>JSON.parse(JSON.stringify(r),(k,v)=>k==='name'&&YAKU_RENAME[v]?YAKU_RENAME[v]:k==='id'&&/^shougen[1-4]$/.test(v)?'shougen':v);
 test('採用済み28試合：数学ⅠⅡ×4/8局、混合・同一キャラのイベント・精算・局数が実験データと完全一致', () => {
   const fixture=JSON.parse(gunzipSync(readFileSync(new URL('./fixtures/trio-adopted-matches.json.gz',import.meta.url))));
   assert.equal(fixture.matches.length,28);
@@ -57,7 +61,7 @@ test('採用済み28試合：数学ⅠⅡ×4/8局、混合・同一キャラの�
         if(id==='yujin')assert.ok(!['chi','pon'].includes(a.type));
         applyAction(g,p.seat,a);g.checkInvariants();assert.ok(++n<4000);
       }
-      assert.deepEqual(g.events,expected.events,row.sample);assert.deepEqual(g.result,expected.result,row.sample);
+      assert.deepEqual(g.events,expected.events,row.sample);assert.deepEqual(g.result,renameYaku(expected.result),row.sample);
       history=recordPublicRound(history,g.events,g.riichi);m=applyRoundResult(m,g.result);
       assert.deepEqual(m.scores,expected.scores);assert.equal(m.scores.reduce((a,b)=>a+b),400);
     }

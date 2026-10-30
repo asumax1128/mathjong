@@ -8,7 +8,7 @@ import { makeConfig } from '../src/engine/config.js';
 import { Game } from '../src/engine/game.js';
 import { applyAction } from '../src/engine/ai.js';
 import { decideCharacter, CHARACTER_ROSTER, newPublicHistory, recordPublicRound } from '../src/engine/characters.js';
-import { createMatch, applyRoundResult, dealerOf } from '../src/engine/match.js';
+import { createMatch, applyRoundResult, dealerOf, potTotal, RIICHI_DEPOSIT } from '../src/engine/match.js';
 import { matchInfo } from '../src/engine/ai-levels.js';
 import { createRng } from '../src/engine/rng.js';
 
@@ -22,14 +22,14 @@ const LENGTH = Number(opt('--length', 4));
 const rules = createRules(makeConfig({ mode: MODE }));
 const ids = Object.values(CHARACTER_ROSTER).flat().map((c) => c.id);
 const players = [0, 1, 2, 3].map((s) => ({ name: 'P' + s, kind: 'ai', personality: 'speed' }));
-const st = { matches: 0, rounds: 0, win: 0, ron: 0, tsumo: 0, drawWall: 0, drawCap: 0, drawFourRiichi: 0, allRiichiWin: 0, furitenBlocked: 0, ronOffered: 0, ronPassed: 0, riichi: 0,
+const st = { matches: 0, rounds: 0, win: 0, ron: 0, tsumo: 0, drawWall: 0, drawCap: 0, drawFourRiichi: 0, allRiichiWin: 0, deposits: 0, potWon: 0, potMax: 0, potReturned: 0, agariYame: 0, finalDealerRenchan: 0, furitenBlocked: 0, ronOffered: 0, ronPassed: 0, riichi: 0,
   pon: 0, funcPonOffered: 0, chi: 0, ankan: 0, doraBonus: 0, winsBy: {}, roundsBy: {}, maxDraws: 0 };
 const t0 = Date.now();
 for (let mi = 0; mi < MATCHES; mi++) {
   const seats = [0, 1, 2].map((k) => ids[(mi * 5 + k * 4 + (mi >> 2)) % 12]);
   if (new Set(seats).size < 3) seats[2] = ids[(ids.indexOf(seats[2]) + 1) % 12];
   const lineup = [ids[(mi * 7 + 3) % 12], ...seats].map((id, s, a) => (a.indexOf(id) !== s ? ids[(ids.indexOf(id) + 6) % 12] : id));
-  let match = createMatch({ length: LENGTH });
+  let match = createMatch({ length: LENGTH, ...(RULESET >= 2 ? { riichiDeposit: RIICHI_DEPOSIT, agariYame: true } : {}) }); // 現行ルール：リーチ宣言料・アガリやめ（docs/65）
   let history = newPublicHistory();
   const rng = createRng(SEED * 1000 + mi);
   for (let r = 1; !match.over && r <= 12; r++) {
@@ -67,8 +67,20 @@ for (let mi = 0; mi < MATCHES; mi++) {
     } else if (g.wall.length > 0) st.drawCap++; else st.drawWall++;
     for (const id of lineup) st.roundsBy[id] = (st.roundsBy[id] || 0) + 1;
     history = recordPublicRound(history, g.events, g.riichi);
-    match = applyRoundResult(match, g.result);
-    if (match.scores.reduce((a, b) => a + b, 0) !== 400) throw new Error('total points');
+    const before = match;
+    match = applyRoundResult(match, g.result, { riichi: g.riichi });
+    // 持ち点＋供託の合計は常に 400（終了時は供託 0）
+    if (match.scores.reduce((a, b) => a + b, 0) + potTotal(match) !== 400) throw new Error('total points');
+    if (match.over && potTotal(match)) throw new Error('pot left at end');
+    const e = match.log.at(-1);
+    if ('potWon' in e) {
+      st.deposits += e.riichi.length; st.potWon += e.potWon; st.potMax = Math.max(st.potMax, e.potBefore + e.riichi.length * RIICHI_DEPOSIT);
+      if (e.potReturned) st.potReturned += e.potReturned.reduce((a, b) => a + b, 0);
+    }
+    if (e.agariYame) {
+      st.agariYame++;
+      if (!match.scores.every((x, s) => s === e.dealer || match.scores[e.dealer] > x)) throw new Error('agari-yame without sole top');
+    } else if (RULESET >= 2 && LENGTH > 1 && before.hand === LENGTH - 1 && e.dealerKeeps) st.finalDealerRenchan++;
     if (LENGTH === 1 && !match.over) throw new Error('one-round match continued');
     st.rounds++;
   }
@@ -77,7 +89,7 @@ for (let mi = 0; mi < MATCHES; mi++) {
 const pct = (x) => `${((100 * x) / st.rounds).toFixed(1)}%`;
 console.log(JSON.stringify({
   mode: MODE, ruleset: RULESET, length: LENGTH, matches: st.matches, rounds: st.rounds, seconds: (Date.now() - t0) / 1000,
-  win: pct(st.win), ron: st.ron, tsumo: st.tsumo, drawWall: st.drawWall, drawCap: st.drawCap, drawFourRiichi: st.drawFourRiichi, allRiichiWin: st.allRiichiWin,
+  win: pct(st.win), ron: st.ron, tsumo: st.tsumo, drawWall: st.drawWall, drawCap: st.drawCap, drawFourRiichi: st.drawFourRiichi, allRiichiWin: st.allRiichiWin, deposits: st.deposits, potWon: st.potWon, potMax: st.potMax, potReturned: st.potReturned, agariYame: st.agariYame, finalDealerRenchan: st.finalDealerRenchan,
   ronOffered: st.ronOffered, ronPassed: st.ronPassed, furitenBlocked: st.furitenBlocked, riichi: st.riichi,
   pon: st.pon, funcPonOffered: st.funcPonOffered, chi: st.chi, ankan: st.ankan, avgDoraBonus: +(st.doraBonus / Math.max(1, st.win)).toFixed(2), maxNormalDraws: st.maxDraws,
   winRateBy: Object.fromEntries(ids.map((id) => [id, st.roundsBy[id] ? +(st.winsBy[id] || 0) / st.roundsBy[id] : null]).map(([k, v]) => [k, v === null ? null : +v.toFixed(3)])),

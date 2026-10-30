@@ -58,10 +58,11 @@ test('数学Ⅱ：弧度法・0〜2πの17角度・関数各16枚・計168枚・
   assert.equal(legacy.config.rules.pon, undefined);
 });
 
-test('数学Ⅰ：第3・第4象限を使う役は全組合せで成立しないため無効（ガイド・ヒントに出ない）', () => {
+// docs/65：第1〜第4象限一色を「象限一色」に統合（数学Ⅰでも第1・第2象限で成立する）。無効は三象限巡だけ（仕様の変更）
+test('数学Ⅰ：3つの象限を使う三象限巡は全組合せで成立しないため無効（ガイド・ヒントに出ない）', () => {
   const cfg = modeConfig('math1');
   const off = cfg.yaku.filter((y) => !y.enabled).map((y) => y.id).sort();
-  assert.deepEqual(off, ['sanshougen', 'shougen3', 'shougen4']);
+  assert.deepEqual(off, ['sanshougen']);
   // 無効化を外した設定で全組合せ（重複あり）を評価して、本当に成立しないことを確認
   for (const y of cfg.yaku) y.enabled = true;
   const r = createRules(cfg);
@@ -71,7 +72,7 @@ test('数学Ⅰ：第3・第4象限を使う役は全組合せで成立しない
     for (const y of r.evaluateMelds([F[a], F[b], F[c]], true).yaku) seen.add(y.id);
   }
   for (const id of off) assert.ok(!seen.has(id), `${id} は数学Ⅰで成立しない`);
-  assert.ok(seen.has('shougen1') && seen.has('shougen2') && seen.has('doukaku'));
+  assert.ok(seen.has('shougen') && seen.has('shougenSankaku') && seen.has('doukaku'));
 });
 
 // ---------------- 9枚の和了形 ----------------
