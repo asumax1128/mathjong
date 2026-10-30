@@ -27,21 +27,22 @@ const scenarios={
  },
 };
 function novice(g,p,rng){
- if(p.type==='claim')return p.ron?{type:'ron'}:{type:'pass'};
+ if(p.type==='claim') { if(p.ron)return {type:'ron'}; if(process.env.NOVICE_SMART==='1' && p.chi.length && rng.next()<.22 && g.melds[p.seat].length===0)return {type:'chi',option:rng.int(p.chi.length)}; return {type:'pass'}; }
  if(p.canTsumo)return {type:'tsumo'};
  if(g.riichi[p.seat])return {type:'discard',tile:g.drawn};
  const view=g.viewFor(p.seat);
- // Modeling novice: 25% fully random, 75% simple beginner tile-keep heuristic.
+ // Non-omniscient novice: uses public hand, optional simple riichi and occasional chi.
+ if(process.env.NOVICE_SMART==='1' && rng.next()<.85) {const opts=g.riichiOptions(p.seat);if(opts.length){const t=opts[rng.int(opts.length)];return {type:'discard',tile:t.ids[0],riichi:true};}}
  return {type:'discard',tile:rng.next()<.25?rng.pick(view.hand).id:beginnerDiscard(g.rules,view,rng)};
 }
-const all={definition:'proxy human with 75% generic beginnerDiscard and 25% fully random, no calls, wins always, never riichi (not observed novice skill)',N,seed0,conditions:{}};
+const all={definition:'proxy: 75% basic keep,25% random; smart variant 85% chance declare simple available riichi and 22% chance chi while no open melds. Always take available win. Not representative of real humans.',smart:process.env.NOVICE_SMART==='1',N,seed0,conditions:{}};
 for(const mode of modeList)for(const length of lengths){
  const rules=createRules(makeConfig({mode}));const key=mode+'_'+length;all.conditions[key]={};
  for(const [label,settings] of Object.entries(scenarios)){
- settings();const st={matches:0,rank:[0,0,0,0],top:0,last:0,score:0,oppScore:0,rounds:0,draws:0,noviceWins:0,oppWins:0,noviceDealins:0,errors:0,lossStreakMax:0};let streak=0;
+ settings();const st={opponents:{},matches:0,rank:[0,0,0,0],top:0,last:0,score:0,oppScore:0,rounds:0,draws:0,noviceWins:0,oppWins:0,noviceDealins:0,errors:0,lossStreakMax:0};let streak=0;
  for(let k=0;k<N;k++){
   let m=createMatch({length,startDealer:k%4}),history=newPublicHistory();
-  const ids=['kanata','mitsuki','aoto'];const shifted=[...ids.slice(k%3),...ids.slice(0,k%3)];
+  const pool=['kanata','mitsuki','aoto','yujin']; const ids=pool.filter((_,i)=>i!==k%4);const shifted=[...ids.slice(k%3),...ids.slice(0,k%3)];
   const roster=['proxy',...shifted];const ps=roster.map((id,i)=>({kind:'ai',name:id,personality:i===0?'speed':id==='mitsuki'?'value':id==='aoto'?'closed':'speed'}));
   let loops=0;
   while(!m.over){
@@ -62,7 +63,7 @@ for(const mode of modeList)for(const length of lengths){
     st.rounds++;
     if(++loops>24)throw Error('round cap');
   }
-  const ranks0=ranks(m.scores)[0];st.rank[ranks0-1]++;st.top+=(ranks0===1);st.last+=(ranks0===4);st.score+=m.scores[0];st.oppScore+=(400-m.scores[0])/3;st.matches++;
+  const ranks0=ranks(m.scores)[0];for(const id of shifted){const seat=roster.indexOf(id),rki=ranks(m.scores)[seat];const stId=st.opponents[id]||(st.opponents[id]={appearances:0,top:0,last:0,score:0});stId.appearances++;stId.top+=(rki===1);stId.last+=(rki===4);stId.score+=m.scores[seat];}st.rank[ranks0-1]++;st.top+=(ranks0===1);st.last+=(ranks0===4);st.score+=m.scores[0];st.oppScore+=(400-m.scores[0])/3;st.matches++;
   if(ranks0!==1)st.lossStreakMax=Math.max(st.lossStreakMax,++streak);else streak=0;
  }
  all.conditions[key][label]={...st,topRate:st.top/st.matches,lastRate:st.last/st.matches,meanScore:st.score/st.matches,meanOppScore:st.oppScore/st.matches,meanRank:st.rank.reduce((s,n,i)=>s+n*(i+1),0)/st.matches};
