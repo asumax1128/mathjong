@@ -3318,7 +3318,8 @@ async function v04bLevels(browser) {
     // 再現情報に ID（席の順）が入る
     await page.locator('button[data-action="settings"]').tap();
     const seats2 = sc.map((x) => x.id);
-    assert.match(await page.locator('.report-info code').innerText(), new RegExp(`&chars=${seats2.join(',')}$`));
+    // docs/62：新しく出力する再現 URL は末尾にルールの版（newrules=2）を付ける（席の順の chars はその前）
+    assert.match(await page.locator('.report-info code').innerText(), new RegExp(`&chars=${seats2.join(',')}&newrules=2$`));
     assert.match(await page.locator('.report-info').innerText(), new RegExp(`ID ${seats2.join(',')}`));
     assert.deepEqual(errors, []);
     await ctx.close();
@@ -7317,7 +7318,7 @@ async function v09RulesUnified(browser) {
     await page.locator('.hand .tile').first().waitFor();
     assert.deepEqual(await page.evaluate(() => [window.__mathjong.S.game.ruleset, window.__mathjong.rules.config.mode]), [2, mode], '通常の対局は現行の新ルール');
     assert.equal(await page.locator('.dora-box').count(), 1);
-    assert.equal(await page.locator('.bc-new').count(), 0, '現行の新ルールに再現の印はない');
+    assert.equal(await page.locator('.bc-rule').count(), 0, '現行の新ルールに再現の印はない');
     await page.locator('button[data-action="settings"]').tap();
     assert.equal(await page.locator('[data-action="ruleset"], .rule-select').count(), 0, '設定にルールの選択はない');
     assert.match(await page.locator('.report-info').innerText(), /新ルール[\s\S]*newrules=2/, '再現URLは newrules=2');
@@ -7341,7 +7342,8 @@ async function v09RulesUnified(browser) {
     await page.locator('.hand .tile').first().waitFor();
     assert.equal(await page.evaluate(() => window.__mathjong.S.game.ruleset), ruleset, `newrules${extra}`);
     assert.equal(await page.locator('.dora-box').count(), ruleset ? 1 : 0);
-    if (note) assert.equal(await page.locator('.bc-new').innerText(), note); else assert.equal(await page.locator('.bc-new').count(), 0);
+    if (note) assert.equal(await page.locator('.bc-rule').innerText(), note); else assert.equal(await page.locator('.bc-rule').count(), 0);
+    assert.equal(await page.locator('.bc-mode').innerText(), '数学Ⅱ', 'モードの表示は変えない');
     await page.locator('button[data-action="settings"]').tap();
     const info = await page.locator('.report-info').innerText();
     assert.ok(ruleset ? info.includes(`newrules=${ruleset}`) : !info.includes('newrules'), '出力する再現URLは元の版のまま');

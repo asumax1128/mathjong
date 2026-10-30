@@ -1090,7 +1090,7 @@ table.values td.undef { color: #999; font-size: 12px; }
 .dora-box .dr-dora .tile { box-shadow: 0 0 0 1px var(--gold) inset; }
 .dora-box .tile.dora-new { outline: 2px solid var(--accent); outline-offset: -1px; z-index: 1; }
 /* 卓の中央：新ルールの印と、数学Ⅱの自分の残り通常ツモ回数 */
-.mj-table .bc-new { margin-left: .3em; padding: 0 .3em; border-radius: 3px; background: var(--gold); color: #2a2208; font-weight: 700; font-size: .92em; }
+.mj-table .bc-rule { padding: 0 .3em; border-radius: 3px; background: rgba(214, 178, 94, .25); color: var(--gold); font-size: .85em; white-space: nowrap; }
 .mj-table .bc-draws strong { color: #fff; font-size: 1.1em; }
 .mj-table .bc-draws.low strong { color: #ffb4a8; }
 /* 暗カン：槓子（4枚）。鳴きではないので枠の色を変える */

@@ -589,7 +589,7 @@ function boardHTML() {
   return `<div class="board-wrap"><div class="mj-table" style="--tv-rows:${sh.top};--bv-rows:${sh.bottom};--lv:${sh.side}" aria-label="対局卓">
     <div class="mj-center" aria-hidden="true"></div>
     <div class="board-center" aria-label="現在の局情報">
-      <span class="bc-mode">${modeLabel(rules)}${RULESET_NOTE[g.ruleset] ? `<span class="bc-new" title="過去の再現 URL の局">${RULESET_NOTE[g.ruleset]}</span>` : ''}</span>
+      <span class="bc-mode">${modeLabel(rules)}</span>${RULESET_NOTE[g.ruleset] ? `<span class="bc-rule" title="過去の再現 URL の局（その時のルールで再生）">${RULESET_NOTE[g.ruleset]}</span>` : ''}
       <b class="bc-round hand-label">${cur.label}</b>
       <span class="bc-state">${cur.renchan ? `連荘${cur.renchan}` : ''}</span>
       <span class="bc-wall">残り <strong>${g.wall.length}</strong>枚</span>
