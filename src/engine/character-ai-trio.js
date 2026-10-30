@@ -1,5 +1,5 @@
 // 追加3人の採用済みAI。docs/38・39の初期版を移植。既存9人の係数には触れない。
-import { decide, chooseCall, handValue, viewCounts, unseenCounts, riichiDecision } from './ai.js';
+import { decide, chooseCall, handValue, viewCounts, unseenCounts, riichiDecision, ankanDecision } from './ai.js';
 import { advHandValue, dangerTable, WIN_COEF } from './ai-levels.js';
 import { dangerTableV06 } from './character-ai.js';
 
@@ -101,6 +101,9 @@ export function decideTrioCharacter(game, seat, id, rng, info = null) {
   if (!TRIO_PARAMS[id]) throw new Error('unknown trio character: ' + id);
   const p = game.pending();
   if (!p || p.seat !== seat) throw new Error('invalid pending');
+  // 新ルールの暗カン：共通の基準戦略（公開ビューだけを使う。旧ルールでは常に null）
+  const kan = ankanDecision(game, seat);
+  if (kan) return kan;
   if (p.type === 'turn' && p.canTsumo) return { type: 'tsumo' };
   if (p.type === 'claim' && p.ron) return { type: 'ron' };
   if (game.riichi[seat]) return p.type === 'turn' ? { type: 'discard', tile: game.drawn } : { type: 'pass' };

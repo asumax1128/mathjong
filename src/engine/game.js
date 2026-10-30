@@ -1,14 +1,16 @@
 // 1局の進行（配牌・ツモ・打牌・チー・ロン・ツモ和了・流局）を管理する状態機械。
 // UI と AI はこのクラスの公開メソッドだけを使う。AI には viewFor() の公開情報だけを渡す。
 import { createRng, shuffle } from './rng.js';
+import { createDeadWall } from './dead-wall.js';
 
 export const SEAT_COUNT = 4;
 const next = (s, k = 1) => (s + k) % SEAT_COUNT;
 
 export class Game {
   // players: [{ name, kind: 'human' | 'ai', personality }]
-  constructor({ rules, seed = 1, dealer = 0, players, round = 1, presetWall = null }) {
+  constructor({ rules, seed = 1, dealer = 0, players, round = 1, presetWall = null, newRules = false }) {
     this.rules = rules;
+    this.newRules = !!newRules;
     this.seed = seed;
     this.dealer = dealer;
     this.round = round;
@@ -37,7 +39,9 @@ export class Game {
     this.current = dealer;
     this.phase = 'turn';
     this.claim = null;
+    this.normalDraws = [0, 0, 0, 0];
     this._draw(dealer);
+    this.deadWall = this.newRules ? createDeadWall(this.wall, this.tileType, this.rules.types) : null;
   }
 
   _wallFromPreset(keys) {
@@ -61,11 +65,34 @@ export class Game {
   log(e) { this.events.push(e); }
   countsOf(ids) { return this.rules.countsOf(ids.map((id) => this.tileType[id])); }
   exposedMelds(seat) { return this.melds[seat].map((m) => m.meld); }
-  isClosed(seat) { return this.melds[seat].length === 0; }
+  isClosed(seat) { return this.melds[seat].every(m=>m.call==='ankan'); }
+  get doraIndicators() { return this.deadWall ? this.deadWall.indicators.map(x=>({...x})) : []; }
+  ankanOptions(seat) {
+    if (!this.newRules || this.phase!=='turn' || this.current!==seat || !this.justDrew || this.riichi[seat] || !this.deadWall.rinshan.length || !this.wall.length || this.deadWall.indicators.length>=5 || this.melds[seat].length>=3) return [];
+    const count=new Map();
+    for(const id of this.hands[seat]) { const t=this.typeOf(id); count.set(t,[...(count.get(t)||[]),id]); }
+    return [...count.entries()].filter(([t,ids])=>ids.length>=4 && this.rules.koutsuOf(t)).map(([type,ids])=>({type,ids:ids.slice(0,4)}));
+  }
+  ankan(seat,type) {
+    this._expect(seat,'turn');
+    const o=this.ankanOptions(seat).find(o=>o.type===type);
+    if(!o)throw new Error('ankan not possible');
+    for(const id of o.ids)this.hands[seat].splice(this.hands[seat].indexOf(id),1);
+    this.melds[seat].push({meld:this.rules.koutsuOf(type).idx,kind:'koutsu',call:'ankan',tiles:o.ids,claimed:null,from:null});
+    const replacement=this.deadWall.replacement();
+    this.hands[seat].push(replacement);
+    this.drawn=replacement;this.justDrew=true;this.turnCount++;
+    this.deadWall.reveal();
+    this._riichiMemo=null;
+    this.log({type:'ankan',seat,tiles:o.ids.slice()});
+    this.log({type:'rinshan',seat});
+    this.log({type:'dora',seat,indicator:this.deadWall.indicators.at(-1).id});
+  }
 
   _draw(seat) {
-    if (!this.wall.length) return this._endDraw();
+    if (!this.wall.length || (this.newRules && this.rules.config.mode==='math2' && this.normalDraws[seat]>=24)) return this._endDraw();
     const id = this.wall.pop();
+    if(this.normalDraws)this.normalDraws[seat]++;
     this.hands[seat].push(id);
     this.current = seat;
     this.phase = 'turn';
@@ -79,7 +106,10 @@ export class Game {
   pending() {
     if (this.phase === 'ended') return null;
     if (this.phase === 'turn') {
-      return { seat: this.current, type: 'turn', canTsumo: !!this.tsumoAnalysis(this.current) };
+      const p = { seat: this.current, type: 'turn', canTsumo: !!this.tsumoAnalysis(this.current) };
+      // 新ルールだけ：暗カンの選択肢。旧ルールの pending() は従来と同じ形（キーを増やさない）
+      if (this.newRules) p.ankan = this.ankanOptions(this.current);
+      return p;
     }
     const c = this.claim.queue[this.claim.pos];
     const o = this._claimOptions(c);
@@ -95,11 +125,11 @@ export class Game {
 
   tsumoAnalysis(seat) {
     if (this.phase !== 'turn' || seat !== this.current || !this.justDrew) return null;
-    return this.rules.analyzeWin(this.countsOf(this.hands[seat]), this.exposedMelds(seat));
+    return this.rules.analyzeWin(this.countsOf(this.hands[seat]), this.exposedMelds(seat), {closed:this.isClosed(seat)});
   }
 
   ronAnalysis(seat, tileId) {
-    return this.rules.analyzeWin(this.countsOf([...this.hands[seat], tileId]), this.exposedMelds(seat), { ron: true });
+    return this.rules.analyzeWin(this.countsOf([...this.hands[seat], tileId]), this.exposedMelds(seat), { ron: true,closed:this.isClosed(seat) });
   }
 
   get riichiEnabled() {
@@ -109,12 +139,12 @@ export class Game {
   // 手の内 counts（和了牌を除く8枚など）が聴牌か：和了できる牌の種類（待ち）の一覧。
   // 和了の判定は既存の analyzeWin（数式面子・刻子・特殊和了）をそのまま使う。
   // その種類の牌が手の内ですでに全部使われている待ち（物理的にあり得ない牌）は数えない。
-  waitsOf(counts, exposed = []) {
+  waitsOf(counts, exposed = [], closed = exposed.length === 0) {
     const out = [];
     for (let t = 0; t < counts.length; t++) {
       if (counts[t] >= this.rules.types[t].copies) continue;
       counts[t]++;
-      const ok = !!this.rules.analyzeWin(counts, exposed);
+      const ok = !!this.rules.analyzeWin(counts, exposed, {closed});
       counts[t]--;
       if (ok) out.push(t);
     }
@@ -125,7 +155,7 @@ export class Game {
   // 条件：リーチの規則が有効・自分の打牌番・門前（公開面子なし）・未リーチ。9枚から1枚捨てた8枚が聴牌になる種類だけ。
   // 同じ局面では結果を再利用する（pending() の多い UI・AI から何度も呼ばれるため）。
   riichiOptions(seat) {
-    if (!this.riichiEnabled || this.phase !== 'turn' || this.current !== seat || this.riichi[seat] || this.melds[seat].length) return [];
+    if (!this.riichiEnabled || this.phase !== 'turn' || this.current !== seat || this.riichi[seat] || !this.isClosed(seat)) return [];
     const key = `${seat}:${this.events.length}`;
     if (this._riichiMemo && this._riichiMemo.key === key) return this._riichiMemo.opts;
     const counts = this.countsOf(this.hands[seat]);
@@ -136,7 +166,7 @@ export class Game {
       if (seen.has(t)) continue;
       seen.add(t);
       counts[t]--;
-      const waits = this.waitsOf(counts);
+      const waits = this.waitsOf(counts, this.exposedMelds(seat), this.isClosed(seat));
       counts[t]++;
       if (waits.length) opts.push({ type: t, ids: this.hands[seat].filter((x) => this.tileType[x] === t), waits });
     }
@@ -303,6 +333,11 @@ export class Game {
     this.phase = 'ended';
     this.claim = null;
     analysis = this._withRiichi(seat, analysis);
+    if(this.deadWall && !analysis.yakuman) {
+      const winning=[...this.hands[seat],...this.melds[seat].flatMap(m=>m.tiles)];
+      const count=this.deadWall.indicators.reduce((n,d)=>n+winning.filter(id=>this.typeOf(id)===d.type).length,0);
+      analysis={...analysis,points:analysis.points+count,doraBonus:count};
+    }
     this.result = { type: 'win', winner: seat, how, from, tile: tileId, analysis, points: analysis.points };
     this.log({ type: 'win', seat, how, from });
   }
@@ -340,6 +375,11 @@ export class Game {
       wallCount: this.wall.length,
       dealer: this.dealer,
       riichi: this.riichi.map((r) => !!r), // リーチ宣言（公開情報）
+      // 新ルールだけ：公開されたドラ表示牌（王牌の他の牌・嶺上牌は渡さない）と各席の通常ツモ回数。旧ルールの view は従来と同じ形
+      ...(this.newRules ? {
+        doraIndicators: this.doraIndicators.map((d) => ({ type: this.typeOf(d.id), doraType: d.type })),
+        normalDraws: this.normalDraws.slice(),
+      } : {}),
     };
   }
 
@@ -348,6 +388,7 @@ export class Game {
     const seen = new Array(this.tileType.length).fill(0);
     const mark = (id) => { seen[id]++; };
     this.wall.forEach(mark);
+    if(this.deadWall)this.deadWall.allPhysical().forEach(mark);
     this.hands.forEach((h) => h.forEach(mark));
     this.rivers.forEach((r) => r.forEach((x) => mark(x.id)));
     this.melds.forEach((ms) => ms.forEach((m) => m.tiles.forEach(mark)));
@@ -362,7 +403,7 @@ export class Game {
       if (!ok) throw new Error(`seat ${s} has ${n} tiles (melds ${this.melds[s].length}, phase ${this.phase})`);
       for (const m of this.melds[s]) {
         const ts = m.tiles.map((id) => this.tileType[id]);
-        if (this.rules.meldOf(...ts)?.idx !== m.meld) throw new Error('invalid exposed meld');
+        if ((m.call==='ankan' ? (ts.length!==4 || ts.some(t=>t!==ts[0]) || this.rules.koutsuOf(ts[0])?.idx!==m.meld) : this.rules.meldOf(...ts)?.idx!==m.meld)) throw new Error('invalid exposed meld');
       }
     }
     return true;

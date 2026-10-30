@@ -1,0 +1,65 @@
+name: Dora ankan cap24 core validation (no deploy)
+on:
+  pull_request:
+    paths:
+      - 'src/engine/**'
+      - 'tests/dora-ankan.test.js'
+      - 'tests/new-rules-engine.test.js'
+      - 'tests/new-rules-ui.test.js'
+      - 'src/ui/**'
+      - 'tests/e2e/play.mjs'
+      - 'tools/legacy-equivalence.mjs'
+      - '.github/workflows/dora-ankan-core.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: main-ref
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check src/engine/dead-wall.js && node --check src/engine/game.js && node --check src/engine/rules.js && node --check src/engine/ai.js && node --check tools/legacy-equivalence.mjs
+      - name: Focused new-rules tests
+        run: node --test tests/dora-ankan.test.js tests/new-rules-engine.test.js tests/new-rules-ui.test.js tests/yakuhint.test.js tests/replay.test.js
+      - name: Legacy rules identical to main (AI actions, events, results, views)
+        run: |
+          a=$(node tools/legacy-equivalence.mjs main-ref)
+          b=$(node tools/legacy-equivalence.mjs .)
+          echo "main:   $a"
+          echo "branch: $b"
+          test "$a" = "$b"
+      - run: npm test
+  ui:
+    # 新ルール⑤の卓UI（ドラ表示・暗カン・嶺上・24回・ルール選択・8画面）と新ルールの通しプレイ。デプロイしない
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check src/ui/app.js && node --check src/ui/replay.js && node --check tests/e2e/play.mjs
+      - name: Install browser
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: New-rule table UI, rule selection, layouts (8 viewports), new-rule play (math I/II, 3 AI levels)
+        run: |
+          mkdir -p /tmp/new-rules-ui
+          node tests/e2e/play.mjs --only v08NewRulesTable,v08NewRulesSelect,v08NewRulesLayout,newRulesPlay --shots /tmp/new-rules-ui
+      - name: Ver.0.7 table regression (legacy rules)
+        run: node tests/e2e/play.mjs --only v07MahjongTable,v07TableHintDock
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: new-rules-ui-shots
+          path: /tmp/new-rules-ui
+          if-no-files-found: ignore

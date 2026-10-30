@@ -2,7 +2,7 @@
 // 配牌や山は操作しない。他家の手牌、未来ツモ、当たり牌の正解は参照しない。
 // 係数は暫定。tools/simulate-characters-all.mjsで比較・調整する。
 import {
-  decide, chooseCall, handValue, viewCounts, unseenCounts, riichiDecision,
+  decide, chooseCall, handValue, viewCounts, unseenCounts, riichiDecision, ankanDecision,
   valueAfterCall, minMissingAfterCall, combosFor, missFactor, aiPoints,
 } from './ai.js';
 import {
@@ -401,6 +401,9 @@ export function decideCharacter(game, seat, id, rng, info = null, seatIds = []) 
   if (!level) throw new Error('unknown character: ' + id);
   const p = game.pending();
   if (!p || p.seat !== seat) throw new Error('invalid character pending');
+  // 新ルールの暗カン：全員共通の基準戦略（乱数を使わない。旧ルールでは選択肢がなく常に null）。個性の係数は変更しない
+  const kan = ankanDecision(game, seat);
+  if (kan) return kan;
   const scores = info?.scores || null;
   if (level === 'beginner') {
     const result = decideBeginnerCharacter(game, seat, id, rng, { seatIds });

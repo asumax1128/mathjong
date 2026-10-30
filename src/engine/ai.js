@@ -117,6 +117,7 @@ export function unseenCounts(rules, view) {
   for (const h of view.hand) u[h.type]--;
   for (const r of view.rivers) for (const t of r) u[t]--;
   for (const ms of view.melds) for (const m of ms) for (const t of m.tiles) u[t]--;
+  if (view.doraIndicators) for(const d of view.doraIndicators) u[d.type]--;
   return u;
 }
 
@@ -301,6 +302,8 @@ export function decide(game, seat, personality, rng, level = 'intermediate', inf
   if (level !== 'beginner' && level !== 'intermediate' && level !== 'advanced') throw new Error(`unknown AI level ${level}`);
   // リーチ中（規則 riichi のとき）：ツモ和了できればツモ、できなければツモ切り（難易度によらない。鳴きはエンジンが出さない）
   const p = game.pending();
+  const kan = ankanDecision(game, seat);
+  if (kan) return kan;
   if (p && p.type === 'turn' && game.riichi && game.riichi[seat]) {
     if (p.canTsumo) return { type: 'tsumo' };
     return { type: 'discard', tile: game.drawn };
@@ -318,13 +321,20 @@ export function decide(game, seat, personality, rng, level = 'intermediate', inf
 //   中級・上級：待ちの牌が自分から見えていない分（＝山や他家の手にあり得る枚数）で1枚以上残っているときだけリーチ
 //              （残り0枚の待ちでツモ切りに縛られるのを避ける）。
 // 判断材料は自分の手牌と公開情報（unseenCounts）だけ。
+// 門前：公開面子がない、または暗カンだけ（新ルール）。公開情報（view.melds の call）だけで判定する。
+// 旧ルールでは暗カンがないので、従来の「公開面子なし」と同じ判定・同じ waitsOf の呼び出しになる。
+function closedByView(view, seat) {
+  return view.melds[seat].every((m) => m.call === 'ankan');
+}
 export function riichiDecision(game, seat, tileId, level) {
-  if (!game.riichiEnabled || game.riichi[seat] || game.melds[seat].length) return false;
+  if (!game.riichiEnabled || game.riichi[seat]) return false;
   const rules = game.rules;
   const view = game.viewFor(seat);
+  if (!closedByView(view, seat)) return false;
   const counts = viewCounts(rules, view);
   counts[game.typeOf(tileId)]--;
-  const waits = game.waitsOf(counts);
+  const kans = view.melds[seat].map((m) => m.meld);
+  const waits = kans.length ? game.waitsOf(counts, kans, true) : game.waitsOf(counts);
   if (!waits.length) return false;
   if (level === 'beginner') return true;
   const unseen = unseenCounts(rules, view);
@@ -352,9 +362,47 @@ function decideIntermediate(game, seat, personality, rng) {
   return { type: 'pass' };
 }
 
+// 暗カン（新ルールのときだけエンジンが選択肢を出す）の基準戦略。乱数を使わず、自分の手牌と公開情報だけで決める。
+// ・ツモ和了できるときはしない（和了を優先）。
+// ・聴牌できる手（ある打牌で待ちがある）：暗カン後の残り（手の内）の待ちの種類が減らないときだけ。
+// ・聴牌できない手：その4枚目が、手の内の他の牌と数式面子の部分（2枚）を作らないとき（4枚目が遊んでいるとき）だけ。
+// 旧ルールでは pending().ankan がないので常に null（判断・乱数・行動は従来と同じ）。
+export function ankanDecision(game, seat) {
+  const p = game.pending();
+  if (!p || p.type !== 'turn' || p.seat !== seat || p.canTsumo || !p.ankan || !p.ankan.length) return null;
+  const rules = game.rules;
+  const view = game.viewFor(seat);
+  const counts = viewCounts(rules, view);
+  const exposed = view.melds[seat].map((m) => m.meld);
+  const closed = closedByView(view, seat);
+  let before = 0;
+  for (let t = 0; t < counts.length; t++) {
+    if (!counts[t]) continue;
+    counts[t]--;
+    before = Math.max(before, game.waitsOf(counts, exposed, closed).length);
+    counts[t]++;
+  }
+  for (const o of p.ankan) {
+    const t = o.type;
+    counts[t] -= 4;
+    const kan = rules.koutsuOf(t).idx;
+    let ok;
+    if (before > 0) {
+      ok = game.waitsOf(counts, [...exposed, kan], closed).length >= before;
+    } else {
+      ok = !rules.meldsByTile[t].some((mi) => rules.melds[mi].kind === 'formula'
+        && rules.melds[mi].tiles.some((x) => x !== t && counts[x] > 0));
+    }
+    counts[t] += 4;
+    if (ok) return { type: 'ankan', tileType: t };
+  }
+  return null;
+}
+
 // Game に行動を適用する共通関数（UI・シミュレーター・テストで共有）
 export function applyAction(game, seat, action) {
   if (action.type === 'discard') game.discard(seat, action.tile, action.riichi ? { riichi: true } : undefined);
   else if (action.type === 'tsumo') game.tsumo(seat);
+  else if (action.type === 'ankan') game.ankan(seat, action.tileType);
   else game.respond(seat, action);
 }

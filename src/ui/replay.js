@@ -9,6 +9,8 @@
 //            足りない項目は従来形式と同じ既定値で補い、組み合わせ全体を検証する。
 //   chars（Ver.0.6、任意）：自由選択の対戦相手。席1〜3（下家・対面・上家）の順のキャラクターID（カンマ区切り、異なる3人）。
 //            ai より優先する。不正ならエラー。ゲームが出力する URL は、自由選択の対局では chars を使う。
+//   newrules（新ルール⑤、任意）：1 のときだけ新ルール（王牌・ドラ・暗カン・数学Ⅱ通常ツモ24回）。付いていない URL は従来ルール。
+//            1 以外の値はエラー。ゲームが出力する URL は、新ルールの対局だけ newrules=1 を付ける。
 // 指定された項目が1つでも不正なら、別の局面として黙って始めずに ok=false（errors に理由）を返す。
 import { intParam, MAX_SEED, MAX_ROUND, MAX_RENCHAN } from './params.js';
 import { parseChars } from './opponents.js';
@@ -59,6 +61,12 @@ export function validateReplay(params, { defaultLen = 4 } = {}) {
     if (!chars) bad('chars', 'chars は異なる3人のキャラクターID（席1〜3の順、カンマ区切り）です');
   }
 
+  let newRules = false;
+  if (params.has('newrules')) {
+    if (params.get('newrules') === '1') newRules = true;
+    else bad('newrules', 'newrules は 1（新ルール）だけです。従来ルールでは付けません');
+  }
+
   const round = roundRaw ?? 1;
   const hand = handRaw ?? Math.min(round - 1, len - 1);
   const dealer = dealerRaw ?? (round - 1) % 4;
@@ -71,11 +79,12 @@ export function validateReplay(params, { defaultLen = 4 } = {}) {
     // 通し局数 round は hand + renchan + 1 以上でなければ、正規の進行では起こり得ない。
     if (round < hand + renchan + 1) bad('round', `通し局数 ${round} は、親番 ${hand} と連荘 ${renchan} の局状態に必要な ${hand + renchan + 1} 局より小さく、不可能な局状態です`);
   }
-  return { kind: fresh ? 'replay' : 'legacy', ok: errors.length === 0, errors, values: { seed, round, hand, renchan, dealer, len, lenGiven: lenRaw !== undefined && lenRaw !== null, mode, ai, chars } };
+  return { kind: fresh ? 'replay' : 'legacy', ok: errors.length === 0, errors, values: { seed, round, hand, renchan, dealer, len, lenGiven: lenRaw !== undefined && lenRaw !== null, mode, ai, chars, newRules } };
 }
 
 // 再現 URL のクエリ（先頭の ? 付き）。ゲームが出力する形式。mode・ai・chars が null なら省く。chars があれば ai は出さない。
-export function replayQuery({ seed, round, dealer, hand, renchan, len, mode = null, ai = null, chars = null }) {
+// newRules が true のときだけ末尾に newrules=1（従来ルールの URL は従来と同じ文字列）。
+export function replayQuery({ seed, round, dealer, hand, renchan, len, mode = null, ai = null, chars = null, newRules = false }) {
   const who = chars ? `&chars=${chars.join(',')}` : ai ? `&ai=${ai}` : '';
-  return `?seed=${seed}&round=${round}&dealer=${dealer}&hand=${hand}&renchan=${renchan}&len=${len}${mode ? `&mode=${mode}` : ''}${who}`;
+  return `?seed=${seed}&round=${round}&dealer=${dealer}&hand=${hand}&renchan=${renchan}&len=${len}${mode ? `&mode=${mode}` : ''}${who}${newRules ? '&newrules=1' : ''}`;
 }

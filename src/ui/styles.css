@@ -889,7 +889,7 @@ table.values td.undef { color: #999; font-size: 12px; }
 .river-left .rb-river-block { top: 0; }
 .river-right .rb-river-block { top: auto; bottom: 0; }
 /* 公開面子：その席の右手側の角。卓の中央寄りに置き、左右の河の延長（角の外側の列）と重ならない */
-.rb-melds-block { --mw: calc(var(--rw) * .9 * 3 + 4px); --mh: calc((var(--rh) * .9 + 4px) * var(--m, 1)); width: var(--mw); height: var(--mh); transform: none; left: auto; top: auto; }
+.rb-melds-block { --mw: calc(var(--rw) * .9 * var(--mt, 3) + 4px); --mh: calc((var(--rh) * .9 + 4px) * var(--m, 1)); width: var(--mw); height: var(--mh); transform: none; left: auto; top: auto; }
 .melds-left .rb-melds-block, .melds-right .rb-melds-block { width: var(--mh); height: var(--mw); }
 .melds-top .rb-melds-block { right: 2px; bottom: 2px; }
 .melds-right .rb-melds-block { left: 2px; bottom: 2px; }
@@ -1045,3 +1045,41 @@ table.values td.undef { color: #999; font-size: 12px; }
   #app:has(> .bar) > .top { display: none; }
   .table .self .hand-help { flex-wrap: wrap; row-gap: 4px; }
 }
+
+/* ===== 新ルール⑤（docs/61）：ドラ表示・暗カン・嶺上ツモ・数学Ⅱの残りツモ回数。新ルールの対局だけに出る要素 ===== */
+/* ドラ表示：卓の右下の角（Ver.0.7 で空いていた区画）。上段＝表示牌、下段＝ドラ。最大5枚 */
+.mj-table .dora-box { grid-area: br; align-self: start; justify-self: end; min-width: 0; z-index: 1;
+  display: flex; flex-direction: column; gap: 1px; padding: 2px 3px; margin: 0 1px 1px 0;
+  border-radius: 5px; background: rgba(4, 14, 24, .62); border: 1px solid rgba(214, 178, 94, .45); }
+.dora-box .dr-row { display: flex; flex-direction: column; align-items: flex-start; gap: 0; }
+.dora-box .dr-l { font-size: max(8px, calc(var(--rw) * .36)); line-height: 1.1; color: var(--ink-dim); white-space: nowrap; }
+.dora-box .dr-dora .dr-l { color: var(--gold); font-weight: 700; }
+.dora-box .dr-tiles { display: flex; gap: 0; }
+.mj-table .dora-box .tile.sz-xs { width: calc(var(--rw) * .72); height: calc(var(--rh) * .72); font-size: calc(var(--rw) * .33); border-bottom-width: 1px; }
+.mj-table .dora-box .tile.sz-xs.t-angle { font-size: calc(var(--rw) * .27); letter-spacing: -.04em; }
+.mj-table .dora-box .tile.sz-xs.t-value { font-size: calc(var(--rw) * .29); }
+.dora-box .dr-dora .tile { box-shadow: 0 0 0 1px var(--gold) inset; }
+.dora-box .tile.dora-new { outline: 2px solid var(--accent); outline-offset: -1px; z-index: 1; }
+/* 卓の中央：新ルールの印と、数学Ⅱの自分の残り通常ツモ回数 */
+.mj-table .bc-new { margin-left: .3em; padding: 0 .3em; border-radius: 3px; background: var(--gold); color: #2a2208; font-weight: 700; font-size: .92em; }
+.mj-table .bc-draws strong { color: #fff; font-size: 1.1em; }
+.mj-table .bc-draws.low strong { color: #ffb4a8; }
+/* 暗カン：槓子（4枚）。鳴きではないので枠の色を変える */
+.meld.ankan { background: rgba(120, 190, 230, .28); box-shadow: 0 0 0 1px rgba(150, 205, 240, .7) inset; }
+.actions button.kan { background: #1f6f6a; color: #fff; border-color: #2b8a84; font-weight: 700; }
+.actions button.kan-type { display: inline-flex; align-items: center; gap: 4px; }
+.actions button.kan-type small { font-size: 11px; opacity: .85; }
+.actions .kan-status { color: #a8e6e1; }
+.hand .tile.kan-ok { box-shadow: 0 0 0 3px #3fc1b8; }
+/* 嶺上ツモの牌：ツモ牌の印に青緑の下線を足す */
+.hand .tile.rinshan { box-shadow: 0 0 0 2px #3fc1b8; }
+.tag.tag-kan { background: #cdeeea; color: #11514c; }
+.yaku .dora-li span { color: #7a5a12; }
+.dora-result .tile { vertical-align: middle; }
+.hint-box .hb-dora { color: var(--ink-dim); }
+/* タイトルのルール選択（新ルール⑤）：2択を横に並べて高さを抑える（数学モード・局数の欄は変えない） */
+.title-set.title-rules { display: grid; grid-template-columns: 1fr 1fr; column-gap: 8px; padding-bottom: 4px; }
+.title-set.title-rules legend { grid-column: 1 / -1; }
+.title-set.title-rules .setting.radio { min-height: 40px; }
+.title-set.title-rules .setting.radio span { display: flex; flex-direction: column; line-height: 1.2; }
+.title-set.title-rules .setting.radio span small { margin-left: 0; font-size: 10.5px; }

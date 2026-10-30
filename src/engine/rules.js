@@ -189,8 +189,7 @@ export function createRules(config = DEFAULT_CONFIG) {
   // counts: 手の内の牌（和了牌を含む） / exposed: 公開面子 index 配列
   // 合法な全和了形を評価し、最高得点の形を返す。和了不可なら null。
   // opts.ron: ロン和了の判定か（三暗刻の暫定規則）。
-  function analyzeWin(counts, exposed = [], { ron = false } = {}) {
-    const closed = exposed.length === 0;
+  function analyzeWin(counts, exposed = [], { ron = false, closed = exposed.length === 0 } = {}) {
     const k = 3 - exposed.length;
     const candidates = [];
     for (const d of decompose(counts, k)) {
