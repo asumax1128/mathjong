@@ -959,10 +959,12 @@ function selectHTML() {
     <div class="opp-status" aria-live="polite"><span class="opp-count">選択 <b>${sel.length}</b>/${PICK_COUNT}人</span>
       <span class="opp-chips">${chips}${empty}</span></div>
     ${S.opp.notice ? `<p class="note opp-notice">${S.opp.notice}</p>` : ''}
-    <div class="opp-grid">${cards}</div>
     <div class="select-actions">
       <button data-action="opp-random" class="opp-random">おまかせ</button>
       <button data-action="start-match" class="primary start-btn"${ready ? '' : ' disabled'}>対局開始</button>
+    </div>
+    <div class="opp-grid">${cards}</div>
+    <div class="select-actions">
       <button data-action="to-title" class="opp-back">タイトルへ戻る</button>
     </div>
     <p class="note select-setting">${MODES[S.nextMode] ? MODES[S.nextMode].label : ''} ／ ${S.length}局戦</p>
