@@ -754,7 +754,7 @@ function handHTML() {
   // 手牌（左）と公開面子（右）は同じ列。面子は手牌より少し小さく、手牌のタップの大きさは変えない。
   const melds = g.melds[HUMAN].length ? `<div class="melds mine" aria-label="自分の公開面子">${meldsHTML(HUMAN, 'm')}</div>` : '';
   return `${selfInfoHTML()}<div class="hand-row${melds ? ' has-melds' : ''}"><div class="hand">${body}</div>${melds}</div>
-    <div class="hand-help"><span class="hh-tools">${g.riichi[HUMAN] ? autoTsumoToggleHTML() : `${autoPassToggleHTML('chi')}${autoPassToggleHTML('pon')}`}<button data-action="autosort" class="small">自動整列</button><button data-action="hint" class="small hint-btn" aria-pressed="${!!S.hintOpen}">ヒント</button></span><span class="hh-menu"><button data-action="guide" class="small">ガイド</button><button data-action="settings" class="small" aria-label="設定">⚙</button></span></div>`;
+    <div class="hand-help"><span class="hh-tools">${autoPassToggleHTML('chi')}${autoPassToggleHTML('pon')}<button data-action="autosort" class="small">自動整列</button><button data-action="hint" class="small hint-btn" aria-pressed="${!!S.hintOpen}">ヒント</button></span><span class="hh-menu"><button data-action="guide" class="small">ガイド</button><button data-action="settings" class="small" aria-label="設定">⚙</button></span></div>`;
 }
 
 // チー・ポンの自動パスの切替（対戦画面。Ver.0.5-A で設定画面から移動）。ON/OFF を色と文字で示す。
@@ -765,7 +765,7 @@ function autoPassToggleHTML(kind) {
   return `<button data-action="toggle-${kind}-autopass" class="small ap-toggle ${on ? 'on' : 'off'}" aria-pressed="${on}" aria-label="${name}の自動パス ${on ? 'ON' : 'OFF'}"><span class="apt-name">${name}自動</span><span class="apt-state">${on ? 'ON' : 'OFF'}</span></button>`;
 }
 
-// リーチ後のオートツモ切りの切替（リーチ中だけ、チー・ポンの自動パスの切替の位置に出す。リーチ中は鳴けないため）
+// リーチ後のオートツモ切りの切替（リーチ中だけ、操作バーに出す。手牌の下の道具の列は従来のまま）
 function autoTsumoToggleHTML() {
   const on = S.autoTsumo.on;
   return `<button data-action="toggle-auto-tsumogiri" class="small ap-toggle auto-tsumo ${on ? 'on' : 'off'}" aria-pressed="${on}" aria-label="オートツモ切り ${on ? 'ON' : 'OFF'}"><span class="apt-name">オートツモ切り</span><span class="apt-state">${on ? 'ON' : 'OFF'}</span></button>`;
@@ -802,14 +802,15 @@ function actionsHTML() {
     // AI の暗カン：記録の順（暗カン → 嶺上ツモ → カンドラ）で、その AI の打牌までの間だけ示す
     const what = kan && kan.seat === p.seat ? `${nameOf(p.seat)} 暗カン → 嶺上ツモ（カンドラ追加）…`
       : p.type === 'turn' ? `${nameOf(p.seat)} の手番…` : `${nameOf(p.seat)} が考え中…`;
-    return `<div class="actions waiting"><span class="status">${what}</span></div>`;
+    // リーチ中は他家の番でもオートツモ切りを切り替えられる（次の自分のツモから反映）
+    return `<div class="actions waiting"><span class="status">${what}</span>${g.riichi[HUMAN] ? autoTsumoToggleHTML() : ''}</div>`;
   }
   if (p.type === 'turn' && g.riichi[HUMAN]) {
     // リーチ中：ツモ和了かツモ切りだけ
     const tsumo = p.canTsumo ? '<button data-action="tsumo" class="win">ツモ</button>' : '';
     return `<div class="actions">
       <span class="status riichi-status">${p.canTsumo ? `リーチ中・和了できます！${S.autoTsumo.on ? '（自動ツモ切りは停止中）' : ''}` : S.autoTsumo.on ? 'リーチ中：自動でツモ切りします' : 'リーチ中：ツモ切り'}</span>
-      ${tsumo}
+      ${autoTsumoToggleHTML()}${tsumo}
       <button data-action="tsumogiri" class="primary">ツモ切り</button>
     </div>`;
   }

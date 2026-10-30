@@ -7608,7 +7608,7 @@ async function v10AutoTsumogiri(browser) {
     await page.locator('.hand .tile').first().waitFor();
     await r2Scene(page, TENPAI2);
     let st = await atState(page);
-    assert.deepEqual([st.toggle, st.chiToggle], [null, 1], 'リーチ前は切替を出さない（チー・ポンの自動パスの切替のまま）');
+    assert.deepEqual([st.toggle, st.chiToggle], [null, 1], 'リーチ前は切替を出さない');
     await page.locator('button[data-action="riichi"]').tap();
     await page.locator('.hand .tile.drawn').tap();
     await page.locator('button[data-action="riichi-discard"]').tap();
@@ -7616,7 +7616,7 @@ async function v10AutoTsumogiri(browser) {
     await atDrive(page);
     await page.evaluate(() => window.__mathjong.step());
     st = await atState(page);
-    assert.deepEqual([st.pending.seat, st.pending.type, st.pending.canTsumo, st.toggle, st.chiToggle, st.on], [0, 'turn', false, 'false', 0, false], 'リーチ中は切替を出す（既定 OFF）');
+    assert.deepEqual([st.pending.seat, st.pending.type, st.pending.canTsumo, st.toggle, st.chiToggle, st.on], [0, 'turn', false, 'false', 1, false], 'リーチ中は操作バーに切替を出す（既定 OFF）。手牌の下の道具は従来のまま');
     let n = st.myDiscards;
     await page.waitForTimeout(1600);
     st = await atState(page);
@@ -7742,7 +7742,7 @@ async function v10AutoTsumogiri(browser) {
   console.log('✓ オートツモ切り（数学Ⅰ・Ⅱ）：既定 OFF（従来どおり手動）・ON で自動・ツモ和了とロンで必ず停止・見送り後も ON とリーチ後フリテン・OFF で予約を取り消し・AI と終局まで二重操作なし・数学Ⅱ24回で流局・次の局／再戦／タイトルで OFF');
 }
 
-// リーチ中の切替と操作バー：8画面で道具の列に収まり、操作バー・ヒントと重ならない
+// リーチ中の切替（操作バー）：8画面で操作バーの中に収まり、ほかのボタン・状態欄・手牌・ヒントと重ならない（自分の番・他家の番）
 async function v10AutoTsumoLayout(browser) {
   for (const [width, height] of V09_SIZES) {
     const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
@@ -7751,25 +7751,34 @@ async function v10AutoTsumoLayout(browser) {
     await page.locator('.hand .tile').first().waitFor();
     await r2Scene(page, TENPAI2);
     await page.evaluate(() => { const m = window.__mathjong, g = m.S.game; g.discard(0, g.drawn, { riichi: true }); window.__r2.until0({}); m.S.autoTsumo.on = true; m.render(); clearTimeout(m.S.timer); m.S.timer = null; });
-    const d = await page.evaluate(() => {
-      const b = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height }; };
-      const q = (s) => document.querySelector(s);
-      const tools = q('.hand-help');
-      return { toggle: b(q('[data-action="toggle-auto-tsumogiri"]')), bar: b(q('footer.bar')), dock: b(q('.study-dock')), hand: b(q('.self .hand')), help: b(tools),
-        guide: b(q('.hand-help [data-action="guide"]')), toolsOverflow: tools.scrollWidth - tools.clientWidth, overflow: document.documentElement.scrollWidth - innerWidth,
-        text: q('[data-action="toggle-auto-tsumogiri"]').innerText.replace(/\s+/g, ' ') };
-    });
-    const label = `${width}x${height}`;
-    const ov = (a, c) => Math.min(a.r, c.r) - Math.max(a.l, c.l) > 0.75 && Math.min(a.b, c.b) - Math.max(a.t, c.t) > 0.75;
-    assert.match(d.text, /オートツモ切り ON/);
-    assert.ok(d.toggle.h >= 36 && d.toggle.t >= d.hand.b - 1, '手牌の下の道具の列・押せる大きさ ' + label);
-    assert.ok(!ov(d.toggle, d.bar) && !ov(d.toggle, d.dock) && !ov(d.toggle, d.guide), '操作バー・ヒント・ガイドと重ならない ' + label);
-    assert.ok(d.toolsOverflow <= 1 && d.overflow <= 1, '横にはみ出さない ' + label);
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v10-layout-${label}.png` });
+    for (const phase of ['mine', 'waiting']) {
+      if (phase === 'waiting') await page.evaluate(() => { const m = window.__mathjong, g = m.S.game; g.discard(0, g.drawn); m.render(); clearTimeout(m.S.timer); m.S.timer = null; });
+      const d = await page.evaluate(() => {
+        const b = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height }; };
+        const q = (s) => document.querySelector(s);
+        const t = q('[data-action="toggle-auto-tsumogiri"]');
+        return { toggle: b(t), bar: b(q('footer.bar')), main: b(q('main.table')), status: b(q('.bar .status')),
+          others: [...document.querySelectorAll('.bar button:not([data-action="toggle-auto-tsumogiri"])')].map(b),
+          tools: [...document.querySelectorAll('.hand-help button')].length, chi: document.querySelectorAll('.hand-help [data-action="toggle-chi-autopass"]').length,
+          overflow: document.documentElement.scrollWidth - innerWidth, text: t.innerText.replace(/\s+/g, ' ') };
+      });
+      const label = `${width}x${height} ${phase}`;
+      const ov = (a, c) => Math.min(a.r, c.r) - Math.max(a.l, c.l) > 0.75 && Math.min(a.b, c.b) - Math.max(a.t, c.t) > 0.75;
+      assert.match(d.text, /オートツモ切り ON/);
+      assert.ok(d.toggle.t >= d.bar.t - 0.5 && d.toggle.b <= d.bar.b + 0.5 && d.toggle.l >= -0.5 && d.toggle.r <= width + 0.5, '操作バーの中 ' + label);
+      assert.ok(d.toggle.h >= 44 && d.toggle.w >= 44, '押しやすい大きさ ' + label);
+      for (const [name, o] of [...d.others.map((x) => ['ボタン', x]), ['状態欄', d.status]]) assert.ok(!ov(d.toggle, o), `${name}と重ならない ${label} ${JSON.stringify([d.toggle, o])}`);
+      // 卓・手牌・ヒントはスクロールする領域（main）の中に表示される。切替はその下の操作バーにあり、見えている範囲と重ならない
+      assert.ok(d.toggle.t >= d.main.b - 0.5, `卓・手牌・ヒントの領域と重ならない ${label} ${JSON.stringify([d.toggle, d.main])}`);
+      assert.equal(d.chi, 1, '手牌の下の道具は従来のまま');
+      assert.ok(d.bar.b <= height + 0.5, '操作バーは画面内 ' + label);
+      assert.ok(d.overflow <= 1, '横にはみ出さない ' + label);
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/v10-layout-${width}x${height}-${phase}.png` });
+    }
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  console.log('✓ オートツモ切りの切替：8画面で道具の列に収まり、操作バー・ヒント・ガイドと重ならない');
+  console.log('✓ オートツモ切りの切替：8画面×自分の番・他家の番で操作バーに収まり、ボタン・状態欄、卓・手牌・ヒントの領域と重ならない');
 }
 
 // 公開モードではサーバーも転送先も作らない。接続失敗をローカル成功で隠さない。
