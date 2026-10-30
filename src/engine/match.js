@@ -1,12 +1,12 @@
-// 対局（試合）の進行（Ver.0.4-A）：4局戦（東1〜東4局）・8局戦（東1〜南4局）、親の連荘、親子の点数精算、順位。
+// 対局（試合）の進行（Ver.0.4-A）：1局戦（東1局のみ・連荘なし）・4局戦（東1〜東4局）・8局戦（東1〜南4局）、親の連荘、親子の点数精算、順位。
 // 1局の中身（配牌・和了判定・役・AI）は Game が担当し、ここは局と局の間だけを扱う純粋なロジック。
 // 状態はコピーして返す（入力を変更しない）。tests/match.test.js で検証。
 
 export const START_POINTS = 100;
-export const MATCH_LENGTHS = [4, 8];
+export const MATCH_LENGTHS = [1, 4, 8];
 const WINDS = ['東', '南'];
 
-// length: 4 | 8、startDealer: 東1局の親の席（既定 0）
+// length: 1 | 4 | 8、startDealer: 東1局の親の席（既定 0）
 export function createMatch({ length = 4, startDealer = 0 } = {}) {
   if (!MATCH_LENGTHS.includes(length)) throw new Error(`unknown match length ${length}`);
   return {
@@ -59,6 +59,7 @@ export function settle(result, dealer) {
 }
 
 // 1局の結果を反映して次の状態を返す。親が和了すれば連荘（同じ親番）、子の和了・流局は親交代。
+// 1局戦は連荘しない：親の和了・子の和了・流局（山切れ・四家立直）のどれでも、この1局で終わる。
 // 最終の親番（4局戦の東4局・8局戦の南4局）が終わったら over（endReason 'normal'）。最終の親の連荘中は続く。
 // opts：{ round, maxRound } 通し局数の上限。今の局の通し番号 round が maxRound に達したら、続くはずでも試合を終える
 // （endReason 'round-limit'。連荘もここで終わる）。同じ局で通常の終了条件も満たすなら 'normal' を優先する
@@ -75,8 +76,9 @@ export function applyRoundResult(m, result, { round = null, maxRound = null } = 
     const gain = deltas[result.winner];
     if (gain > n.best[result.winner]) { n.best[result.winner] = gain; n.bestBase[result.winner] = result.points; }
   }
-  const dealerKeeps = win && result.winner === dealer;
-  n.log.push({ label: handLabel(m), hand: m.hand, dealer, renchan: m.renchan, result: win ? { winner: result.winner, how: result.how, from: result.from ?? null, points: result.points } : { type: 'draw' }, deltas, dealerKeeps });
+  const dealerKeeps = win && result.winner === dealer && m.length !== 1;
+  const draw = result && result.reason ? { type: 'draw', reason: result.reason } : { type: 'draw' }; // 四家立直は reason を残す（山切れは従来の形）
+  n.log.push({ label: handLabel(m), hand: m.hand, dealer, renchan: m.renchan, result: win ? { winner: result.winner, how: result.how, from: result.from ?? null, points: result.points } : draw, deltas, dealerKeeps });
   n.played++;
   if (dealerKeeps) {
     n.renchan++;

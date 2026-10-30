@@ -7781,6 +7781,361 @@ async function v10AutoTsumoLayout(browser) {
   console.log('✓ オートツモ切りの切替：8画面×自分の番・他家の番で操作バーに収まり、ボタン・状態欄、卓・手牌・ヒントの領域と重ならない');
 }
 
+// ---- 1局戦・四家立直（docs/64） ----
+// 席ごとの聴牌（8枚）：席0 30°・150° 待ち、席1・席2 60°、席3 60°・120°（数学Ⅰ・Ⅱ共通。tests/four-riichi.test.js と同じ）
+const FR_HANDS = [
+  ['cos', '180', '=-1', 'tan', '45', '=1', 'sin', '=1/2'],
+  ['sin', '90', '=1', 'cos', '0', '=1', 'cos', '=1/2'],
+  ['tan', '135', '=-1', 'sin', '0', '=0', 'tan', '=√3'],
+  ['cos', '120', '=-1/2', 'sin', '180', '=0', 'sin', '=√3/2'],
+];
+const FR_X = '=-1/√3'; // 誰の待ち・チー・ポンにもならない牌
+// 親 dealer から配る山（エンジンは親から順に配る）
+function frWall(dealer, draws) {
+  const k = (x) => (x.startsWith('=') ? `v:${x.slice(1)}` : /^\d+$/.test(x) ? `a:${x}` : `f:${x}`);
+  const keys = [];
+  for (let r = 0; r < 8; r++) for (let j = 0; j < 4; j++) keys.push(k(FR_HANDS[(dealer + j) % 4][r]));
+  return [...keys, ...draws.map(k)];
+}
+// 自分（人）のリーチ：画面の「リーチ」→ ツモ牌を選ぶ →「リーチして捨てる」
+async function frRiichiUI(page) {
+  await riWaitTurn(page);
+  await page.locator('button[data-action="riichi"]').tap();
+  const id = await page.evaluate(() => window.__mathjong.S.game.drawn);
+  await page.locator(`.hand .tile[data-id="${id}"]`).tap();
+  await page.locator('button[data-action="riichi-discard"]').tap();
+}
+// AI 席を自分の判断番（または終局）まで進める：手番ならツモ牌でリーチ（リーチ中はツモ切り）、宣言は見送る。
+// 自分の宣言（ロンなど）・自分の手番・終局で止め、画面の進行（step）に戻す
+const frAiUntilMe = (page) => page.evaluate(() => {
+  const m = window.__mathjong, g = m.S.game;
+  clearTimeout(m.S.timer); m.S.timer = null;
+  for (let i = 0; i < 40 && g.pending() && g.pending().seat !== 0; i++) {
+    const p = g.pending();
+    if (p.type === 'claim') g.respond(p.seat, { type: 'pass' });
+    else g.discard(p.seat, g.drawn, { riichi: !g.riichi[p.seat] });
+    g.checkInvariants();
+  }
+  m.step(true);
+  const p = g.pending();
+  return { pending: p && { seat: p.seat, type: p.type, ron: !!p.ron }, result: g.result && { type: g.result.type, reason: g.result.reason || null, winner: g.result.winner ?? null }, riichi: g.riichi.map(Boolean) };
+});
+const frResultText = (page) => page.locator('.overlay .result').innerText();
+
+async function v11OneRoundTitle(browser) {
+  // (1) タイトル：1局戦・4局戦・8局戦の3択。1局戦を選ぶと保存され、再読み込み後も残る。選択画面の設定表示・対局の局数も1局戦
+  for (const mode of ['math1', 'math2']) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?speed=test`);
+    await page.waitForSelector('.title-screen');
+    assert.deepEqual(await page.locator('input[data-action="title-length"]').evaluateAll((es) => es.map((e) => e.value)), ['1', '4', '8']);
+    assert.equal(await page.locator('input[data-action="title-length"][value="4"]').isChecked(), true, '既定は従来どおり4局戦');
+    await page.locator('label.setting.radio', { hasText: mode === 'math1' ? '数学Ⅰ' : '数学Ⅱ' }).tap();
+    await page.locator('label.setting.radio', { hasText: '1局戦' }).tap();
+    assert.equal(await page.evaluate(() => localStorage.getItem('mj-length')), '1');
+    await page.reload();
+    await page.waitForSelector('.title-screen');
+    assert.equal(await page.locator('input[data-action="title-length"][value="1"]').isChecked(), true, '保存された1局戦');
+    await page.locator('button[data-action="choose-opponents"]').click();
+    await page.waitForSelector('.select-screen');
+    assert.match(await page.locator('.select-setting').innerText(), new RegExp(`${mode === 'math1' ? '数学Ⅰ' : '数学Ⅱ'} ／ 1局戦`));
+    await page.locator('button[data-action="to-title"]').first().click();
+    await page.waitForSelector('.title-screen');
+    await chooseAndStart(page, ['kanata', 'mitsuki', 'aoto']);
+    const st = await matchState(page);
+    assert.deepEqual([st.mode, st.length, st.label, st.scores, st.round], [mode, 1, '東1局', [100, 100, 100, 100], 1]);
+    // 保存値の不正な値は既定（4局戦）に戻る
+    await page.evaluate(() => localStorage.setItem('mj-length', '2'));
+    await page.goto(`${LOCAL}?speed=test`);
+    await page.waitForSelector('.title-screen');
+    assert.equal(await page.locator('input[data-action="title-length"][value="4"]').isChecked(), true, '保存値 2 は無効');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 1局戦：タイトルの3択（1局戦・4局戦・8局戦）、保存・再読み込み、選択画面の表示、数学Ⅰ・Ⅱで開始');
+}
+
+async function v11OneRoundEnd(browser) {
+  // 1局戦はどの終わり方でも1局で試合終了（親の和了でも連荘しない）。結果 → 最終結果 → 同じ3人と再戦／相手を変更／タイトルへ
+  // 精算は4局戦と同じ（親ツモ：子3人 各 −2B／子ツモ：親 −2B・ほかの子 −B）。B は和了点（ドラを含む）
+  const cases = [['親のツモ', 'math1', 0], ['子のツモ', 'math2', 1], ['流局', 'math1', 2], ['親のツモ', 'math2', 3]];
+  for (const [name, mode, dealer] of cases) {
+    const { ctx, page, errors } = await v3Page(browser, mode, { query: `&round=1&dealer=${dealer}&hand=0&renchan=0&len=1&newrules=2` });
+    if (name !== '流局') {
+      // 自分の手は三関制覇の形、自分の最初のツモが =1。親 dealer から配り、自分の番までの他家はツモ切り（宣言の起きない牌）
+      await page.evaluate(([hands, dealer, x]) => {
+        const k = (v) => (v.startsWith('=') ? `v:${v.slice(1)}` : /^\d+$/.test(v) ? `a:${v}` : `f:${v}`);
+        const keys = [];
+        for (let r = 0; r < 8; r++) for (let j = 0; j < 4; j++) keys.push(k(hands[(dealer + j) % 4][r]));
+        const draws = [];
+        for (let j = 0; j < 4 && (dealer + j) % 4 !== 0; j++) draws.push(x);
+        draws.push('=1');
+        const m = window.__mathjong; m.S.nextPresetWall = [...keys, ...draws.map(k)]; m.startRound();
+        clearTimeout(m.S.timer); m.S.timer = null;
+        const g = m.S.game;
+        for (let i = 0; i < 20 && g.pending() && g.pending().seat !== 0; i++) { const p = g.pending(); if (p.type === 'claim') g.respond(p.seat, { type: 'pass' }); else g.discard(p.seat, g.drawn); }
+        m.step(true);
+      }, [[TSUMO_HAND, V3_O1, V3_O2, V3_O3], dealer, '=-1/√3']);
+      await page.waitForSelector('button[data-action="tsumo"]');
+      await page.locator('button[data-action="tsumo"]').tap();
+    } else await forceDraw(page);
+    await page.waitForSelector('.overlay .result');
+    const st = await matchState(page);
+    const B = await page.evaluate(() => window.__mathjong.S.game.result.points ?? 0);
+    const want = name === '流局' ? [0, 0, 0, 0] : [0, 1, 2, 3].map((s) => (s === 0 ? (dealer === 0 ? 6 * B : 4 * B) : dealer === 0 || s === dealer ? -2 * B : -B));
+    assert.deepEqual([st.over, st.played, st.renchan, st.length], [true, 1, 0, 1], `${mode} ${name}：1局で終了・連荘なし`);
+    assert.equal(st.sum, 400);
+    assert.deepEqual(st.scores, want.map((d) => 100 + d), `${name}の精算`);
+    const text = await frResultText(page);
+    assert.match(text, /1局戦はこの1局で終わりです/);
+    assert.doesNotMatch(text, /次は|連荘1回目|親交代/);
+    // 再現情報：1局戦の URL（len=1・newrules=2）。開くと同じ親の1局戦の東1局。1局戦にない連荘はエラー画面
+    const replay = await page.locator('.overlay .result .report-info code').innerText();
+    assert.match(replay, new RegExp(`^\\?seed=\\d+&round=1&dealer=${dealer}&hand=0&renchan=0&len=1&mode=${mode}&chars=[a-z,]+&newrules=2$`));
+    if (name === '流局') {
+      const p2 = await ctx.newPage();
+      await p2.goto(`${LOCAL}${replay}&speed=slow`);
+      await p2.waitForSelector('.hand .tile');
+      const r2 = await matchState(p2);
+      assert.deepEqual([r2.length, r2.label, r2.dealer, r2.round, r2.mode], [1, '東1局', dealer, 1, mode]);
+      await p2.goto(`${LOCAL}${replay.replace('renchan=0', 'renchan=1').replace('round=1', 'round=2')}`);
+      await p2.waitForSelector('.replay-error');
+      assert.match(await p2.locator('.replay-error').innerText(), /1局戦は連荘しません/);
+      await p2.close();
+    }
+    assert.equal(await page.locator('button[data-action="next"]').innerText(), '最終結果へ');
+    await page.locator('button[data-action="next"]').tap();
+    await page.waitForSelector('.overlay .final');
+    const fin = await page.locator('.overlay .final').innerText();
+    assert.match(fin, /実施した局数：1局（1局戦・東1局のみ）/);
+    assert.doesNotMatch(fin, /連荘回数/);
+    assert.match(fin, /各局の結果（1局）/);
+    assert.match(fin, name === '流局' ? /東1局\s*流局/ : /東1局\s*あなたのツモ/);
+    const shown = await page.locator('.final-table tr').evaluateAll((rows) => rows.slice(1).map((r) => [r.querySelector('.rank').textContent, Number(r.querySelector('.pts').textContent)]));
+    for (const [rank, pts] of shown) assert.equal(rank, `${1 + st.scores.filter((y) => y > pts).length}位`, '順位（同点は同順位）');
+    if (name === '親のツモ' && dealer === 0) {
+      // 同じ3人と再戦：1局戦のまま、全員100点
+      const before = (await matchState(page)).chars;
+      await page.locator('button[data-action="again"]').tap();
+      await page.waitForSelector('.hand .tile');
+      let s2 = await matchState(page);
+      assert.deepEqual([s2.length, s2.label, s2.scores, s2.played, s2.over, s2.chars, s2.mode], [1, '東1局', [100, 100, 100, 100], 0, false, before, mode]);
+      assert.equal(await page.evaluate(() => window.__mathjong.S.matchSettings.ruleset), 2);
+      // 相手を変更 → 選択画面（直前の3人）→ 入れ替えて開始：1局戦のまま
+      await page.evaluate(() => { const { S, render } = window.__mathjong; S.match.over = true; S.modal = 'final'; render(); });
+      await page.locator('.final button[data-action="change-opponents"]').tap();
+      await page.waitForSelector('.select-screen');
+      assert.match(await page.locator('.select-setting').innerText(), /1局戦/);
+      await chooseAndStartFromSelect(page, ['kaoru', 'yuki', 'asuma']);
+      s2 = await matchState(page);
+      assert.deepEqual([s2.length, s2.label, s2.chars.slice().sort()], [1, '東1局', ['asuma', 'kaoru', 'yuki']]);
+      // タイトルへ戻る：局数の選択は1局戦のまま
+      await page.evaluate(() => { const { S, render } = window.__mathjong; S.match.over = true; S.modal = 'final'; render(); });
+      await page.locator('.final button[data-action="to-title"]').tap();
+      await page.waitForSelector('.title-screen');
+      assert.equal(await page.locator('input[data-action="title-length"][value="1"]').isChecked(), true);
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 1局戦：親のツモ（連荘なし）・子のツモ・流局で1局で試合終了、精算・合計400・順位、再戦／相手変更／タイトルへ・再現URL（len=1）（数学Ⅰ・Ⅱ）');
+}
+// 四家立直の局面を画面で始める（親 dealer、山の後ろに draws）。人は席0
+async function frScene(page, dealer, draws) {
+  await page.evaluate((w) => { const m = window.__mathjong; m.S.nextPresetWall = w; m.startRound(); clearTimeout(m.S.timer); m.S.timer = null; }, frWall(dealer, draws));
+}
+const frState = (page) => page.evaluate(() => {
+  const { S } = window.__mathjong, g = S.game, m = S.match;
+  return { result: g.result && { type: g.result.type, reason: g.result.reason || null, winner: g.result.winner ?? null, how: g.result.how || null }, riichi: g.riichi.map(Boolean),
+    wall: g.wall.length, scores: m.scores.slice(), hand: m.hand, over: m.over, dealer: S.dealer, history: S.history.map((h) => h.result.reason || h.result.type),
+    log: m.log.map((e) => e.result.reason || e.result.type || 'win'), ron: document.querySelectorAll('button[data-action="ron"]').length };
+});
+
+async function v11FourRiichi(browser) {
+  for (const mode of ['math1', 'math2']) {
+    // (1) 1局戦：人が1人目、AI 3人がリーチ → 4人目（AI）の宣言牌に誰もロンできず途中流局 → 試合終了・履歴に四家立直
+    {
+      const { ctx, page, errors } = await v3Page(browser, mode, { query: '&round=1&dealer=0&hand=0&renchan=0&len=1&newrules=2' });
+      await frScene(page, 0, [FR_X, FR_X, FR_X, FR_X]);
+      await frRiichiUI(page);
+      const a = await frAiUntilMe(page);
+      assert.deepEqual(a.result, { type: 'draw', reason: 'four-riichi', winner: null }, `${mode}：四家立直`);
+      await page.waitForSelector('.overlay .result');
+      const text = await frResultText(page);
+      assert.match(text, /途中流局\s*四家立直/);
+      assert.match(text, /4人全員のリーチが成立/);
+      assert.match(text, /得点の移動はありません/);
+      assert.doesNotMatch(text, /山の牌がなくなりました|通常ツモの上限/);
+      assert.match(text, /1局戦はこの1局で終わりです/);
+      const st = await frState(page);
+      assert.ok(st.wall > 0, '山は残っている');
+      assert.deepEqual([st.scores, st.over, st.history, st.log], [[100, 100, 100, 100], true, ['four-riichi'], ['four-riichi']]);
+      await page.locator('button[data-action="next"]').tap();
+      await page.waitForSelector('.overlay .final');
+      const fin = await page.locator('.overlay .final').innerText();
+      assert.match(fin, /各局の結果（1局・四家立直1回）[\s\S]*東1局\s*途中流局（四家立直）/);
+      assert.deepEqual(await page.locator('.final-table td.rank').allInnerTexts(), ['1位', '1位', '1位', '1位'], '全員100点で同順位');
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+    // (2) 4局戦：4人目（上家）の宣言牌 30° は自分の待ち → ロンの判断が先（ロンのボタン）→ ロンで和了（四家立直にしない）
+    // (3) 同じ局面でロンを見送る → 途中流局・親交代（東2局・下家が親）。その後の流局は「流局」と区別して履歴に残る
+    for (const choice of ['ron', 'pass']) {
+      const { ctx, page, errors } = await v3Page(browser, mode, { query: '&round=1&dealer=0&hand=0&renchan=0&len=4&newrules=2' });
+      await frScene(page, 0, [FR_X, FR_X, FR_X, '30']);
+      await frRiichiUI(page);
+      const a = await frAiUntilMe(page);
+      assert.deepEqual([a.pending, a.result, a.riichi], [{ seat: 0, type: 'claim', ron: true }, null, [true, true, true, true]], '4人リーチでもロンの判断が先');
+      await page.waitForSelector('button[data-action="ron"]');
+      await page.locator(`button[data-action="${choice}"]`).tap();
+      await page.waitForSelector('.overlay .result');
+      const st = await frState(page);
+      const text = await frResultText(page);
+      if (choice === 'ron') {
+        assert.deepEqual(st.result, { type: 'win', reason: null, winner: 0, how: 'ron' });
+        assert.match(text, /あなた の和了\s*ロン/);
+        assert.doesNotMatch(text, /四家立直/);
+        assert.equal(st.scores.reduce((x, y) => x + y, 0), 400);
+        assert.ok(st.scores[0] > 100 && st.scores[3] < 100, '上家から親のロン');
+      } else {
+        assert.deepEqual(st.result, { type: 'draw', reason: 'four-riichi', winner: null, how: null });
+        assert.match(text, /途中流局\s*四家立直/);
+        assert.match(text, /親交代[\s\S]*東2局/);
+        assert.deepEqual([st.scores, st.hand, st.over], [[100, 100, 100, 100], 1, false]);
+        await page.locator('button[data-action="next"]').tap();
+        await page.waitForSelector('.hand .tile');
+        let m = await matchState(page);
+        assert.deepEqual([m.label, m.dealer, m.renchan], ['東2局', 1, 0], '親交代');
+        for (let i = 0; i < 3; i++) {
+          await forceDraw(page);
+          await page.waitForSelector('.overlay .result');
+          assert.match(await frResultText(page), /流局/);
+          assert.doesNotMatch(await frResultText(page), /四家立直/);
+          await page.locator('button[data-action="next"]').tap();
+          if (i < 2) await page.waitForSelector('.hand .tile');
+        }
+        await page.waitForSelector('.overlay .final');
+        assert.match(await page.locator('.overlay .final').innerText(), /各局の結果（4局・四家立直1回）/);
+        await page.locator('.match-log summary').click();
+        const fin = await page.locator('.overlay .final').innerText();
+        assert.match(fin, /東1局\s*途中流局（四家立直）[\s\S]*東2局\s*流局[\s\S]*東3局\s*流局[\s\S]*東4局\s*流局/);
+        assert.equal(await page.locator('.match-log li[data-kind="four-riichi"]').count(), 1);
+        assert.equal(await page.locator('.match-log li[data-kind="draw"]').count(), 3);
+        assert.match(fin, /連荘回数：0回/);
+      }
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+    // (4) 8局戦：親は下家。AI 3人が先にリーチし、人が4人目（画面で宣言）→ 途中流局・親交代
+    // (5) フリテン：人は 150° をツモ（ツモ和了できる）してもリーチで捨て、4人目の宣言牌 30° はロンできない → 途中流局
+    for (const kind of ['human-last', 'furiten']) {
+      const dealer = kind === 'human-last' ? 1 : 0;
+      const { ctx, page, errors } = await v3Page(browser, mode, { query: `&round=1&dealer=${dealer}&hand=0&renchan=0&len=8&newrules=2` });
+      await frScene(page, dealer, kind === 'human-last' ? [FR_X, FR_X, FR_X, FR_X] : ['150', FR_X, FR_X, '30']);
+      if (kind === 'human-last') {
+        const a = await frAiUntilMe(page);
+        assert.deepEqual([a.pending, a.riichi], [{ seat: 0, type: 'turn', ron: false }, [false, true, true, true]], 'AI 3人がリーチ');
+        await frRiichiUI(page);
+      } else {
+        await riWaitTurn(page);
+        assert.equal(await page.locator('button[data-action="tsumo"]').count(), 1, 'ツモ和了できる');
+        await frRiichiUI(page);
+        const a = await frAiUntilMe(page);
+        assert.equal(a.pending, null);
+        assert.equal(await page.evaluate(() => window.__mathjong.S.game.ronBlocked[0] !== null), true, 'フリテンでロンできなかった');
+      }
+      await page.waitForSelector('.overlay .result');
+      const st = await frState(page);
+      assert.deepEqual([st.result.reason, st.riichi, st.scores, st.hand, st.over], ['four-riichi', [true, true, true, true], [100, 100, 100, 100], 1, false], `${mode} ${kind}`);
+      assert.match(await frResultText(page), /途中流局\s*四家立直[\s\S]*親交代/);
+      await page.locator('button[data-action="next"]').tap();
+      await page.waitForSelector('.hand .tile');
+      const m = await matchState(page);
+      assert.deepEqual([m.label, m.dealer, m.length], ['東2局', (dealer + 1) % 4, 8]);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  }
+  console.log('✓ 四家立直（数学Ⅰ・Ⅱ）：1局戦で終了・4局戦/8局戦で親交代、ロンの判断が先（ロン優先・見送りで途中流局）、フリテン、人が4人目、履歴で山切れの流局と区別');
+}
+
+// 8画面：タイトルの3択・四家立直の結果・最終結果（各局の結果）が画面に収まり、重ならない
+async function v11Layout(browser) {
+  for (const [width, height] of V09_SIZES) {
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    const label = `${width}x${height}`;
+    await page.goto(`${LOCAL}?speed=test`);
+    await page.waitForSelector('.title-screen');
+    const t = await page.evaluate(() => {
+      const b = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height }; };
+      const set = document.querySelector('.title-len');
+      return { set: b(set), radios: [...set.querySelectorAll('label.setting.radio')].map((l) => ({ ...b(l), clip: l.scrollWidth - l.clientWidth, smallClip: [...l.querySelectorAll('small')].map((x) => x.scrollWidth - x.clientWidth)[0], text: l.innerText.replace(/\s+/g, ' ') })),
+        overflow: document.documentElement.scrollWidth - innerWidth };
+    });
+    assert.equal(t.radios.length, 3);
+    for (const r of t.radios) {
+      assert.ok(r.h >= 44, `押しやすい高さ ${label} ${r.text}`);
+      assert.ok(r.l >= t.set.l - 0.5 && r.r <= t.set.r + 0.5, `枠の中 ${label} ${r.text}`);
+      assert.ok(r.clip <= 1 && r.smallClip <= 1, `文字が切れない ${label} ${r.text} ${r.clip}/${r.smallClip}`);
+    }
+    for (let i = 0; i < 3; i++) for (let j = i + 1; j < 3; j++) {
+      const a = t.radios[i], c = t.radios[j];
+      assert.ok(Math.min(a.r, c.r) - Math.max(a.l, c.l) <= 0.5 || Math.min(a.b, c.b) - Math.max(a.t, c.t) <= 0.5, `重ならない ${label}`);
+    }
+    assert.ok(t.overflow <= 1, '横にはみ出さない ' + label);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v11-title-${label}.png` });
+    // 四家立直の結果（1局戦）→ 最終結果
+    await page.goto(`${LOCAL}?mode=math2&seed=1&speed=slow&round=1&dealer=0&hand=0&renchan=0&len=1&newrules=2`);
+    await page.waitForSelector('.hand .tile');
+    await frScene(page, 0, [FR_X, FR_X, FR_X, FR_X]);
+    await page.evaluate(() => {
+      const m = window.__mathjong, g = m.S.game;
+      for (let i = 0; i < 4; i++) g.discard(g.pending().seat, g.drawn, { riichi: true });
+      m.step(true);
+    });
+    await page.waitForSelector('.overlay .result');
+    for (const which of ['result', 'final']) {
+      if (which === 'final') { await page.locator('button[data-action="next"]').click(); await page.waitForSelector('.overlay .final'); }
+      const d = await page.evaluate((which) => {
+        const b = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height }; };
+        const modal = document.querySelector('.overlay .modal');
+        const head = document.querySelector(which === 'result' ? '.result h2' : '.final h2');
+        const btns = [...document.querySelectorAll('.overlay .modal-actions button')];
+        return { modal: b(modal), head: b(head), headText: head.innerText, btns: btns.map(b), scrollable: modal.scrollHeight - modal.clientHeight,
+          log: which === 'final' ? b(document.querySelector('.match-log')) : null, overflow: document.documentElement.scrollWidth - innerWidth,
+          modalOverflowX: modal.scrollWidth - modal.clientWidth };
+      }, which);
+      assert.ok(d.modal.l >= -0.5 && d.modal.r <= width + 0.5, `${which} 画面内 ${label}`);
+      assert.ok(d.head.t >= -0.5 && d.head.b <= height + 0.5, `${which} 見出しが見える ${label}`);
+      assert.ok(d.overflow <= 1 && d.modalOverflowX <= 1, `${which} 横にはみ出さない ${label}`);
+      if (which === 'result') assert.match(d.headText, /途中流局\s*四家立直/);
+      // ボタンは（必要ならモーダル内のスクロールで）押せる
+      for (let i = 0; i < d.btns.length; i++) {
+        const btn = page.locator('.overlay .modal-actions button').nth(i);
+        await btn.scrollIntoViewIfNeeded();
+        const bb = await btn.boundingBox();
+        assert.ok(bb && bb.y >= -0.5 && bb.y + bb.height <= height + 0.5 && bb.height >= 40, `${which} ボタン ${i} ${label}`);
+      }
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/v11-${which}-${label}.png` });
+    }
+    assert.ok(await page.locator('.match-log[open] li[data-kind="four-riichi"]').isVisible(), '1局戦の履歴は開いた状態');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 1局戦・四家立直の画面：8画面でタイトルの3択（44px以上・文字切れなし・重ならない）、四家立直の結果・最終結果（各局の結果）が収まりボタンを押せる');
+}
+
+async function chooseAndStartFromSelect(page, ids) {
+  const cur = await page.locator('.opp-card.selected').evaluateAll((es) => es.map((e) => e.dataset.id));
+  for (const id of cur) if (!ids.includes(id)) await page.locator(`.opp-check[data-id="${id}"]`).click();
+  for (const id of ids) if (!cur.includes(id)) await page.locator(`.opp-check[data-id="${id}"]`).click();
+  await page.locator('.select-screen button[data-action="start-match"]').click();
+  await page.waitForSelector('.hand .tile');
+}
+
 // 公開モードではサーバーも転送先も作らない。接続失敗をローカル成功で隠さない。
 const server = EXTERNAL ? null : await startServer(0, { base: BASE, host: '127.0.0.1' });
 if (server) {
@@ -7798,7 +8153,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);

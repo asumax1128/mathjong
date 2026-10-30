@@ -16,7 +16,7 @@
 import { intParam, MAX_SEED, MAX_ROUND, MAX_RENCHAN } from './params.js';
 import { parseChars } from './opponents.js';
 
-export const REPLAY_LENGTHS = [4, 8];
+export const REPLAY_LENGTHS = [1, 4, 8];
 const MODES = ['math1', 'math2'];
 export const REPLAY_AI_LEVELS = ['beginner', 'intermediate', 'advanced'];
 // 再現 URL の newrules の値（ルールの版）。現行の版は CURRENT_RULESET（新しく始める対局はすべてこの版）
@@ -42,7 +42,7 @@ export function validateReplay(params, { defaultLen = 4 } = {}) {
   let len = defaultLen;
   const lenRaw = num('len', 8);
   if (lenRaw !== undefined && lenRaw !== null) {
-    if (REPLAY_LENGTHS.includes(lenRaw)) len = lenRaw; else bad('len', 'len は 4 または 8 です');
+    if (REPLAY_LENGTHS.includes(lenRaw)) len = lenRaw; else bad('len', 'len は 1・4・8 のいずれかです');
   }
   const roundRaw = num('round', MAX_ROUND, 1);
   const handRaw = num('hand', 7);
@@ -80,6 +80,8 @@ export function validateReplay(params, { defaultLen = 4 } = {}) {
   // 局状態の整合性（新形式のみ。従来形式には hand・renchan がないので適用しない）
   if (fresh && errors.length === 0) {
     if (hand > len - 1) bad('hand', `${len}局戦の親番は 0〜${len - 1} です（hand=${hand}）`);
+    if (len === 1 && renchan > 0) bad('renchan', `1局戦は連荘しません（renchan=${renchan}）`);
+    if (len === 1 && round > 1) bad('round', `1局戦の通し局数は 1 だけです（round=${round}）`);
     // 親番 hand に着くまでに少なくとも hand 局、その親番の連荘 renchan 局を終えている。現在の局はその次なので
     // 通し局数 round は hand + renchan + 1 以上でなければ、正規の進行では起こり得ない。
     if (round < hand + renchan + 1) bad('round', `通し局数 ${round} は、親番 ${hand} と連荘 ${renchan} の局状態に必要な ${hand + renchan + 1} 局より小さく、不可能な局状態です`);

@@ -18,6 +18,8 @@ export class Game {
     // ruleset 2：フリテン（捨て牌・同巡（見逃し）・リーチ後の見逃し）と関数牌のポン禁止
     this.furitenRule = ruleset >= 2;
     this.funcPonBan = ruleset >= 2;
+    // ruleset 2：四家立直（4人全員のリーチが成立したら途中流局）。4人目の宣言牌へのロンの判断が終わってから判定する
+    this.fourRiichiRule = ruleset >= 2;
     this.seed = seed;
     this.dealer = dealer;
     this.round = round;
@@ -374,7 +376,9 @@ export class Game {
     this.justDrew = false; // 鳴いた直後はツモ和了不可。打牌のみ。
   }
 
+  // 打牌（とその宣言の判断）が終わって次の人のツモへ進む。ロンが成立した場合はここに来ない（＝ロンが四家立直より優先）。
   _advance(from) {
+    if (this.fourRiichiRule && this.riichi.every(Boolean)) return this._endDraw('four-riichi');
     if (!this.wall.length) return this._endDraw();
     this._draw(next(from));
   }
@@ -406,9 +410,15 @@ export class Game {
     return { ...analysis, yaku, points: analysis.points + bonus, riichi: true, riichiBonus: bonus };
   }
 
-  _endDraw() {
+  // reason：なし＝山切れ・数学Ⅱの24回（従来と同じ形）、'four-riichi'＝四家立直の途中流局（ruleset 2）。どちらも点数の移動なし
+  _endDraw(reason = null) {
     this.phase = 'ended';
     this.claim = null;
+    if (reason) {
+      this.result = { type: 'draw', reason };
+      this.log({ type: 'abortive-draw', reason });
+      return;
+    }
     this.result = { type: 'draw' };
     this.log({ type: 'exhaustive-draw' });
   }
