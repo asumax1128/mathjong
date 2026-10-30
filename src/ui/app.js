@@ -45,7 +45,7 @@ const IS_LOCAL = isLocalHost(location.hostname);
 //   従来形式 ?seed&round、新形式 ?seed&round&dealer&hand&renchan&len[&mode]。src/ui/replay.js で、各値の範囲と
 //   局状態の組み合わせ（round ≥ hand + renchan + 1、hand < len など）を検証する。不整合な URL は別の局面として
 //   黙って始めず、エラー画面（タイトルへ戻れる）を出す。seed がない・不正な URL は通常のタイトル画面。
-const savedLen = (() => { const v = store.get('mj-length', null); return v === '4' || v === '8' ? Number(v) : 4; })();
+const savedLen = (() => { const v = store.get('mj-length', null); return v === '1' || v === '4' || v === '8' ? Number(v) : 4; })();
 const REPLAY = validateReplay(params, { defaultLen: savedLen });
 const RV = REPLAY.values; // seed が有効なときだけ（kind が none なら null）
 // モード（Ver.0.3）：数学Ⅰ（度数法・124枚）／数学Ⅱ（弧度法・168枚）。新しい対局の開始時にだけ切り替える。
@@ -79,7 +79,9 @@ const AI_LEVELS = [
   { id: 'intermediate', label: '中級', desc: 'おうすけ・なつき・ゆき。点差で打ち方が変わります' },
   { id: 'advanced', label: '上級', desc: 'シャカ・かおる・アスマ。危険と高得点を読み合う' },
 ];
-const parseLen = (v) => (v === 4 || v === 8 || v === '4' || v === '8' ? Number(v) : null);
+const parseLen = (v) => ([1, 4, 8].includes(Number(v)) && String(Number(v)) === String(v) ? Number(v) : null);
+// 対局の長さの表示（タイトル・最終結果）
+const LENGTH_TEXT = { 1: '1局戦・東1局のみ', 4: '4局戦・東1〜東4局', 8: '8局戦・東1〜南4局' };
 const parseAi = (v) => (AI_LEVELS.some((a) => a.id === v) ? v : null);
 
 const S = {
@@ -991,6 +993,10 @@ function resultHTML() {
       <li class="total"><span>合計</span><b>${r.points}点</b></li></ul>${doraResultHTML()}
       ${a.kind === 'normal' && a.melds.some((mi) => rules.melds[mi].kind === 'koutsu') && a.melds.some((mi) => rules.melds[mi].kind === 'formula') ? '<p class="note">数式面子と刻子の混合形：数式系の役は付きません（門前なら役なしで和了できます）。</p>' : ''}
       ${a.candidateCount > 1 ? `<p class="note">この手は${a.candidateCount}通りの和了形に分けられます。最高得点の形を採用しました。</p>` : ''}`;
+  } else if (r.reason === 'four-riichi') {
+    // ruleset 2：四家立直（4人目の宣言牌に誰もロンしなかった）。山切れの流局とは別の表示
+    head = '<h2 class="four-riichi">途中流局 <small>四家立直</small></h2>';
+    detail = '<p class="draw-reason four-riichi-reason">4人全員のリーチが成立したため、途中流局です（4人目の宣言牌でロンはありませんでした）。得点の移動はありません（リーチの宣言料もありません）。</p>' + doraResultHTML();
   } else {
     head = '<h2>流局</h2>';
     // 新ルールの数学Ⅱは、山が残っていても次の通常ツモが25回目になる時点で流局する
@@ -1010,6 +1016,7 @@ function resultHTML() {
   const m = S.match;
   const dealerName = (s) => (s === HUMAN ? 'あなた' : `${POS[s]} ${PLAYERS[s].name}`);
   const nextLine = m.over && m.endReason === 'round-limit' ? `<p class="next-round over">${ROUND_LIMIT_NOTE}</p>`
+    : m.over && m.length === 1 ? '<p class="next-round over">1局戦はこの1局で終わりです（親の和了でも連荘しません）。<b>試合終了</b>です。</p>'
     : m.over ? `<p class="next-round over">${S.lastRound.label}の親番が終わりました。<b>試合終了</b>です。</p>`
     : m.renchan > 0 && r.type === 'win' && r.winner === S.lastRound.dealer
       ? `<p class="next-round">親が和了したので<b>連荘</b>：次は${handLabel(m)}（連荘${m.renchan}回目）、親は${dealerName(dealerOf(m))}</p>`
@@ -1050,16 +1057,31 @@ function finalHTML() {
     <div class="table-wrap"><table class="final-table">
       <tr><th>順位</th><th>名前</th><th>得点</th><th>開始との差</th><th>和了</th><th>最高和了</th></tr>${rows}</table></div>
     <ul class="final-info">
-      <li>実施した局数：<b>${m.played}局</b>（${m.length === 4 ? '4局戦・東1〜東4局' : '8局戦・東1〜南4局'}）</li>
-      <li>連荘回数：<b>${m.renchanTotal}回</b></li>
+      <li>実施した局数：<b>${m.played}局</b>（${LENGTH_TEXT[m.length]}）</li>
+      ${m.length === 1 ? '' : `<li>連荘回数：<b>${m.renchanTotal}回</b></li>`}
       <li>数学モード：${modeLabel(rules)}</li>
       <li class="final-rules">ルール：${RULESET_LABEL[S.matchSettings.ruleset]}</li>
       <li class="final-opps">対戦相手：${opponentsText()}</li>
       ${m.endReason === 'round-limit' ? `<li class="note round-limit-note">${ROUND_LIMIT_NOTE}</li>` : ''}
       <li class="note">開始時の持ち点は各${START_POINTS}点（合計${START_POINTS * 4}点）。同点は同順位。点数配分は試作段階の暫定値です。</li>
     </ul>
+    ${matchLogHTML(m)}
     <div class="modal-actions final-actions"><button data-action="again" class="primary">同じ3人と再戦</button><button data-action="change-opponents">相手を変更</button><button data-action="to-title">タイトルへ戻る</button></div>
   </div>`;
+}
+
+// 対局履歴（各局の結果）。四家立直は山切れの流局と区別して表示する
+function matchLogHTML(m) {
+  const who = (s) => (s === HUMAN ? 'あなた' : PLAYERS[s].name);
+  const items = m.log.map((e) => {
+    const r = e.result;
+    const what = r.type === 'draw' ? (r.reason === 'four-riichi' ? '<b class="ml-4r">途中流局（四家立直）</b>' : '流局')
+      : `${who(r.winner)}の${r.how === 'ron' ? `ロン（${who(r.from)}から）` : 'ツモ'} ${r.points}点`;
+    return `<li data-kind="${r.type === 'draw' ? r.reason || 'draw' : 'win'}"><span class="ml-label">${e.label}${e.renchan ? `（連荘${e.renchan}）` : ''}</span>${what}</li>`;
+  }).join('');
+  const fr = m.log.filter((e) => e.result.reason === 'four-riichi').length;
+  // 1局戦は開いた状態。複数の局は閉じておき、見出しに四家立直の回数を出す
+  return `<details class="match-log"${m.log.length <= 1 ? ' open' : ''}><summary>各局の結果（${m.log.length}局${fr ? `・四家立直${fr}回` : ''}）</summary><ol>${items}</ol></details>`;
 }
 
 // 再現 URL の局状態が不正なとき（別の局面として黙って始めない）。タイトルへ戻れる。
@@ -1088,7 +1110,8 @@ function titleHTML() {
         ${radio('mode', 'math1', '数学Ⅰ', S.nextMode === 'math1', '<small>度数法・0°〜180°・124枚</small>')}
         ${radio('mode', 'math2', '数学Ⅱ', S.nextMode === 'math2', '<small>弧度法・0〜2π・168枚</small>')}
       </fieldset>
-      <fieldset class="title-set"><legend>対局の長さ</legend>
+      <fieldset class="title-set title-len"><legend>対局の長さ</legend>
+        ${radio('length', '1', '1局戦', S.length === 1, '<small>東1局のみ</small>')}
         ${radio('length', '4', '4局戦', S.length === 4, '<small>東1〜東4局</small>')}
         ${radio('length', '8', '8局戦', S.length === 8, '<small>東1〜南4局</small>')}
       </fieldset>
@@ -1255,6 +1278,7 @@ function rulesHTML() {
     ${S.game.furitenRule ? `<li class="nr-rule"><b>フリテン</b>：次の場合はロンできません（ツモ和了はできます）。①待ちの牌のどれかを自分で捨てている（鳴かれて河から移った牌も含む）。②和了できる牌を見送った（自分の次のツモまで）。③リーチ後に和了できる牌を見送った（その局の終わりまで）。フリテンのときは手牌の上に理由を表示します。</li>
     <li class="nr-rule"><b>関数牌はポンできません</b>（sin・cos・tan）。角度牌・結果牌のポン、関数牌の暗カン・刻子での和了はできます。</li>
     <li class="nr-rule"><b>リーチの待ち</b>：リーチすると、待ちの牌と自分から見えていない残り枚数を手牌の上に表示します。</li>` : ''}
+    ${S.game.fourRiichiRule ? '<li class="nr-rule"><b>四家立直</b>：4人全員のリーチが成立すると途中流局です（4人目の宣言牌でロンがあればロンが優先）。得点の移動はなく、親は交代します。</li>' : ''}
     ${rules.config.mode === 'math2' ? `<li class="nr-rule"><b>数学Ⅱの通常ツモ</b>：各自${DRAW_CAP}回まで（親の最初のツモを含み、鳴き・嶺上ツモは数えません）。次の通常ツモが${DRAW_CAP + 1}回目になる時点で流局します。残り回数は卓の中央に表示します。</li>` : ''}` : '';
   return `<h2>ルール（暫定）</h2>
   <ul class="rules-list">${body}${nr}

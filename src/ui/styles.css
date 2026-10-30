@@ -280,6 +280,12 @@ button.danger { background: #b42318; color: #fff; border-color: #b42318; }
 .title-set .setting.radio span small { margin-left: 8px; color: var(--ink-dim); font-size: 12px; }
 .title-set .soon { border: 1px solid var(--felt-line); border-radius: 4px; padding: 0 4px; }
 .title-set .note { margin: 2px 0 0; font-size: 12px; color: var(--ink-dim); }
+/* 対局の長さ（1局戦・4局戦・8局戦）：3つを横に並べ、説明は名前の下（タイトルの高さを増やさない） */
+.title-len { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 6px; }
+.title-len .setting.radio { gap: 6px; }
+.title-len .setting.radio span { line-height: 1.2; }
+.title-len .setting.radio span small { display: block; margin-left: 0; font-size: 11px; white-space: nowrap; }
+@media (max-width: 359px) { .title-len { padding-left: 8px; padding-right: 8px; column-gap: 4px; } }
 .start-btn { min-height: 52px; font-size: 18px; }
 
 /* ---- 対戦相手の選択（Ver.0.6）：スマートフォンは2列、PC（細かいポインター・幅 720px 以上）は3列 ---- */
@@ -365,6 +371,11 @@ button.danger { background: #b42318; color: #fff; border-color: #b42318; }
 .final-table td.pts { font-size: 16px; font-weight: 800; }
 .final-table tr.me { background: #fdf3d4; }
 .final-info { padding-left: 1.2em; font-size: 13px; }
+/* 対局履歴（各局の結果）。四家立直は山切れの流局と区別して強調 */
+.match-log ol { margin: 6px 0 0; padding-left: 1.6em; font-size: 13px; }
+.match-log li { padding: 2px 0; }
+.match-log .ml-label { display: inline-block; min-width: 5.5em; font-weight: 700; }
+.match-log .ml-4r, .result h2.four-riichi small { color: #8a3b12; }
 .reveal { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 4px 0; border-bottom: 1px solid #e5dfcd; }
 .reveal .who { font-size: 12px; width: 100%; }
 .reveal .tiles { display: inline-flex; gap: 1px; flex-wrap: wrap; }
