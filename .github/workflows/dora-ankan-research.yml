@@ -1,0 +1,29 @@
+name: Dora Ankan conservation simulation (no deploy)
+on:
+  pull_request:
+    paths:
+      - 'tools/dora-ankan-compare.mjs'
+      - '.github/workflows/dora-ankan-research.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check tools/dora-ankan-compare.mjs
+      - name: Run existing AI for math1 and math2 with and without 14 deadwall and ankan
+        run: |
+          mkdir -p /tmp/kan
+          KAN_GAMES=100 node tools/dora-ankan-compare.mjs | tee /tmp/kan/results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dora-ankan-conservation
+          path: /tmp/kan/*.json
+          if-no-files-found: error
