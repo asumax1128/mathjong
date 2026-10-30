@@ -77,7 +77,7 @@ jobs:
       - name: New-rule table UI, rules unification, opponent select, tile faces, furiten and riichi waits, function-tile pon, layouts (8 viewports), new-rule play, auto tsumogiri, one-round match, four riichi
         run: |
           mkdir -p /tmp/new-rules-ui
-          node tests/e2e/play.mjs --only v08NewRulesTable,v08NewRulesLayout,newRulesPlay,v09RulesUnified,v09SelectTop,v09TileFaces,v09FuritenWaits,v09FuncPon,v09Layout,v10AutoTsumogiri,v10AutoTsumoLayout,v11OneRoundTitle,v11OneRoundEnd,v11FourRiichi,v11Layout,v12Deposit,v12AgariYame,v12WaitsAndYaku,v12Layout,v03bHints --shots /tmp/new-rules-ui
+          node tests/e2e/play.mjs --only v08NewRulesTable,v08NewRulesLayout,newRulesPlay,v09RulesUnified,v09SelectTop,v09TileFaces,v09FuritenWaits,v09FuncPon,v09Layout,v10AutoTsumogiri,v10AutoTsumoLayout,v11OneRoundTitle,v11OneRoundEnd,v11FourRiichi,v11Layout,v12Deposit,v12AgariYame,v12WaitsAndYaku,v12Layout,v13RiichiAssist,v03bHints --shots /tmp/new-rules-ui
       - name: Ver.0.7 table and Ver.0.4 match regression (legacy rules, 4/8-round matches)
         run: node tests/e2e/play.mjs --only v07MahjongTable,v07TableHintDock,v04Match,v04End,v06FreeSelect
       - uses: actions/upload-artifact@v4

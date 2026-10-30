@@ -6326,6 +6326,7 @@ async function v06FreeSelect(browser) {
 
 // 初心者の部屋：第1〜3段階を実際のタップで進め、エンジンの正誤・通常対局への復帰を検証。
 async function v07BeginnerRoom(browser) {
+  // docs/67：8段階の初心者の部屋。第1段階（数式・3つの面子）と第2段階の1つ目（ツモと打牌）
   for (const width of [320, 390, 430]) {
     const ctx = await newContext(browser, { viewport: { width, height: 844 }, isMobile: true, hasTouch: true });
     const page = await ctx.newPage();
@@ -6334,48 +6335,47 @@ async function v07BeginnerRoom(browser) {
     await page.locator('button[data-action="br-open"]').tap();
     await page.waitForSelector('.beginner-room');
     if (EXTERNAL) assert.equal(await page.evaluate(() => typeof window.__mathjong), 'undefined', '公開モードはテストフックを使わない');
-    assert.match(await page.locator('.br-sub').innerText(), /数学Ⅰ/);
+    assert.match(await page.locator('.br-sub').innerText(), /数学Ⅰ.*第1段階 \/ 8/);
+    assert.equal(await page.locator('.br-progress span').count(), 8);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'チュートリアルに横スクロールなし');
     const tile = async (i) => page.locator('.br-pick[data-idx="' + i + '"]').tap();
-    // Stage1: incorrect formula, then sin30=1/2.
     for (const i of [0, 2, 5]) await tile(i);
     await page.locator('button[data-action="br-check"]').tap();
     assert.match(await page.locator('.br-feedback').innerText(), /面子にならない/);
     for (const i of [3, 4, 1]) await tile(i);
     await page.locator('button[data-action="br-check"]').tap();
     assert.match(await page.locator('.br-feedback').innerText(), /正解/);
+    assert.equal(await page.locator('button[data-action="br-next"]').innerText(), '次の課題へ');
     await page.locator('button[data-action="br-next"]').tap();
     assert.match(await page.locator('.br-panel h2').innerText(), /3つの面子/);
-    // Stage2: three actual melds, including two distinct =1/2 tiles.
     for (const group of [[3, 5, 2], [0, 8, 7], [6, 1, 4]]) {
       for (const i of group) await tile(i);
       await page.locator('button[data-action="br-check"]').tap();
     }
     assert.match(await page.locator('.br-feedback').innerText(), /和了形/);
+    assert.equal(await page.locator('button[data-action="br-next"]').innerText(), '第2段階へ進む');
     await page.locator('button[data-action="br-next"]').tap();
-    // Stage3: wrong discard, then discard =-1 for tenpai.
     await tile(1);
     await page.locator('button[data-action="br-check"]').tap();
     assert.match(await page.locator('.br-feedback').innerText(), /惜しい/);
     await tile(5);
     await page.locator('button[data-action="br-check"]').tap();
     assert.match(await page.locator('.br-feedback').innerText(), /和了できる/);
-    assert.equal(await page.locator('button[data-action="br-next"]').innerText(), '第4段階へ進む');
     await page.locator('button[data-action="br-next"]').tap();
-    await page.waitForSelector('.bp[data-lesson="4A"]');
+    await page.waitForSelector('.bp[data-lesson="D1"]');
     await page.locator('button[data-action="br-title"]').tap();
     await page.waitForSelector('.title-screen');
-    // The tutorial must not alter the normal selection screen.
     await page.locator('button[data-action="choose-opponents"]').tap();
     assert.equal(await page.locator('.opp-card').count(), 12);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  console.log('✓ 初心者の部屋：3段階の誤答・正答・画面遷移、320/390/430px、通常対局の入口');
+  console.log('✓ 初心者の部屋（8段階）：第1段階（数式・3つの面子）・第2段階の打牌の誤答・正答・画面遷移、320/390/430px、通常対局の入口');
 }
 
-// 初心者の部屋 第4〜6段階：タップだけで第1段階から卒業試験まで進み、途中の再開・一覧・やり直し・保存できない端末を確かめる
+// 初心者の部屋（docs/67）：タップだけで全8段階（捨て牌・聴牌と待ち・リーチ・ロン/ツモ・フリテン・鳴き・仕上げ）→ 卒業試験の1局戦。
+// 途中の再開・一覧・やり直し・受け直し・保存できない端末・版1の進み具合の引き継ぎ
 async function v07BeginnerRoom2(browser) {
   const noHScroll = async (page, where) => assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${where}：横スクロールなし`);
   for (const width of [320, 375, 390, 430]) {
@@ -6390,171 +6390,227 @@ async function v07BeginnerRoom2(browser) {
     const pickTile = (label) => page.locator(`.bp-tile[aria-label="${label}"], .bp-tile[aria-label="${label}（ツモ）"]`).first().tap();
     const feedback = async () => (await page.locator('.br-feedback').allInnerTexts()).join('\n');
     const count = (sel) => page.locator(sel).count();
-    // 第1〜3段階
+    const info = async () => (await page.locator('.bp-info').count() ? (await page.locator('.bp-info').innerText()).replace(/\s+/g, ' ') : '');
+    // 第1段階・第2段階の1つ目
     for (const i of [3, 4, 1]) await page.locator(`.br-pick[data-idx="${i}"]`).tap();
     await tap('br-check'); await tap('br-next');
     for (const g of [[3, 5, 2], [0, 8, 7], [6, 1, 4]]) { for (const i of g) await page.locator(`.br-pick[data-idx="${i}"]`).tap(); await tap('br-check'); }
     await tap('br-next');
     await page.locator('.br-pick[data-idx="5"]').tap(); await tap('br-check'); await tap('br-next');
-    // 4-A：上家の =1/2 → チーのボタンは1つだけ・ポン／ロンなし。見送るは練習では止まる
-    await lesson('4A');
-    assert.match(await page.locator('.br-sub').innerText(), /第4段階 \/ 6/);
-    await noHScroll(page, `${width}px 4-A`);
-    assert.equal(await count('button[data-action="bp-chi"]'), 1);
-    assert.equal(await count('button[data-action="bp-pon"], button[data-action="bp-ron"]'), 0);
-    assert.match(await page.locator('button[data-action="bp-chi"]').innerText(), /sin\s*30\s*°\s*=\s*1\s*2/);
-    assert.match(await page.locator('.bp-seat[data-seat="3"] .bp-name').innerText(), /上家.*練習用CPU/);
-    await tap('bp-pass');
-    assert.match(await feedback(), /チーを押して/);
-    await tap('bp-chi');
-    assert.match(await page.locator('.bp-status').innerText(), /ツモをしないで/);
-    assert.equal(await count('.bp-seat.me .bp-meld'), 1);
-    assert.equal(await count('.bp-hand .bp-tile'), 6);
-    await pickTile('90°'); await tap('bp-discard');
-    assert.match(await feedback(), /チー成功/);
-    assert.equal(await page.locator('button[data-action="br-next"]').innerText(), '次の課題へ');
-    await tap('br-next');
-    // 4-B：下家・対面の =1/2 ではボタンが出ない（続けるだけ）、上家でチー
-    await lesson('4B');
-    for (const who of [/下家/, /対面/]) {
-      assert.match(await page.locator('.bp-pause').innerText(), who);
-      assert.equal(await count('button[data-action="bp-chi"]'), 0, 'チーのボタンは出ない');
-      await tap('bp-continue');
-    }
-    assert.equal(await count('button[data-action="bp-chi"]'), 1);
-    await tap('bp-chi'); await pickTile('90°'); await tap('bp-discard');
-    assert.match(await feedback(), /上家の捨て牌だけ/);
-    // 途中で再読み込み → 一覧の「続きから」で 4-B から（完了は次へ進むまで記録しない課題の途中）
-    await tap('br-next');
-    await lesson('4C');
-    await page.reload();
-    await page.locator('button[data-action="br-open"]').tap();
-    await page.waitForSelector('.br-list-view');
-    await noHScroll(page, `${width}px 一覧`);
-    assert.match(await page.locator('.br-stage[data-stage="3"]').innerText(), /途中（課題3\/4）/);
-    assert.equal(await page.locator('.br-stage[data-stage="4"]').isDisabled(), true, '未開放の段階は選べない');
-    assert.match(await page.locator('.br-stage[data-stage="0"]').innerText(), /クリア/);
-    await tap('br-resume');
-    // 4-C：対面の sin → ポン
-    await lesson('4C');
-    assert.equal(await count('button[data-action="bp-chi"]'), 0);
-    await tap('bp-pon'); await pickTile('90°'); await tap('bp-discard');
-    assert.match(await feedback(), /ポン成功/);
-    await tap('br-next');
-    // 4-D：135° 以外は止まる、120° ではロンなし、60° でロン
-    await lesson('4D');
-    await tap('bp-chi');
-    await pickTile('tan'); await tap('bp-discard');
-    assert.match(await feedback(), /135° を捨てよう/);
+    // 2-B 捨てる牌を選ぶ：完成面子の牌は止める → 135°
+    await lesson('D1');
+    await noHScroll(page, `${width}px 2-B`);
+    await pickTile('30°'); await tap('bp-discard');
+    assert.match(await feedback(), /完成している/);
     await pickTile('135°'); await tap('bp-discard');
-    assert.match(await page.locator('.bp-pause').innerText(), /役がない/);
-    assert.equal(await count('button[data-action="bp-ron"]'), 0);
-    await tap('bp-continue');
-    assert.equal(await count('button[data-action="bp-ron"]'), 1);
-    await tap('bp-ron');
-    assert.match(await page.locator('.bp-result').innerText(), /象限一色/); // docs/65：役名の統合
-    assert.match(await page.locator('.br-panel').innerText(), /ロン ＞ ポン ＞ チー/);
-    assert.equal(await page.locator('button[data-action="br-next"]').innerText(), '第5段階へ進む');
+    assert.match(await feedback(), /よい判断/);
     await tap('br-next');
-    // 5-A：リーチ。聴牌にならない牌ではリーチボタンが押せない。リーチ後はツモ切りだけ
+    // 3-A 聴牌：選ぶと捨てた後の待ち・聴牌にならない牌は止める → 135° で =1 待ち
+    await lesson('T1');
+    assert.equal(await info(), '', '選ぶまでは待ちを出さない');
+    await pickTile('tan');
+    assert.match(await info(), /聴牌にならない/);
+    await pickTile('135°');
+    assert.match(await info(), /この牌を捨てると待ち/);
+    await tap('bp-discard');
+    assert.match(await feedback(), /聴牌！　待ちは =1/);
+    assert.match(await info(), /聴牌 待ち/);
+    await tap('br-next');
+    // 3-B 待ち牌クイズ：30°・150°
+    await page.waitForSelector('.br-quiz');
+    await page.locator('.br-pick[data-idx="1"]').tap(); await tap('br-check');
+    assert.match(await feedback(), /あと1種類/);
+    await page.locator('.br-pick[data-idx="7"]').tap(); await tap('br-check');
+    assert.match(await feedback(), /正解/);
+    await tap('br-next');
+    // 4-A リーチ：ボタンの強調・金の印・選ぶと待ち・宣言料5点・リーチ後はツモ切り
     await lesson('5A');
-    await pickTile('sin');
+    assert.match(await page.locator('.bp-status').innerText(), /リーチできるよ/);
+    assert.ok(await count('.bp-tile.riichi-cand') >= 1, '聴牌になる牌に金の印');
+    assert.match(await page.locator('button[data-action="bp-riichi"]').innerText(), /宣言料5点/);
     assert.equal(await page.locator('button[data-action="bp-riichi"]').isDisabled(), true);
     await pickTile('=−1');
+    assert.match(await info(), /この牌を捨てると待ち/);
     await tap('bp-discard');
     assert.match(await feedback(), /リーチして捨てる/);
     await tap('bp-riichi');
     assert.match(await page.locator('.bp-status').innerText(), /リーチ中/);
     assert.equal(await count('.bp-hand .bp-tile:not([disabled])'), 1, 'ツモした牌だけ選べる');
+    assert.match(await info(), /リーチの待ち/);
     await page.locator('.bp-tile.drawn').tap(); await tap('bp-discard');
     assert.match(await feedback(), /ツモ切り/);
     await tap('br-next');
-    // 5-B：ロン
+    // 5-A ロン・5-B ツモ
     await lesson('5B');
     await tap('bp-pass');
     assert.match(await feedback(), /ロンを押そう/);
     await tap('bp-ron');
     assert.match(await page.locator('.bp-result').innerText(), /ロン和了[\s\S]*下家（右）が払う/);
     await tap('br-next');
-    // 5-C：ツモ
     await lesson('5C');
     assert.equal(await count('button[data-action="bp-ron"]'), 0);
-    const checkTsumoOnly = async () => {
-      assert.match(await page.locator('.bp-status').innerText(), /ツモで和了しよう/);
-      assert.equal(await count('button[data-action="bp-riichi"], button[data-action="bp-discard"]'), 0, '課題で受け付けない操作は表示しない');
-      assert.equal(await page.locator('button[data-action="bp-tsumo"]').isEnabled(), true);
-    };
-    await checkTsumoOnly();
-    await page.locator('.bp-tile.drawn').tap();
-    await checkTsumoOnly();
-    await pickTile('sin');
-    await checkTsumoOnly();
+    assert.equal(await count('button[data-action="bp-riichi"], button[data-action="bp-discard"]'), 0, '課題で受け付けない操作は表示しない');
     await tap('bp-tsumo');
     assert.match(await page.locator('.bp-result').innerText(), /ツモ和了[\s\S]*ほかの3人が払う/);
-    assert.deepEqual((await page.locator('.bp-settle td:nth-child(3)').allInnerTexts()).map((x) => parseInt(x, 10)), [108, 98, 98, 96], '5-C：子ツモの精算と合計400点');
+    assert.deepEqual((await page.locator('.bp-settle td:nth-child(3)').allInnerTexts()).map((x) => parseInt(x, 10)), [108, 98, 98, 96], '子ツモの精算と合計400点');
+    // 途中で再読み込み → 一覧の「続きから」
     await tap('br-next');
-    // 卒業試験：ヒント→やり直し→リーチ→ロンを見送る→ツモ
-    await lesson('6');
-    assert.match(await page.locator('.br-sub').innerText(), /第6段階 \/ 6/);
-    await tap('br-hint');
-    assert.match(await page.locator('.br-hint').innerText(), /90° を捨てると/);
+    await lesson('F1');
+    await page.reload();
+    await page.locator('button[data-action="br-open"]').tap();
+    await page.waitForSelector('.br-list-view');
+    await noHScroll(page, `${width}px 一覧`);
+    assert.match(await page.locator('.br-stage[data-stage="4"]').innerText(), /クリア/);
+    assert.match(await page.locator('.br-stage[data-stage="5"]').innerText(), /挑戦できる/);
+    assert.equal(await page.locator('.br-stage[data-stage="6"]').isDisabled(), true, '未開放の段階は選べない');
+    await tap('br-resume');
+    // 6-A 捨て牌のフリテン
+    await lesson('F1');
+    await pickTile('30°'); await tap('bp-discard');
     await pickTile('135°'); await tap('bp-discard');
-    assert.match(await feedback(), /聴牌（あと1枚で和了の形）がくずれた/);
-    await tap('br-reset');
+    assert.match(await page.locator('.bp-pause').innerText(), /捨て牌のフリテン/);
+    assert.equal(await count('button[data-action="bp-ron"]'), 0);
+    assert.match(await info(), /フリテン\s*ロン不可：自分の捨て牌に待ちがある/);
+    await tap('bp-continue');
+    await tap('bp-tsumo');
+    assert.match(await feedback(), /ツモ和了！　フリテン/);
+    await tap('br-next');
+    // 6-B 見逃しのフリテン
+    await lesson('F2');
+    await tap('bp-ron');
+    assert.match(await feedback(), /見送る/);
+    await tap('bp-pass');
+    assert.match(await page.locator('.bp-pause').innerText(), /次のツモまで/);
+    assert.match(await info(), /見逃した/);
+    await tap('bp-continue');
+    await page.locator('.bp-tile.drawn').tap(); await tap('bp-discard');
+    await tap('bp-ron');
+    assert.match(await feedback(), /ロン和了/);
+    await tap('br-next');
+    // 鳴き：4課題
+    await lesson('4A');
+    await tap('bp-chi'); await pickTile('90°'); await tap('bp-discard'); await tap('br-next');
+    await lesson('4B');
+    await tap('bp-continue'); await tap('bp-continue');
+    await tap('bp-chi'); await pickTile('90°'); await tap('bp-discard'); await tap('br-next');
+    await lesson('4C');
+    await tap('bp-pon'); await pickTile('90°'); await tap('bp-discard'); await tap('br-next');
+    await lesson('4D');
+    await tap('bp-chi'); await pickTile('135°'); await tap('bp-discard');
+    assert.match(await page.locator('.bp-pause').innerText(), /役がない/);
+    await tap('bp-continue'); await tap('bp-ron');
+    assert.match(await page.locator('.bp-result').innerText(), /象限一色/);
+    assert.equal(await page.locator('button[data-action="br-next"]').innerText(), '第8段階へ進む');
+    await tap('br-next');
+    // 8-A 仕上げの練習：リーチ → ロンを見送る → ツモ
     await lesson('6');
-    assert.equal(await count('.bp-seat.me .bp-river .tile'), 0, 'やり直しは最初の局面から');
+    assert.match(await page.locator('.br-sub').innerText(), /第8段階 \/ 8/);
     await pickTile('90°'); await tap('bp-riichi');
     await tap('bp-pass');
-    assert.match(await feedback(), /見送った/);
-    assert.equal(await count('button[data-action="bp-tsumo"]'), 1);
-    await noHScroll(page, `${width}px 卒業試験`);
     await tap('bp-tsumo');
-    const grad = await page.locator('.br-panel').innerText();
-    assert.match(grad, /卒業試験 合格/);
-    assert.match(grad, /初心者の部屋 修了/);
-    assert.match(grad, /リーチ/);
-    const scores = await page.locator('.bp-settle td:nth-child(3)').allInnerTexts();
-    assert.equal(scores.reduce((a, x) => a + parseInt(x, 10), 0), 400, '精算後の合計400点');
-    await noHScroll(page, `${width}px 修了`);
-    // 「実際の対局に挑戦する」→ 通常の対戦相手の選択（12人）
-    await tap('br-challenge');
-    await page.waitForSelector('.opp-card');
-    assert.equal(await page.locator('.opp-card').count(), 12);
-    // 進み具合：6段階すべてクリアで保存、通常の設定キーは変えない
-    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('mj-beginner-room-v1')));
-    assert.deepEqual(saved.cleared, [true, true, true, true, true, true]);
-    // 卒業から選択画面へ戻るだけでなく、通常対局を実際に開始できる。
-    for (const id of ['kanata', 'yuki', 'asuma']) await page.locator(`.opp-check[data-id="${id}"]`).tap();
-    await page.locator('.select-screen button[data-action="start-match"]').tap();
-    await page.waitForSelector('.hand .tile');
-    await noHScroll(page, `${width}px 卒業後の通常対局`);
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/beginner-normal-${width}.png`, fullPage: true });
-    // クリアした段階はもう一度遊べる
-    await openBeginnerPage(page);
+    assert.match(await page.locator('.br-panel').innerText(), /卒業試験 合格！|ツモ和了/);
+    await tap('br-next');
+    // 8-B 卒業試験：数学Ⅰ・Ⅱを選んで1局戦（初級の3人・現行ルール）
+    await page.waitForSelector('.br-exam');
+    await noHScroll(page, `${width}px 卒業試験の説明`);
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('mj-beginner-room-v2')));
+    assert.deepEqual(saved.cleared, [true, true, true, true, true, true, true, false], '卒業試験の前');
+    // 公開サイトと同じ条件（テスト用のフックなし）。数学Ⅰ・Ⅱを交互に。1局戦を画面の操作だけで最後まで打つのは 375・390px
+    const examMode = width % 2 ? 'math2' : 'math1';
+    if (![375, 390].includes(width)) {
+      await page.locator(`button[data-action="br-exam"][data-mode="${examMode}"]`).tap();
+      await page.waitForSelector('.hand .tile');
+      await noHScroll(page, `${width}px 卒業試験の対局`);
+      assert.match(await page.locator('.board-center').innerText(), /東1局/);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+      continue;
+    }
+    await page.evaluate(() => localStorage.setItem('mj-speed', 'fast'));
+    await page.reload();
     await page.locator('button[data-action="br-open"]').tap();
-    await page.locator('.br-stage[data-stage="3"]').tap();
-    await lesson('4A');
+    await page.waitForSelector('.br-list-view');
+    await page.locator('.br-stage[data-stage="7"]').tap();
+    await page.locator('button[data-action="br-next"]').waitFor({ state: 'detached' }).catch(() => {});
+    if (await page.locator('.br-exam').count() === 0) {
+      // 続き（仕上げの練習）から：卒業試験の画面まで進める
+      await lesson('6'); await pickTile('90°'); await tap('bp-riichi'); await tap('bp-pass'); await tap('bp-tsumo'); await tap('br-next');
+    }
+    await page.waitForSelector('.br-exam');
+    await page.locator(`button[data-action="br-exam"][data-mode="${examMode}"]`).tap();
+    await page.waitForSelector('.hand .tile');
+    await noHScroll(page, `${width}px 卒業試験の対局`);
+    const names = await page.locator('.seat-tag .name').allInnerTexts();
+    assert.deepEqual(names.filter((n) => n !== 'あなた').sort(), ['あおと', 'かなた', 'みつき'].sort(), '初級の3人');
+    assert.match(await page.locator('.board-center').innerText(), examMode === 'math1' ? /数学Ⅰ[\s\S]*東1局[\s\S]*供託/ : /数学Ⅱ[\s\S]*東1局[\s\S]*供託/);
+    // 画面の操作だけで打つ：和了できれば和了、宣言は見送る、自分の番はツモ牌（なければ左端）を2回タップ
+    for (let i = 0; i < 1500; i++) {
+      if (await page.locator('.overlay .final').count()) break;
+      if (await page.locator('.overlay .result button[data-action="next"]').count()) { await page.locator('.overlay .result button[data-action="next"]').click(); continue; }
+      const btn = async (a) => (await page.locator(`.actions button[data-action="${a}"]`).count()) > 0;
+      if (await btn('tsumo')) { await page.locator('.actions button[data-action="tsumo"]').click(); continue; }
+      if (await btn('ron')) { await page.locator('.actions button[data-action="ron"]').click(); continue; }
+      if (await btn('pass')) { await page.locator('.actions button[data-action="pass"]').click(); continue; }
+      if (await btn('tsumogiri')) { await page.locator('.actions button[data-action="tsumogiri"]').click(); continue; }
+      const t = page.locator('.hand .tile.tap.drawn, .hand .tile.tap').first();
+      if (await page.locator('.hand .tile.tap').count()) { await t.click(); if (await page.locator('.hand .tile.tap.selected').count()) await page.locator('.hand .tile.tap.selected').click(); continue; }
+      await page.waitForTimeout(60);
+    }
+    await page.waitForSelector('.overlay .final');
+    const fin = await page.locator('.overlay .final').innerText();
+    assert.match(fin, /卒業試験 (1位で合格！|合格（修了）)/);
+    assert.match(fin, /実施した局数：1局（1局戦・東1局のみ）/);
+    assert.match(fin, /卒業試験 1回/);
+    const after = await page.evaluate(() => JSON.parse(localStorage.getItem('mj-beginner-room-v2')));
+    assert.deepEqual([after.cleared[7], after.graduated, after.exam.plays, after.exam.lastMode], [true, true, 1, examMode]);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v13-exam-final-${width}.png` });
+    // 初心者の部屋へ戻る → 修了済み・どの段階も受け直せる
+    await page.locator('.final button[data-action="br-back"]').tap();
+    await page.waitForSelector('.br-list-view');
+    assert.match(await page.locator('.br-list-view').innerText(), /修了済み/);
+    assert.equal(await page.locator('.br-stage[disabled]').count(), 0);
+    await page.locator('button[data-action="br-restart"]').tap();
+    assert.match(await page.locator('.br-sub').innerText(), /第1段階/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  // 保存できない端末（localStorage が例外）：最初から最後の段階まで遊べる（ここでは第4段階まで確認）
-  const ctx = await newContext(browser, { viewport: { width: 320, height: 700 }, isMobile: true, hasTouch: true });
-  await ctx.addInitScript(() => {
-    Object.defineProperty(window, 'localStorage', { get() { throw new Error('SecurityError'); } });
-  });
-  const page = await ctx.newPage();
-  const errors = watchErrors(page);
-  await openBeginnerPage(page);
-  await page.locator('button[data-action="br-open"]').tap();
-  for (const i of [3, 4, 1]) await page.locator(`.br-pick[data-idx="${i}"]`).tap();
-  await page.locator('button[data-action="br-check"]').tap();
-  await page.locator('button[data-action="br-list"]').tap();
-  assert.match(await page.locator('.br-list-view').innerText(), /保存できません/);
-  assert.match(await page.locator('.br-stage[data-stage="0"]').innerText(), /クリア/);
-  assert.equal(await page.locator('.br-stage[data-stage="1"]').isDisabled(), false);
-  assert.deepEqual(errors, []);
-  await ctx.close();
-  console.log('✓ 初心者の部屋 第4〜6段階：チー・ポン・役の制限・リーチ・ロン・ツモ・卒業試験、再開・一覧・やり直し・保存不可、320/375/390/430px');
+  // 版1（旧6段階）の進み具合：引き継いで表示し、版1のキーは消さない
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const v1 = JSON.stringify({ v: 1, cleared: [true, true, true, true, true, false], resume: { stage: 4, part: 2 } });
+    await ctx.addInitScript((v1) => { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('mj-beginner-room-v1', v1); sessionStorage.setItem('seeded', '1'); } }, v1);
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await openBeginnerPage(page);
+    await page.locator('button[data-action="br-open"]').tap();
+    await page.waitForSelector('.br-list-view');
+    const text = await page.locator('.br-list-view').innerText();
+    assert.match(text, /引き継ぎました/);
+    for (const st of [0, 1, 2, 3, 4, 6]) assert.match(await page.locator(`.br-stage[data-stage="${st}"]`).innerText(), /クリア/);
+    assert.match(await page.locator('.br-stage[data-stage="5"]').innerText(), /挑戦できる/);
+    assert.equal(await page.evaluate(() => localStorage.getItem('mj-beginner-room-v1')), v1, '版1のキーはそのまま');
+    await page.locator('button[data-action="br-resume"]').tap();
+    await page.waitForSelector('.bp[data-lesson="5C"]');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // 保存できない端末（localStorage が例外）：遊べる・保存できないことを知らせる
+  {
+    const ctx = await newContext(browser, { viewport: { width: 320, height: 700 }, isMobile: true, hasTouch: true });
+    await ctx.addInitScript(() => { Object.defineProperty(window, 'localStorage', { get() { throw new Error('SecurityError'); } }); });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await openBeginnerPage(page);
+    await page.locator('button[data-action="br-open"]').tap();
+    for (const i of [3, 4, 1]) await page.locator(`.br-pick[data-idx="${i}"]`).tap();
+    await page.locator('button[data-action="br-check"]').tap();
+    await page.locator('button[data-action="br-list"]').tap();
+    assert.match(await page.locator('.br-list-view').innerText(), /保存できません/);
+    assert.equal(await page.locator('.br-stage[data-stage="1"]').isDisabled(), true, '第1段階の途中');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 初心者の部屋（8段階）：捨て牌・聴牌と待ち（クイズ）・リーチ（強調・印・待ち・宣言料）・ロン/ツモ・フリテン2種・鳴き・仕上げ → 卒業試験の1局戦（数学Ⅰ/Ⅱ・記録）・受け直し・再開・版1の引き継ぎ・保存不可、320/375/390/430px');
 }
 
 // ---- Ver.0.7：麻雀卓と下部ヒント・数式確認エリアの画面検査 ----
@@ -8367,6 +8423,97 @@ async function v12Layout(browser) {
   console.log('✓ 供託・リーチ前の待ちの画面：8画面で卓の中央に収まり、待ちは手牌の上・操作バーと重ならない・横スクロールなし');
 }
 
+// ---- docs/67：通常対局のリーチ支援（ボタンの強調・聴牌になる牌の印・宣言前の待ち・宣言料）----
+async function v13RiichiAssist(browser) {
+  for (const [width, height] of V09_SIZES) {
+    for (const mode of width === 390 || width === 667 ? ['math1', 'math2'] : ['math1']) {
+      const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
+      const page = await ctx.newPage(), errors = watchErrors(page);
+      const label = `${width}x${height} ${mode}`;
+      await page.goto(LOCAL + `?mode=${mode}&seed=7&speed=slow&newrules=2`);
+      await page.locator('.hand .tile').first().waitFor();
+      await r2Scene(page, TENPAI2);
+      // (1) リーチできる：金色のボタン（宣言料5点）・聴牌になる牌だけに印（エンジンの riichiOptions と一致）
+      const st = await page.evaluate(() => {
+        const { S } = window.__mathjong, g = S.game;
+        const opt = new Set(g.riichiOptions(0).map((o) => o.type));
+        const tiles = [...document.querySelectorAll('.hand .tile[data-id]')].map((e) => ({ cand: e.classList.contains('riichi-cand'), ok: opt.has(g.typeOf(Number(e.dataset.id))) }));
+        const btn = document.querySelector('button[data-action="riichi"]');
+        return { tiles, cls: btn.className, text: btn.innerText.replace(/\s+/g, ' '), anim: getComputedStyle(btn).animationName };
+      });
+      assert.ok(st.tiles.every((t) => t.cand === t.ok) && st.tiles.some((t) => t.cand), `印はリーチの選択肢と一致 ${label}`);
+      assert.match(st.cls, /riichi-ready/);
+      assert.equal(st.text, 'リーチ 宣言料5点');
+      assert.equal(st.anim, 'riichi-ready', '通常は光る');
+      // (2) 「リーチ」→ 宣言牌の選択：選ぶ前は確定できない。聴牌にならない牌は選べない（誤タップ防止）
+      await page.locator('button[data-action="riichi"]').click();
+      assert.equal(await page.locator('button[data-action="riichi-discard"]').isDisabled(), true);
+      assert.match(await page.locator('.riichi-status').innerText(), /金の印の牌を選ぶと待ちを表示/);
+      const cosId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'f:cos'); });
+      await page.locator(`.hand .tile[data-id="${cosId}"]`).click({ force: true });
+      assert.equal(await page.evaluate(() => window.__mathjong.S.selected), null, '聴牌にならない牌は選べない');
+      // (3) 聴牌になる牌を選ぶ → 捨てた後の待ち（30°・150°）を確認 → 確定ボタンに宣言料
+      await page.locator('.hand .tile.drawn').click();
+      const info = (await page.locator('.self-info').innerText()).replace(/\s+/g, ' ');
+      assert.match(info, /捨てると待ち/);
+      assert.equal(await page.locator('.self-info .si-wait').count(), 2);
+      assert.match(await page.locator('.riichi-status').innerText(), /待ちを確認/);
+      assert.match((await page.locator('button[data-action="riichi-discard"]').innerText()).replace(/\s+/g, ' '), /リーチして捨てる 宣言料5点を供託へ/);
+      // ボタンの大きさ・重なり・はみ出し
+      const lay = await page.evaluate(() => {
+        const b = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height }; };
+        return { btns: [...document.querySelectorAll('.actions button')].map(b), status: b(document.querySelector('.actions .status')), bar: b(document.querySelector('footer.bar')),
+          clip: [...document.querySelectorAll('.actions button')].map((e) => e.scrollWidth - e.clientWidth), overflow: document.documentElement.scrollWidth - innerWidth };
+      });
+      const ov = (a, c) => Math.min(a.r, c.r) - Math.max(a.l, c.l) > 0.75 && Math.min(a.b, c.b) - Math.max(a.t, c.t) > 0.75;
+      for (const [i, x] of lay.btns.entries()) {
+        assert.ok(x.h >= 44 && x.w >= 44, `押しやすい大きさ ${label} ${JSON.stringify(x)}`);
+        assert.ok(x.b <= height + 0.5 && x.r <= width + 0.5 && x.l >= -0.5, `画面内 ${label}`);
+        for (const y of lay.btns.slice(i + 1)) assert.ok(!ov(x, y), `ボタンが重ならない ${label}`);
+        assert.ok(!ov(x, lay.status), `状態欄と重ならない ${label}`);
+      }
+      assert.ok(lay.clip.every((c) => c <= 1), `文字が切れない ${label} ${lay.clip}`);
+      assert.ok(lay.overflow <= 1, `横にはみ出さない ${label}`);
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/v13-riichi-${width}x${height}-${mode}.png` });
+      // (4) 宣言：リーチ成立・名札は −5・供託 5点
+      await page.locator('button[data-action="riichi-discard"]').click();
+      const after = await page.evaluate(() => { const { S } = window.__mathjong; clearTimeout(S.timer); S.timer = null; return { riichi: !!S.game.riichi[0] }; });
+      assert.equal(after.riichi, true);
+      assert.match(await page.locator('.seat-tag.seat-0 .score').innerText(), /^95/);
+      assert.match(await page.locator('.board-center .bc-pot').innerText(), /供託\s*5点/);
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  }
+  // 視覚演出「簡易」・動きを減らす設定では光らない（強調の色は残す）
+  for (const [lite, reduced] of [[true, false], [false, true]]) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: reduced ? 'reduce' : 'no-preference' });
+    if (lite) await ctx.addInitScript(() => localStorage.setItem('mj-effects', 'lite'));
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?mode=math1&seed=7&speed=slow&newrules=2');
+    await page.locator('.hand .tile').first().waitFor();
+    if (lite) await page.evaluate(() => { const { S, render } = window.__mathjong; S.fx.mode = 'lite'; render(); });
+    await r2Scene(page, TENPAI2);
+    const st = await page.evaluate(() => { const b = document.querySelector('button[data-action="riichi"]'); return { anim: getComputedStyle(b).animationName, bg: getComputedStyle(b).backgroundImage }; });
+    assert.equal(st.anim, 'none', lite ? '簡易' : '動きを減らす');
+    assert.match(st.bg, /gradient/, '強調の色は残す');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // 宣言料なし（過去の版 newrules=1）：ボタンに宣言料を書かない
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?mode=math1&seed=7&speed=slow&newrules=1');
+    await page.locator('.hand .tile').first().waitFor();
+    await r2Scene(page, TENPAI2);
+    assert.equal((await page.locator('button[data-action="riichi"]').innerText()).trim(), 'リーチ');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ リーチ支援（8画面・数学Ⅰ/Ⅱ）：金色のボタン（宣言料5点）・聴牌になる牌の印（エンジンと一致）・聴牌にならない牌は選べない・選ぶと待ち・確定に宣言料・44px以上で重ならない・成立で −5 と供託・簡易/動きを減らす設定は光らない・過去の版は宣言料なし');
+}
+
 async function chooseAndStartFromSelect(page, ids) {
   const cur = await page.locator('.opp-card.selected').evaluateAll((es) => es.map((e) => e.dataset.id));
   for (const id of cur) if (!ids.includes(id)) await page.locator(`.opp-check[data-id="${id}"]`).click();
@@ -8392,7 +8539,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -8463,6 +8610,7 @@ try {
   await v12AgariYame(browser);
   await v12WaitsAndYaku(browser);
   await v12Layout(browser);
+  await v13RiichiAssist(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。

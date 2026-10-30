@@ -1,4 +1,4 @@
-name: Public beginner room 1-6 (read-only)
+name: Public beginner room 1-8 (read-only)
 on:
   # 公開済みのUIだけを検査する。未公開のPRを本番に要求せず、PR回帰はローカルE2Eで実行。
   page_build:
