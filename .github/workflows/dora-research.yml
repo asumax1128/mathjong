@@ -1,0 +1,28 @@
+name: Dora deadwall research (no deploy)
+on:
+  pull_request:
+    paths:
+      - 'tools/dora-compare.mjs'
+      - '.github/workflows/dora-research.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Matched-seed Game+AI comparison
+        run: |
+          mkdir -p /tmp/dora
+          DORA_GAMES=100 node tools/dora-compare.mjs | tee /tmp/dora/ai-100.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dora-real-ai-comparison
+          path: /tmp/dora/*.json
+          if-no-files-found: error
