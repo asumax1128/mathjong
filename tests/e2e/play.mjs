@@ -87,15 +87,16 @@ async function invariants(page) {
   });
 }
 
-async function playDevice(browser, dev, seed, rounds, stats, { autopass = false, mode = 'legacy', newRules = false, ai = null } = {}) {
+async function playDevice(browser, dev, seed, rounds, stats, { autopass = false, mode = 'legacy', ruleset = 0, ai = null } = {}) {
+  const newRules = ruleset >= 1;
   const ctx = await newContext(browser, { viewport: dev.viewport, isMobile: dev.isMobile, hasTouch: dev.hasTouch, deviceScaleFactor: 2 });
   // Ver.0.2-B：チーのオートパス ON で通しプレイ（チーのみの宣言は画面に出ない）
   if (autopass) await ctx.addInitScript(() => { try { localStorage.setItem('mj-chi-autopass', '1'); } catch { /* */ } });
   const page = await ctx.newPage();
   const errors = watchErrors(page);
-  await page.goto(`${LOCAL}?${mode === 'legacy' ? 'rules=legacy' : `mode=${mode}`}&seed=${seed}&speed=test&len=8${newRules ? '&newrules=1' : ''}${ai ? `&ai=${ai}` : ''}`); // 8局戦（最大6局を続けて遊ぶため）
-  // 新ルール（docs/61）：URL の newrules=1 のときだけ。付いていない URL は従来ルール（ドラ表示・暗カンなし）
-  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), newRules, `${dev.name}: ルール`);
+  await page.goto(`${LOCAL}?${mode === 'legacy' ? 'rules=legacy' : `mode=${mode}`}&seed=${seed}&speed=test&len=8${ruleset ? `&newrules=${ruleset}` : ''}${ai ? `&ai=${ai}` : ''}`); // 8局戦（最大6局を続けて遊ぶため）
+  // ルールの版（docs/62）：URL の newrules（1＝新ルール初版、2＝現行）。付いていない URL は従来ルール（ドラ表示・暗カンなし）
+  assert.equal(await page.evaluate(() => window.__mathjong.S.game.ruleset), ruleset, `${dev.name}: ルールの版`);
   assert.equal(await page.locator('.dora-box').count(), newRules ? 1 : 0, `${dev.name}: ドラ表示は新ルールだけ`);
   const tap = (loc) => (dev.hasTouch ? loc.tap() : loc.click());
 
@@ -2195,10 +2196,11 @@ async function chiAutoPass(browser) {
   // (12) バージョン表示：ヘッダー・ページタイトル・再現情報
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.7.0-a');
-    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.7.0-a');
+    // 版の変更（docs/62）：画面 0.7.0・エンジン 0.6.0
+    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.7.0');
+    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.7.0');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.7\.0-a ・ エンジン v0\.5\.0-a/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.7\.0 ・ エンジン v0\.6\.0/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -7119,105 +7121,384 @@ async function v08NewRulesTable(browser) {
 
 // 新ルールの通しプレイ：数学Ⅰ・Ⅱ、AI 難易度3つ（従来の ?ai=）。暗カンが出れば画面から実行する
 async function newRulesPlay(browser, stats = { rounds: 0, wins: [0, 0, 0, 0], draws: 0, tsumo: 0, ron: 0, ronDeclined: 0, chi: 0, chiPassed: 0, chiOverriddenByRon: 0, discards: 0, yaku: {} }) {
-  const runs = [[DEVICES[0], 'math1', 'beginner', 6101], [DEVICES[1], 'math2', 'intermediate', 6202], [DEVICES[3], 'math2', 'advanced', 6303], [DEVICES[2], 'math1', 'advanced', 6404]];
-  for (const [dev, mode, ai, seed] of runs) {
-    await playDevice(browser, dev, seed, 2, stats, { mode, newRules: true, ai });
-    console.log(`✓ ${dev.name}: 新ルール ${mode === 'math1' ? '数学Ⅰ' : '数学Ⅱ'}・${ai} 2局 完走（暗カン ${stats.ankan || 0}回）`);
+  // 現行の新ルール（newrules=2）で数学Ⅰ・Ⅱ×3難易度、新ルール初版（newrules=1、過去の再現 URL）でも1回
+  const runs = [[DEVICES[0], 'math1', 'beginner', 6101, 2], [DEVICES[1], 'math2', 'intermediate', 6202, 2], [DEVICES[3], 'math2', 'advanced', 6303, 2], [DEVICES[2], 'math1', 'advanced', 6404, 2], [DEVICES[0], 'math2', 'intermediate', 6505, 1]];
+  for (const [dev, mode, ai, seed, ruleset] of runs) {
+    await playDevice(browser, dev, seed, 2, stats, { mode, ruleset, ai });
+    console.log(`✓ ${dev.name}: ${ruleset === 2 ? '新ルール' : '新ルール初版'} ${mode === 'math1' ? '数学Ⅰ' : '数学Ⅱ'}・${ai} 2局 完走（暗カン ${stats.ankan || 0}回）`);
   }
 }
 
-// 新旧ルールの選択：既定は従来ルール。タイトル・設定で選び、新しい対局から反映。保存・再戦・再現URL・12人の選択
-async function v08NewRulesSelect(browser) {
+// ===== 次回更新（docs/62）：牌の表示・フリテン・リーチの待ち・関数牌のポン禁止・新ルールへの一本化・相手選択の上部ボタン =====
+const V09_SIZES = [[320, 568], [375, 667], [390, 844], [667, 375], [844, 390], [768, 1024], [1180, 820], [1440, 900]];
+// 現行の新ルール（ruleset 2）の局面を作る：自分（親）の手牌を keys にし、王牌の表示牌以外から牌を交換する（保存則を保つ）
+async function r2Scene(page, hand) {
+  return page.evaluate((hand) => {
+    const m = window.__mathjong;
+    clearTimeout(m.S.timer); m.S.timer = null; m.fx.clear();
+    const old = m.S.game;
+    const g = new old.constructor({ rules: m.rules, seed: 7, dealer: 0, players: old.players, ruleset: 2 });
+    const key = (x) => (x.startsWith('=') ? `v:${x.slice(1)}` : /^\d+$/.test(x) ? `a:${x}` : `f:${x}`);
+    const T = (x) => m.rules.typeByKey.get(key(x)).idx;
+    const shown = new Set(g.deadWall.indicators.map((d) => d.id));
+    const conts = () => [...g.hands, g.wall];
+    const where = (id) => { for (const c of conts()) { const i = c.indexOf(id); if (i >= 0) return [c, i]; } return null; };
+    const swap = (a, b) => { if (a === b) return; const [ca, ia] = where(a), [cb, ib] = where(b); ca[ia] = b; cb[ib] = a; };
+    const h = g.hands[0], used = new Set();
+    hand.forEach((x, i) => {
+      const id = h.find((y) => g.typeOf(y) === T(x) && !used.has(y)) ?? conts().flat().find((y) => g.typeOf(y) === T(x) && !used.has(y) && !shown.has(y));
+      used.add(id); swap(h[i], id);
+    });
+    g.drawn = h.at(-1); g._riichiMemo = null;
+    // テスト用の操作：今の手番の席に key の牌をツモさせて（山の牌と交換）、捨てさせる
+    window.__r2 = {
+      T,
+      // 手番の席のツモ牌を、山にある key の牌と入れ替える
+      rigDraw(x) {
+        const s = g.current; const w = g.wall.findIndex((y) => g.typeOf(y) === T(x));
+        if (w < 0) throw new Error('no ' + x);
+        const d = g.drawn, hs = g.hands[s];
+        hs[hs.indexOf(d)] = g.wall[w]; g.wall[w] = d; g.drawn = hs[hs.indexOf(g.wall[w]) >= 0 ? -1 : hs.length - 1];
+        g.drawn = hs.find((y) => g.typeOf(y) === T(x) && y !== undefined && !g.rivers.flat().some((r) => r.id === y));
+        g._riichiMemo = null;
+      },
+      // 他家の打牌（宣言はすべて見送る）を、席0の判断番まで進める。discards：席→捨てさせる牌
+      // stopOnCall：自分のチー・ポンだけの宣言でも止まる（既定はロンのない自分の宣言を見送って進む）
+      until0(discards = {}, stopOnCall = false) {
+        for (let i = 0; i < 60 && g.pending(); i++) {
+          const p = g.pending();
+          if (p.seat === 0 && (p.type === 'turn' || p.ron || stopOnCall)) break;
+          if (p.seat === 0) { g.respond(0, { type: 'pass' }); continue; }
+          if (p.type === 'claim') { g.respond(p.seat, { type: 'pass' }); continue; }
+          if (discards[p.seat]) { this.rigDraw(discards[p.seat]); delete discards[p.seat]; }
+          g.discard(p.seat, g.drawn);
+        }
+        g.checkInvariants(); m.render(); m.step();
+        clearTimeout(m.S.timer); m.S.timer = null;
+      },
+    };
+    g.checkInvariants(); m.S.game = g; m.S.selected = null; m.S.scored = false; m.S.modal = null; m.render();
+    return { waits: null, ruleset: g.ruleset };
+  }, hand);
+}
+const r2State = (page) => page.evaluate(() => {
+  const g = window.__mathjong.S.game;
+  const info = document.querySelector('.self-info');
+  return { furiten: g.furitenOf(0), riichiWaits: g.riichiWaits[0], pending: g.pending() && { ...g.pending() },
+    info: info ? info.innerText.replace(/\s+/g, ' ') : null, infoTitle: info && info.querySelector('.si-furiten') ? info.querySelector('.si-furiten').getAttribute('title') : null,
+    waits: [...document.querySelectorAll('.self-info .si-wait')].map((e) => ({ label: e.querySelector('.tile').getAttribute('aria-label'), left: e.querySelector('small').textContent })),
+    ron: document.querySelectorAll('button[data-action="ron"]').length, pon: document.querySelectorAll('button[data-action="pon"]').length, tsumo: document.querySelectorAll('button[data-action="tsumo"]').length };
+});
+const TENPAI2 = ['cos', '180', '=-1', 'tan', '45', '=1', 'sin', '=1/2', '=-√3']; // 30°・150° 待ち＋ツモ牌（−√3）
+
+async function v09FuritenWaits(browser) {
+  for (const [width, height] of [[390, 844], [320, 568]]) {
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?mode=math1&seed=7&speed=slow&newrules=2');
+    await page.locator('.hand .tile').first().waitFor();
+    // (1) 同巡のフリテン（画面から見送る）：ロンのボタン → 見送る → 理由の表示 → 対面の 150° はロンの宣言なし → 自分のツモで解除 → ロンできる
+    await r2Scene(page, TENPAI2);
+    await page.locator('.hand .tile.drawn').tap(); await page.locator('.hand .tile.drawn').tap(); // −√3 を捨てる
+    await page.evaluate(() => { clearTimeout(window.__mathjong.S.timer); window.__mathjong.S.timer = null; });
+    await page.evaluate(() => window.__r2.until0({ 1: '30' }));
+    let st = await r2State(page);
+    assert.deepEqual([st.pending.seat, st.pending.type, st.pending.ron, st.ron], [0, 'claim', true, 1], '30° でロンできる');
+    assert.equal(st.info, null, 'フリテンでなければ表示しない（リーチ前は待ちも出さない）');
+    await page.locator('button[data-action="pass"]').tap();
+    await page.evaluate(() => { clearTimeout(window.__mathjong.S.timer); window.__mathjong.S.timer = null; });
+    await page.evaluate(() => window.__r2.until0({ 2: '150' }));
+    st = await r2State(page);
+    assert.deepEqual(st.furiten.reasons, [], '自分のツモで解除済み');
+    // 解除前（対面の 150° の時点）の表示は、記録から確かめる：見送らされた牌がある
+    const blocked = await page.evaluate(() => window.__mathjong.S.game.ronBlocked[0]);
+    assert.ok(blocked && blocked.reasons.includes('temporary'), '対面の 150° はフリテンでロンできなかった');
+    assert.equal(st.pending.type, 'turn');
+    // (2) 捨て牌のフリテン：150° を自分で捨てる（ツモ牌と入れ替え）→ 表示 → 下家の 30° でもロンできない → ツモ和了はできる
+    await page.evaluate(() => { window.__r2.rigDraw('150'); window.__mathjong.render(); });
+    assert.equal((await r2State(page)).tsumo, 1, '150° はツモ和了できる');
+    await page.locator('.hand .tile.drawn').tap(); await page.locator('.hand .tile.drawn').tap();
+    await page.evaluate(() => { clearTimeout(window.__mathjong.S.timer); window.__mathjong.S.timer = null; window.__mathjong.render(); });
+    st = await r2State(page);
+    assert.match(st.info, /フリテン/); assert.match(st.infoTitle, /待ちの牌を自分で捨てている/);
+    if (width > 360) assert.match(st.info, /捨て牌に待ち（150°）/);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v09-furiten-discard-${width}.png` });
+    await page.evaluate(() => window.__r2.until0({ 1: '30' }));
+    st = await r2State(page);
+    assert.equal(st.pending.type, 'turn', '下家の 30° ではロンの宣言がない');
+    assert.equal(st.ron, 0);
+    await page.evaluate(() => { window.__r2.rigDraw('30'); window.__mathjong.render(); });
+    assert.equal((await r2State(page)).tsumo, 1, 'フリテンでもツモ和了はできる');
+    // (3) リーチの待ち（実際の牌・見えていない残り枚数）・リーチ後の見逃し（局の終わりまで）
+    await r2Scene(page, TENPAI2);
+    await page.locator('button[data-action="riichi"]').tap();
+    await page.locator('.hand .tile.drawn').tap();
+    await page.locator('button[data-action="riichi-discard"]').tap();
+    await page.evaluate(() => { clearTimeout(window.__mathjong.S.timer); window.__mathjong.S.timer = null; window.__mathjong.render(); });
+    st = await r2State(page);
+    assert.deepEqual(st.waits.map((w) => w.label), ['30°', '150°'], 'リーチの待ちを牌で表示');
+    const unseen = await page.evaluate(async () => { const { unseenFromView } = await import('./src/engine/yakuhint.js'); const m = window.__mathjong; const u = unseenFromView(m.rules, m.S.game.viewFor(0)); return m.S.game.riichiWaits[0].map((t) => `残${u[t]}`); });
+    assert.deepEqual(st.waits.map((w) => w.left), unseen, '残りは公開情報と自分の手牌から');
+    assert.equal(st.furiten.furiten, false); assert.doesNotMatch(st.info, /フリテン/);
+    // 他家に待ちが渡らない：他家の AI に渡る riichi[] と view に待ちはない
+    const leak = await page.evaluate(() => { const g = window.__mathjong.S.game; return { riichi: Object.keys(g.riichi[0]).sort(), view: JSON.stringify(g.viewFor(1)).includes('riichiWaits') }; });
+    assert.deepEqual(leak, { riichi: ['tile', 'turn'], view: false });
+    await page.evaluate(() => window.__r2.until0({ 1: '30' }));
+    st = await r2State(page);
+    assert.equal(st.ron, 1, 'リーチ中も和了の牌ならロンできる');
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v09-riichi-ron-${width}.png` });
+    await page.locator('button[data-action="pass"]').tap();
+    await page.evaluate(() => { clearTimeout(window.__mathjong.S.timer); window.__mathjong.S.timer = null; });
+    await page.evaluate(() => window.__r2.until0({}));
+    st = await r2State(page);
+    assert.deepEqual(st.furiten.reasons, ['riichi']); assert.match(st.info, /リーチ後の見逃し/);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v09-riichi-furiten-${width}.png` });
+    await page.locator('button[data-action="tsumogiri"]').tap();
+    await page.evaluate(() => { clearTimeout(window.__mathjong.S.timer); window.__mathjong.S.timer = null; });
+    await page.evaluate(() => window.__r2.until0({ 2: '150' }));
+    st = await r2State(page);
+    assert.equal(st.pending.type, 'turn', 'リーチ後の見逃しの後は 150° でもロンの宣言がない');
+    await page.evaluate(() => { window.__r2.rigDraw('150'); window.__mathjong.render(); });
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.locator('.overlay .result').waitFor();
+    assert.match(await page.locator('.overlay .result').innerText(), /あなた の和了 ツモ[\s\S]*リーチ/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ フリテン（同巡の見逃し・捨て牌・リーチ後の見逃し）：ロンの宣言なし・ツモ和了は可・理由の表示／リーチの待ち（牌と見えていない残り枚数、他家に渡さない）');
+}
+
+async function v09FuncPon(browser) {
   const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const page = await ctx.newPage(), errors = watchErrors(page);
-  // タイトルのロゴ画像を読み終えてから画面を移る（読み込み中に離れると要求が中断され、エラーとして記録されるため）
+  await page.goto(LOCAL + '?mode=math1&seed=7&speed=slow&newrules=2');
+  await page.locator('.hand .tile').first().waitFor();
+  // 自分は sin・sin と 90°・90° を持つ。下家（AI）に sin を捨てさせる → ポンのボタンなし。90° → ポンのボタンあり → ポン
+  await r2Scene(page, ['sin', 'sin', '90', '90', '=-√3', '=-√3', '0', '0', '=1/√2']);
+  await page.locator('.hand .tile.drawn').tap(); await page.locator('.hand .tile.drawn').tap();
+  await page.evaluate(() => { clearTimeout(window.__mathjong.S.timer); window.__mathjong.S.timer = null; });
+  await page.evaluate(() => window.__r2.until0({ 1: 'sin', 2: 'sin', 3: 'sin' }, true));
+  let st = await r2State(page);
+  const sinsGone = await page.evaluate(() => window.__mathjong.S.game.rivers.slice(1).flat().filter((r) => window.__mathjong.S.game.typeOf(r.id) === window.__r2.T('sin')).length);
+  assert.equal(sinsGone, 3, '他家3人が sin を捨てた');
+  assert.equal(st.pending.type, 'turn', '関数牌ではポンの宣言番にならない');
+  await page.locator('.hand .tile.drawn').tap(); await page.locator('.hand .tile.drawn').tap();
+  await page.evaluate(() => { clearTimeout(window.__mathjong.S.timer); window.__mathjong.S.timer = null; });
+  await page.evaluate(() => window.__r2.until0({ 1: '90' }, true));
+  st = await r2State(page);
+  assert.deepEqual([st.pending.type, st.pon], ['claim', 1], '角度牌はポンできる');
+  await page.locator('button[data-action="pon"]').tap();
+  assert.equal(await page.evaluate(() => window.__mathjong.S.game.melds[0][0].call), 'pon');
+  // ガイドのルールに関数牌のポン禁止・フリテンの説明
+  await page.locator('button[data-action="guide"]').first().tap();
+  await page.locator('[data-action="guide-tab"][data-tab="rules"]').tap();
+  const rulesText = await page.locator('.rules-list').innerText();
+  assert.match(rulesText, /関数牌はポンできません/); assert.match(rulesText, /フリテン/); assert.doesNotMatch(rulesText, /フリテンは未実装/);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  console.log('✓ 関数牌のポン禁止（宣言なし）・角度牌のポンは可・ガイドの説明');
+}
+
+async function v09RulesUnified(browser) {
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  // 以前のルール選択の保存値（従来ルール）が残っていても、従来ルールにはならない
+  await ctx.addInitScript(() => { try { localStorage.setItem('mj-rule-set', 'legacy'); } catch { /* */ } });
+  const page = await ctx.newPage(), errors = watchErrors(page);
   const logoLoaded = () => page.waitForFunction(() => { const i = document.querySelector('.title-logo-img'); return !!i && i.complete; });
   await page.goto(LOCAL + '?speed=test');
   await logoLoaded();
-  // 既定：従来ルール（保存値なし）
-  assert.equal(await page.locator('input[data-action="title-ruleset"][value="legacy"]').isChecked(), true, '既定は従来ルール');
-  const startWith = async (ids) => {
+  assert.equal(await page.locator('[data-action="title-ruleset"], .title-rules').count(), 0, 'タイトルにルールの選択はない');
+  assert.equal(await page.locator('[data-action="title-mode"]').count(), 2, '数学Ⅰ・Ⅱは選べる');
+  for (const mode of ['math1', 'math2']) {
+    await page.locator(`input[data-action="title-mode"][value="${mode}"]`).check();
     await page.locator('button[data-action="choose-opponents"]').tap();
-    assert.equal(await page.locator('.opp-card').count(), 12, '12人から選べる');
-    for (const id of ids) await page.locator(`.opp-card[data-id="${id}"] .opp-check`).tap();
+    await page.locator('button[data-action="opp-random"]').tap();
     await page.locator('button[data-action="start-match"]').tap();
     await page.locator('.hand .tile').first().waitFor();
-  };
-  const ids = await page.evaluate(() => [...document.querySelectorAll('[data-action="title-ruleset"]')].length);
-  assert.equal(ids, 2);
-  const all = await page.evaluate(async () => (await import('./src/ui/opponents.js')).OPPONENTS.map((o) => o.id));
-  await startWith(all.slice(0, 3));
-  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), false, '従来ルールで開始');
-  assert.equal(await page.locator('.dora-box').count(), 0); assert.equal(await page.locator('.bc-new').count(), 0);
-  // 設定で新ルールを選んでも、いまの局は変わらない。「新しい対局」から新ルール
-  await page.locator('button[data-action="settings"]').tap();
-  await page.locator('input[data-action="ruleset"][value="new"]').check();
-  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), false, 'いまの局は変わらない');
-  assert.match(await page.locator('.rule-note').innerText(), /新しい対局」で切り替わります/);
-  await page.locator('button[data-action="reset"]').tap();
-  await page.locator('.dora-box').waitFor();
-  assert.equal(await page.evaluate(() => window.__mathjong.S.matchSettings.newRules), true);
-  assert.match(await page.locator('.board-center').innerText(), /新ルール/);
-  // 再現情報：新ルールだけ newrules=1
-  await page.locator('button[data-action="settings"]').tap();
-  assert.match(await page.locator('.report-info').innerText(), /新ルール[\s\S]*newrules=1/);
-  await page.locator('button[data-action="close"]').tap();
-  // 試合終了 → 同じ3人と再戦：同じルール
-  await page.evaluate(() => { const m = window.__mathjong; m.S.match.over = true; m.S.modal = 'final'; m.render(); });
-  assert.match(await page.locator('.final').innerText(), /ルール：新ルール/);
-  await page.locator('button[data-action="again"]').tap();
-  await page.locator('.dora-box').waitFor();
-  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), true, '再戦は同じルール');
-  // タイトルへ：保存された選択（新ルール）が選ばれている。追加3人（12人の選択）で新ルールの対局を1局進める
-  await page.locator('button[data-action="settings"]').tap();
-  await page.locator('button[data-action="ask-title"]').tap();
-  await page.locator('button[data-action="to-title"]').tap();
-  await logoLoaded();
-  await page.reload();
-  await logoLoaded();
-  assert.equal(await page.locator('input[data-action="title-ruleset"][value="new"]').isChecked(), true, '選択を保存');
-  await page.locator('button[data-action="choose-opponents"]').tap();
-  const sel = await page.evaluate(() => window.__mathjong.S.opp.selected.length);
-  if (sel) for (const id of await page.evaluate(() => window.__mathjong.S.opp.selected.slice())) await page.locator(`.opp-card[data-id="${id}"] .opp-check`).tap();
-  await page.locator('button[data-action="to-title"]').tap();
-  await logoLoaded();
-  await startWith(all.slice(-3));
-  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), true);
-  // 1局を最後まで：自分はツモ切り・ツモ和了・ロン、暗カンがあれば実行
-  for (let i = 0; i < 300; i++) {
-    await page.waitForSelector('.overlay .result, .actions:not(.waiting) button:not([disabled]), .hand .tile.tap', { timeout: 15000 });
-    await invariants(page);
-    if (await page.locator('.overlay .result').count()) break;
-    for (const a of ['tsumo', 'ron', 'ankan', 'ankan-type', 'pass']) { const b = page.locator(`button[data-action="${a}"]`); if (await b.count()) { await b.first().tap(); break; } }
-    const drawn = page.locator('.hand .tile.tap.drawn');
-    if (await drawn.count()) { await drawn.tap(); await drawn.tap(); }
+    assert.deepEqual(await page.evaluate(() => [window.__mathjong.S.game.ruleset, window.__mathjong.rules.config.mode]), [2, mode], '通常の対局は現行の新ルール');
+    assert.equal(await page.locator('.dora-box').count(), 1);
+    assert.equal(await page.locator('.bc-new').count(), 0, '現行の新ルールに再現の印はない');
+    await page.locator('button[data-action="settings"]').tap();
+    assert.equal(await page.locator('[data-action="ruleset"], .rule-select').count(), 0, '設定にルールの選択はない');
+    assert.match(await page.locator('.report-info').innerText(), /新ルール[\s\S]*newrules=2/, '再現URLは newrules=2');
+    await page.locator('button[data-action="reset"]').tap();
+    await page.locator('.hand .tile').first().waitFor();
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game.ruleset), 2, '新しい対局も新ルール');
+    await page.evaluate(() => { const m = window.__mathjong; m.S.match.over = true; m.S.modal = 'final'; m.render(); });
+    assert.match(await page.locator('.final').innerText(), /ルール：新ルール/);
+    await page.locator('button[data-action="again"]').tap();
+    await page.locator('.hand .tile').first().waitFor();
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game.ruleset), 2, '再戦も新ルール');
+    await page.locator('button[data-action="settings"]').tap();
+    await page.locator('button[data-action="ask-title"]').tap();
+    await page.locator('button[data-action="to-title"]').tap();
+    await logoLoaded();
   }
-  await page.locator('.overlay .result').waitFor();
-  assert.equal(await page.evaluate(() => window.__mathjong.S.scores.reduce((a, b) => a + b, 0)), 400);
-  // 従来ルールに戻す（タイトル）→ 従来ルール
-  await page.locator('button[data-action="next"]').tap();
-  await page.locator('button[data-action="settings"]').tap();
-  await page.locator('input[data-action="ruleset"][value="legacy"]').check();
-  await page.locator('button[data-action="reset"]').tap();
-  await page.waitForFunction(() => window.__mathjong.S.game && !window.__mathjong.S.game.newRules);
-  assert.equal(await page.locator('.dora-box').count(), 0);
-  // 再現URL：newrules=1 は新ルール、ないURLは保存値が新ルールでも従来、不正値はエラー画面
-  await page.goto(LOCAL + '?seed=11&round=1&dealer=0&hand=0&renchan=0&len=4&mode=math2&newrules=1&speed=slow');
-  await page.locator('.dora-box').waitFor();
-  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), true);
-  await page.evaluate(() => localStorage.setItem('mj-rule-set', 'new'));
-  await page.goto(LOCAL + '?seed=11&round=1&dealer=0&hand=0&renchan=0&len=4&mode=math2&speed=slow');
-  await page.locator('.hand .tile').first().waitFor();
-  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), false, 'newrules のない再現URLは従来ルール');
-  await page.goto(LOCAL + '?seed=11&newrules=yes');
+  // 再現URL：newrules なし＝従来ルール（過去の URL）、1＝新ルール初版、2＝現行。それぞれ印と版。3 はエラー画面
+  const q = 'seed=11&round=1&dealer=0&hand=0&renchan=0&len=4&mode=math2&speed=slow';
+  for (const [extra, ruleset, note] of [['', 0, '従来ルールの再現'], ['&newrules=1', 1, '新ルール初版の再現'], ['&newrules=2', 2, null]]) {
+    await page.goto(`${LOCAL}?${q}${extra}`);
+    await page.locator('.hand .tile').first().waitFor();
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game.ruleset), ruleset, `newrules${extra}`);
+    assert.equal(await page.locator('.dora-box').count(), ruleset ? 1 : 0);
+    if (note) assert.equal(await page.locator('.bc-new').innerText(), note); else assert.equal(await page.locator('.bc-new').count(), 0);
+    await page.locator('button[data-action="settings"]').tap();
+    const info = await page.locator('.report-info').innerText();
+    assert.ok(ruleset ? info.includes(`newrules=${ruleset}`) : !info.includes('newrules'), '出力する再現URLは元の版のまま');
+  }
+  // 同じ seed の再現：新旧の版は別の進行（王牌の有無）、同じ版は同じ進行
+  const walls = [];
+  for (const extra of ['', '', '&newrules=2', '&newrules=2']) {
+    await page.goto(`${LOCAL}?${q}${extra}`);
+    await page.locator('.hand .tile').first().waitFor();
+    walls.push(await page.evaluate(() => JSON.stringify([window.__mathjong.S.game.hands, window.__mathjong.S.game.wall])));
+  }
+  assert.equal(walls[0], walls[1]); assert.equal(walls[2], walls[3]); assert.notEqual(walls[0], walls[2]);
+  await page.goto(`${LOCAL}?seed=11&newrules=3`);
   assert.match(await page.locator('.replay-error').innerText(), /newrules/);
-  // 数学Ⅰも新ルールで開始できる
-  await page.goto(LOCAL + '?seed=12&mode=math1&newrules=1&speed=slow');
-  await page.locator('.dora-box').waitFor();
-  assert.equal(await page.locator('.bc-draws').count(), 0, '数学Ⅰは回数の上限なし（表示なし）');
   assert.deepEqual(errors, []);
   await ctx.close();
-  console.log('✓ 新旧ルールの選択：既定は従来・設定は次の対局から・保存・再戦は同じルール・再現URL（newrules=1 だけ新ルール、不正値はエラー）・12人から選択・新ルールで1局完走');
+  console.log('✓ 新ルールへの一本化：タイトル・設定にルールの選択なし・古い保存値は無視・通常/新しい対局/再戦は現行の新ルール（数学Ⅰ・Ⅱ）・再現URL（なし＝従来、1＝初版、2＝現行、3＝エラー）・seed の再現');
+}
+
+async function v09SelectTop(browser) {
+  for (const [width, height] of V09_SIZES) {
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?speed=test');
+    await page.waitForFunction(() => { const i = document.querySelector('.title-logo-img'); return !!i && i.complete; });
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    await page.locator('.select-screen').waitFor();
+    const box = (sel) => page.locator(sel).first().boundingBox();
+    const [title, status, rnd, start, card, back] = await Promise.all(['.select-title', '.opp-status', 'button[data-action="opp-random"]', 'button[data-action="start-match"]', '.opp-card', 'button[data-action="to-title"]'].map(box));
+    const label = `${width}x${height}`;
+    assert.ok(title.y < status.y && status.y + status.height <= rnd.y + 1, '見出し → 選択状況 → ボタン ' + label);
+    assert.ok(rnd.y + rnd.height <= card.y + 1 && start.y + start.height <= card.y + 1, 'ボタンは一覧の上 ' + label);
+    assert.ok(Math.abs(rnd.y - start.y) < 1 && rnd.x + rnd.width <= start.x, '「おまかせ」「対局開始」は横並び ' + label);
+    assert.ok(rnd.height >= 44 && start.height >= 44 && rnd.width >= 88 && start.width >= 110, '押しやすい大きさ ' + label);
+    assert.ok(start.x + start.width <= width + 0.5 && rnd.x >= -0.5, '画面内 ' + label);
+    assert.ok(back.y > card.y, '「タイトルへ戻る」は下 ' + label);
+    assert.ok(await page.locator('button[data-action="start-match"]').isDisabled(), '3人そろうまで開始できない');
+    // 選択で画面が跳ねない：スクロール位置とカードの位置が変わらない（4人目の案内も一覧をずらさない）
+    await page.evaluate(() => window.scrollTo(0, 120));
+    const ids = await page.locator('.opp-card').evaluateAll((es) => es.map((e) => e.dataset.id));
+    const pos = async () => page.evaluate(() => ({ y: scrollY, card: document.querySelectorAll('.opp-card')[6].getBoundingClientRect().top }));
+    const p0 = await pos();
+    for (const id of ids.slice(4, 8)) {
+      // 要素を画面内へスクロールしない押し方（テストの操作でスクロール位置を変えない）
+      await page.locator(`.opp-card[data-id="${id}"] .opp-check`).evaluate((e) => e.click());
+      const p = await pos();
+      assert.ok(Math.abs(p.y - p0.y) < 1 && Math.abs(p.card - p0.card) < 1, `選択で画面が跳ねない ${label} ${JSON.stringify([p0, p])}`);
+    }
+    assert.equal(await page.locator('.opp-notice').count(), 1, '4人目は案内');
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.opp-notice')).position), 'fixed');
+    assert.equal(await page.locator('button[data-action="start-match"]').isDisabled(), false, '3人で開始できる');
+    if (SHOTS && (width === 320 || width === 390 || width === 1440)) { await page.evaluate(() => window.scrollTo(0, 0)); await page.screenshot({ path: `${SHOTS}/v09-select-${label}.png` }); }
+    // おまかせ：既存の抽選（異なる3人）
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.locator('button[data-action="opp-random"]').click();
+    const sel = await page.evaluate(() => window.__mathjong.S.opp.selected.slice());
+    assert.equal(new Set(sel).size, 3);
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 0, '横スクロールなし ' + label);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 相手選択：見出し→選択状況→「おまかせ」「対局開始」（横並び・一覧の上）→12人→「タイトルへ戻る」、8画面・選択で画面が跳ねない・3人で開始');
+}
+
+// 全牌種類×表示の文脈（手牌・面子・河・面子の枠・ドラ表示・結果・ガイドの大きさ）で、中身が枠からはみ出さず、分子・分母が重ならない
+async function v09TileFaces(browser) {
+  let checked = 0;
+  for (const [width, height] of [[320, 568], [568, 320], [390, 844], [844, 390], [1440, 900]]) {
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?mode=math2&seed=7&speed=slow');
+    await page.locator('.hand .tile').first().waitFor();
+    const res = await page.evaluate(async () => {
+      const { tileHTML } = await import('./src/ui/render.js');
+      const { createRules } = await import('./src/engine/rules.js');
+      const { makeConfig } = await import('./src/engine/config.js');
+      const m = window.__mathjong; clearTimeout(m.S.timer); m.S.timer = null;
+      const types = [...createRules(makeConfig({ mode: 'math1' })).types, ...createRules(makeConfig({ mode: 'math2' })).types];
+      const seen = new Set(); const uniq = types.filter((t) => { const k = t.key + (t.unit || ''); if (seen.has(k)) return false; seen.add(k); return true; });
+      const row = (size) => uniq.map((t) => tileHTML(t, { size, attrs: `data-k="${t.key}${t.unit === 'rad' ? '#rad' : ''}"` })).join('');
+      const ctxs = [
+        ['手牌', `<main class="table"><section class="self"><div class="hand-row"><div class="hand" style="flex-wrap:wrap">${row('l')}</div></div></section></main>`],
+        ['自分の面子', `<main class="table"><section class="self"><div class="hand-row"><div class="melds mine"><span class="meld" style="flex-wrap:wrap">${row('m')}</span></div></div></section></main>`],
+        ['m', `<div>${row('m')}</div>`], ['s', `<div>${row('s')}</div>`], ['xs', `<div>${row('xs')}</div>`],
+        ...[13, 15, 17, 20, 24, 28].flatMap((rw) => [
+          [`河 rw${rw}`, `<div class="mj-table" style="--rw:${rw}px;display:block;width:auto"><div class="river">${row('xs')}</div></div>`],
+          [`他家の面子 rw${rw}`, `<div class="mj-table" style="--rw:${rw}px;display:block;width:auto"><div class="melds-block"><span class="meld">${row('xs')}</span></div></div>`],
+          [`ドラ表示 rw${rw}`, `<div class="mj-table" style="--rw:${rw}px;display:block;width:auto"><div class="dora-box" style="display:block"><span class="dr-tiles" style="flex-wrap:wrap">${row('xs')}</span></div></div>`],
+        ]),
+      ];
+      const host = document.createElement('div');
+      host.style.cssText = 'position:absolute;left:0;top:0;width:100%;z-index:99';
+      host.innerHTML = ctxs.map(([n, html]) => `<section data-ctx="${n}"><div style="display:flex;flex-wrap:wrap;gap:2px">${html}</div></section>`).join('');
+      document.body.appendChild(host);
+      document.querySelector('#app').style.display = 'none';
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const bad = [];
+      let n = 0;
+      for (const sec of host.querySelectorAll('section[data-ctx]')) for (const t of sec.querySelectorAll('.tile')) {
+        n++;
+        const tb = t.getBoundingClientRect(), cs = getComputedStyle(t);
+        const inner = { l: tb.left + parseFloat(cs.borderLeftWidth), r: tb.right - parseFloat(cs.borderRightWidth), t: tb.top + parseFloat(cs.borderTopWidth), b: tb.bottom - parseFloat(cs.borderBottomWidth) };
+        let l = Infinity, r = -Infinity, top = Infinity, bot = -Infinity;
+        const add = (b) => { l = Math.min(l, b.left); r = Math.max(r, b.right); top = Math.min(top, b.top); bot = Math.max(bot, b.bottom); };
+        const walker = document.createTreeWalker(t, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+          const node = walker.currentNode; if (!node.textContent.trim() || node.parentElement.closest('.eq')) continue;
+          const drawn = node.parentElement.closest('.glyph') && node.parentElement.closest('.neg, .rs');
+          if (drawn) { add(drawn.getBoundingClientRect()); continue; } // CSS で描く負号・根号は要素の箱
+          const rg = document.createRange(); rg.selectNodeContents(node); for (const b of rg.getClientRects()) add(b);
+        }
+        for (const e of t.querySelectorAll('.den, .radicand')) add(e.getBoundingClientRect());
+        const over = Math.max(inner.l - l, r - inner.r, inner.t - top, bot - inner.b, 0);
+        let frac = 0;
+        for (const f of t.querySelectorAll('.frac')) frac = Math.max(frac, f.querySelector('.num').getBoundingClientRect().bottom - f.querySelector('.den').getBoundingClientRect().top);
+        const neg = t.querySelector('.neg');
+        const negOk = !neg || (neg.getBoundingClientRect().width > 0.5 && neg.getBoundingClientRect().left >= inner.l - 0.5);
+        if (over > 0.5 || frac > 0.6 || !negOk) bad.push({ ctx: sec.dataset.ctx, k: t.dataset.k, over: +over.toFixed(2), frac: +frac.toFixed(2), negOk });
+      }
+      return { n, bad };
+    });
+    checked += res.n;
+    assert.deepEqual(res.bad, [], `牌の中身がはみ出す・重なる ${width}x${height}`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log(`✓ 牌の表示：数学Ⅰ・Ⅱの全種類×手牌・面子・河・他家の面子・ドラ表示・結果・小（${checked}枚）で枠からはみ出さない・分子分母が重ならない・負号が欠けない`);
+}
+
+// リーチの待ち・フリテンの行：8画面で手牌の上に収まり、操作バー・ヒント・卓と重ならない
+async function v09Layout(browser) {
+  for (const [width, height] of V09_SIZES) {
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?mode=math1&seed=7&speed=slow&newrules=2');
+    await page.locator('.hand .tile').first().waitFor();
+    await r2Scene(page, TENPAI2);
+    await page.evaluate(() => { const g = window.__mathjong.S.game; g.discard(0, g.drawn, { riichi: true }); window.__r2.until0({ 1: '30' }); });
+    await page.evaluate(() => { const g = window.__mathjong.S.game; g.respond(0, { type: 'pass' }); window.__r2.until0({}); });
+    const d = await page.evaluate(() => {
+      const b = (s) => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height }; };
+      const info = document.querySelector('.self-info');
+      return { info: b('.self-info'), hand: b('.self .hand'), self: b('.table .self'), bar: b('footer.bar'), dock: b('.study-dock'), table: b('.mj-table'),
+        overflow: document.documentElement.scrollWidth - innerWidth, infoOverflow: info.scrollWidth - info.clientWidth, text: info.innerText };
+    });
+    const label = `${width}x${height}`;
+    const ov = (a, c) => Math.min(a.r, c.r) - Math.max(a.l, c.l) > 0.75 && Math.min(a.b, c.b) - Math.max(a.t, c.t) > 0.75;
+    assert.match(d.text, /待ち[\s\S]*フリテン/, label);
+    assert.ok(d.info.t >= d.self.t - 0.5 && d.info.b <= d.hand.t + 1, '手牌の上（自分の欄の中） ' + label);
+    assert.ok(!ov(d.info, d.bar) && !ov(d.info, d.dock) && !ov(d.info, d.table), '操作バー・ヒント・卓と重ならない ' + label);
+    assert.ok(d.info.h <= 64, `高さを取りすぎない ${d.info.h} ` + label);
+    assert.ok(d.overflow <= 1 && d.infoOverflow <= 1, '横にはみ出さない ' + label);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v09-layout-${label}.png` });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ リーチの待ち・フリテンの行：8画面で手牌の上に収まり、操作バー・ヒント・卓と重ならない');
 }
 
 // 新ルールの画面：スマホ縦・横・320px・タブレット・PC で、ドラ表示と操作バー・ヒント・河・中央・名札が重ならない
@@ -7300,7 +7581,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesSelect, v08NewRulesLayout, newRulesPlay };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -7355,7 +7636,12 @@ try {
   await v07TableHintDock(browser);
   await v07MahjongTable(browser);
   await v08NewRulesTable(browser);
-  await v08NewRulesSelect(browser);
+  await v09RulesUnified(browser);
+  await v09SelectTop(browser);
+  await v09TileFaces(browser);
+  await v09FuritenWaits(browser);
+  await v09FuncPon(browser);
+  await v09Layout(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。

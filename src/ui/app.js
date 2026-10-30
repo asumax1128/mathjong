@@ -9,7 +9,7 @@ import { matchInfo } from '../engine/ai-levels.js';
 import { createRng } from '../engine/rng.js';
 import { trigExact } from '../engine/exact.js';
 import { tileHTML, formulaHTML, backHTML, valueHTML, angleHTML, angleText } from './render.js';
-import { yakuCandidates, warmUp, claimForSeat } from '../engine/yakuhint.js';
+import { yakuCandidates, warmUp, claimForSeat, unseenFromView } from '../engine/yakuhint.js';
 import { hintKey } from './hintstate.js';
 import { analyzeFormulas, initialSelection, assignColors, exposedSummary } from '../engine/formulahint.js';
 import { createMatch, applyRoundResult, dealerOf, handLabel, ranks, matchAt, START_POINTS } from '../engine/match.js';
@@ -21,14 +21,14 @@ import { createRoomState, pickRoomTile, checkRoom, nextRoom, roomHint, roomHTML,
 import { loadProgress, saveProgress, hasProgress } from './beginner-progress.js';
 import { SEAT_AREA, SEAT_ROT, riverRows as layoutRiverRows, boardShape as layoutBoardShape } from './table-layout.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, MAX_ROUND } from './params.js';
-import { validateReplay, replayQuery } from './replay.js';
+import { validateReplay, replayQuery, CURRENT_RULESET } from './replay.js';
 import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, scanEffects, fxOffer, fxAdvance, fxTimes, fxProgress, isLiteEffect } from './effects.js';
 import { SOUND_KEY, parseSoundSetting, pickSound, createSoundPlayer } from './sound.js';
 import { VOICE_KEY, parseVoiceSetting, createVoicePlayer } from './voice.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
-const APP_VERSION = '0.7.0-a';
+const APP_VERSION = '0.7.0';
 document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`;
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -58,11 +58,11 @@ function rulesForMode(mode) {
   return rulesCache[key] || (rulesCache[key] = createRules(LEGACY ? makeConfig({ legacy: true }) : makeConfig({ mode })));
 }
 const modeLabel = (r) => (MODES[r.config.mode] ? MODES[r.config.mode].label : '旧規則');
-// 新ルール⑤（docs/61）：王牌・ドラ・暗カン・数学Ⅱ通常ツモ24回。既定は従来ルール。保存キー mj-rule-set（'new' のときだけ新ルール）。
-// 試合の開始時に S.matchSettings.newRules として確定し、試合の途中では変えない。旧規則（?rules=legacy）では使わない。
-const RULESET_KEY = 'mj-rule-set';
-const parseRuleSet = (v) => v === 'new';
-const RULESET_LABEL = (on) => (on ? '新ルール' : '従来ルール');
+// ルールの版（docs/62）：新しく始める対局はすべて現行の新ルール（CURRENT_RULESET＝2：王牌・ドラ・暗カン・数学Ⅱ通常ツモ24回・
+// フリテン・関数牌のポン禁止）。従来ルール（0）・新ルール初版（1）は、過去の再現 URL（newrules なし／newrules=1）の再生だけに使う。
+// 以前の選択の保存値（mj-rule-set）は読まない（従来ルールが選ばれることはない）。旧規則（?rules=legacy、ローカル専用）は版0。
+const RULESET_LABEL = ['従来ルール', '新ルール初版', '新ルール'];
+const RULESET_NOTE = ['従来ルールの再現', '新ルール初版の再現', ''];
 const HUMAN = 0;
 const POS = ['自分', '下家', '対面', '上家'];
 let PLAYERS = [
@@ -117,8 +117,6 @@ const voice = createVoicePlayer({ sound, isOn: () => S.voice.on });
 // 対局中のモード（S.mode）と、次の新しい対局で使うモード（S.nextMode）
 S.mode = parseMode(params.get('mode')) || parseMode(store.get(MODE_KEY, null)) || DEFAULT_MODE;
 S.nextMode = S.mode;
-// 次の新しい対局のルール（再現 URL では URL の指定。newrules がない URL は従来ルール）
-S.nextNewRules = REPLAY.kind !== 'none' && REPLAY.ok ? RV.newRules : parseRuleSet(store.get(RULESET_KEY, null));
 let rules = rulesForMode(S.mode);
 // 対局設定（タイトル画面で選び、「対局開始」で確定）。保存キー mj-mode・mj-length・mj-ai
 S.length = REPLAY.kind !== 'none' && REPLAY.ok && RV.lenGiven ? RV.len : savedLen;
@@ -158,8 +156,8 @@ function startRound() {
   const seed = S.seedBase + S.round * 7919;
   const presetWall = IS_LOCAL ? S.nextPresetWall || null : null; // テスト用：山の並びを指定（ローカルのみ）
   S.nextPresetWall = null;
-  const newRules = !!(S.matchSettings && S.matchSettings.newRules); // 試合の開始時に確定したルール
-  S.game = new Game({ rules, seed, dealer: S.dealer, players: PLAYERS, round: S.round, presetWall, newRules });
+  const ruleset = S.matchSettings ? S.matchSettings.ruleset : 0; // 試合の開始時に確定したルールの版
+  S.game = new Game({ rules, seed, dealer: S.dealer, players: PLAYERS, round: S.round, presetWall, ruleset });
   S.aiRng = createRng(seed ^ 0x5bd1e995);
   warmUp(rules); // 役候補ヒント用の評価を少しずつ事前計算（判定・進行には影響しない）
   S.selected = null;
@@ -591,7 +589,7 @@ function boardHTML() {
   return `<div class="board-wrap"><div class="mj-table" style="--tv-rows:${sh.top};--bv-rows:${sh.bottom};--lv:${sh.side}" aria-label="対局卓">
     <div class="mj-center" aria-hidden="true"></div>
     <div class="board-center" aria-label="現在の局情報">
-      <span class="bc-mode">${modeLabel(rules)}${g.newRules ? '<span class="bc-new">新ルール</span>' : ''}</span>
+      <span class="bc-mode">${modeLabel(rules)}${RULESET_NOTE[g.ruleset] ? `<span class="bc-new" title="過去の再現 URL の局">${RULESET_NOTE[g.ruleset]}</span>` : ''}</span>
       <b class="bc-round hand-label">${cur.label}</b>
       <span class="bc-state">${cur.renchan ? `連荘${cur.renchan}` : ''}</span>
       <span class="bc-wall">残り <strong>${g.wall.length}</strong>枚</span>
@@ -648,6 +646,43 @@ function currentOrder() {
   return S.handOrder;
 }
 
+// ---- 自分のリーチの待ち・フリテン（ruleset 2）：手牌の上の短い1行。自分だけの情報（他家・AI には渡さない） ----
+// 短い理由（画面）と詳しい説明（title・読み上げ）
+const FURITEN_SHORT = { discard: '捨て牌に待ち', temporary: '見逃し（次のツモまで）', riichi: 'リーチ後の見逃し' };
+const FURITEN_LONG = { discard: '待ちの牌を自分で捨てているため', temporary: '和了できる牌を見送ったため（自分の次のツモで解除）', riichi: 'リーチ後に和了できる牌を見送ったため（この局の終わりまで）' };
+const typeText = (t) => { const x = T(t); return x.kind === 'func' ? x.fn : x.kind === 'angle' ? angleText(x) : `${x.display.neg ? '−' : ''}${x.display.num}${x.display.den ? `/${x.display.den}` : ''}`; };
+// リーチ後の見逃しがあれば、同巡の見逃し（同じ見送りで付く、より短い制限）は表示を省く
+const reasonsText = (f, map) => f.reasons.filter((r) => !(r === 'temporary' && f.reasons.includes('riichi'))).map((r) => (r === 'discard' ? `${map.discard}${f.inRiver.length ? `（${f.inRiver.map(typeText).join('・')}）` : ''}` : map[r])).join('／');
+// 直近にフリテンでロンできなかった牌（その後に自分が打牌するまで表示）
+function recentRonBlock() {
+  const g = S.game;
+  const b = g.ronBlocked && g.ronBlocked[HUMAN];
+  if (!b) return null;
+  return g.events.slice(b.at).some((e) => e.type === 'discard' && e.seat === HUMAN) ? null : b;
+}
+function selfInfoHTML() {
+  const g = S.game;
+  if (!g.furitenRule) return '';
+  const f = g.furitenOf(HUMAN);
+  const waits = g.riichiWaits[HUMAN];
+  const blk = recentRonBlock();
+  if (!waits && !f.furiten && !blk) return '';
+  let html = '';
+  if (waits) {
+    // 残り：自分から見えていない枚数（公開情報と自分の手牌だけから計算。他家の手牌・山のどちらにあるかは分からない）
+    const unseen = unseenFromView(rules, g.viewFor(HUMAN));
+    html += `<span class="si-waits" aria-label="リーチの待ち"><span class="si-label">待ち</span>${waits.map((t) => `<span class="si-wait" title="${typeText(t)}：自分から見えていない残り${Math.max(0, unseen[t])}枚">${tileHTML(T(t), { size: 'xs' })}<small>残${Math.max(0, unseen[t])}</small></span>`).join('')}</span>`;
+  }
+  if (f.furiten || blk) {
+    // フリテン：ロンできない（ツモ和了はできる）と短い理由。直前に和了の牌を見送らされたときは、その牌も示す
+    const r = f.furiten ? f : blk;
+    const block = blk ? `<span class="si-blocked">${POS[blk.from]}${tileHTML(T(g.typeOf(blk.tile)), { size: 'xs' })}もロン不可</span>` : '';
+    const title = `フリテン：ロンできません（ツモ和了はできます）。${reasonsText(r, FURITEN_LONG)}${blk ? `。${POS[blk.from]}の ${typeText(g.typeOf(blk.tile))} は和了の牌ですが、フリテンのためロンできませんでした` : ''}`;
+    html += `<span class="si-furiten" role="status" title="${title}" aria-label="${title}"><b>フリテン</b><span class="si-why"><span class="si-ron">ロン不可：</span>${reasonsText(r, FURITEN_SHORT)}</span>${block}</span>`;
+  }
+  return `<div class="self-info${f.furiten ? ' furiten' : ''}">${html}</div>`;
+}
+
 function handHTML() {
   const g = S.game;
   const p = g.pending();
@@ -682,7 +717,7 @@ function handHTML() {
   const body = order.map((id) => (drawnAtEnd && id === drawn ? `<span class="drawn-gap"></span>${tile(id)}` : tile(id))).join('');
   // 手牌（左）と公開面子（右）は同じ列。面子は手牌より少し小さく、手牌のタップの大きさは変えない。
   const melds = g.melds[HUMAN].length ? `<div class="melds mine" aria-label="自分の公開面子">${meldsHTML(HUMAN, 'm')}</div>` : '';
-  return `<div class="hand-row${melds ? ' has-melds' : ''}"><div class="hand">${body}</div>${melds}</div>
+  return `${selfInfoHTML()}<div class="hand-row${melds ? ' has-melds' : ''}"><div class="hand">${body}</div>${melds}</div>
     <div class="hand-help"><span class="hh-tools">${autoPassToggleHTML('chi')}${autoPassToggleHTML('pon')}<button data-action="autosort" class="small">自動整列</button><button data-action="hint" class="small hint-btn" aria-pressed="${!!S.hintOpen}">ヒント</button></span><span class="hh-menu"><button data-action="guide" class="small">ガイド</button><button data-action="settings" class="small" aria-label="設定">⚙</button></span></div>`;
 }
 
@@ -975,7 +1010,7 @@ function finalHTML() {
       <li>実施した局数：<b>${m.played}局</b>（${m.length === 4 ? '4局戦・東1〜東4局' : '8局戦・東1〜南4局'}）</li>
       <li>連荘回数：<b>${m.renchanTotal}回</b></li>
       <li>数学モード：${modeLabel(rules)}</li>
-      <li class="final-rules">ルール：${RULESET_LABEL(S.matchSettings.newRules)}</li>
+      <li class="final-rules">ルール：${RULESET_LABEL[S.matchSettings.ruleset]}</li>
       <li class="final-opps">対戦相手：${opponentsText()}</li>
       ${m.endReason === 'round-limit' ? `<li class="note round-limit-note">${ROUND_LIMIT_NOTE}</li>` : ''}
       <li class="note">開始時の持ち点は各${START_POINTS}点（合計${START_POINTS * 4}点）。同点は同順位。点数配分は試作段階の暫定値です。</li>
@@ -1014,10 +1049,7 @@ function titleHTML() {
         ${radio('length', '4', '4局戦', S.length === 4, '<small>東1〜東4局</small>')}
         ${radio('length', '8', '8局戦', S.length === 8, '<small>東1〜南4局</small>')}
       </fieldset>
-      <fieldset class="title-set title-rules"><legend>ルール</legend>
-        ${radio('ruleset', 'legacy', '従来ルール', !S.nextNewRules, '<small>これまでの規則</small>')}
-        ${radio('ruleset', 'new', '新ルール', S.nextNewRules, '<small>ドラ・暗カンあり</small>')}
-      </fieldset>
+
     </div>
     <button data-action="choose-opponents" class="primary start-btn">対戦相手を選ぶ</button>
     <button data-action="br-open" class="br-open">初心者の部屋（練習）</button>
@@ -1050,14 +1082,16 @@ function selectHTML() {
     <p class="select-lead">${OPPONENTS.length}人から3人を選んでください。カードをタップすると詳しい紹介を見られます。</p>
     <div class="opp-status" aria-live="polite"><span class="opp-count">選択 <b>${sel.length}</b>/${PICK_COUNT}人</span>
       <span class="opp-chips">${chips}${empty}</span></div>
-    ${S.opp.notice ? `<p class="note opp-notice">${S.opp.notice}</p>` : ''}
-    <div class="opp-grid">${cards}</div>
-    <div class="select-actions">
+    <div class="select-actions select-top">
       <button data-action="opp-random" class="opp-random">おまかせ</button>
       <button data-action="start-match" class="primary start-btn"${ready ? '' : ' disabled'}>対局開始</button>
+    </div>
+    ${S.opp.notice ? `<p class="note opp-notice" role="status">${S.opp.notice}</p>` : ''}
+    <div class="opp-grid">${cards}</div>
+    <div class="select-actions select-bottom">
       <button data-action="to-title" class="opp-back">タイトルへ戻る</button>
     </div>
-    <p class="note select-setting">${MODES[S.nextMode] ? MODES[S.nextMode].label : ''} ／ ${S.length}局戦 ／ ${RULESET_LABEL(S.nextNewRules)}</p>
+    <p class="note select-setting">${MODES[S.nextMode] ? MODES[S.nextMode].label : ''} ／ ${S.length}局戦</p>
     ${S.opp.detail ? oppDetailHTML(S.opp.detail) : ''}
   </main>`;
 }
@@ -1093,8 +1127,8 @@ function reportInfoHTML() {
   const m = S.match;
   const label = S.scored && S.lastRound ? S.lastRound : { label: handLabel(m), renchan: m.renchan };
   const hand = S.scored && S.lastRound ? m.log[m.log.length - 1].hand : m.hand;
-  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ ${label.label}・連荘${label.renchan}（通し第<b>${S.round}</b>局・親 ${POS[S.dealer]}）／ ${m.length}局戦 ／ ${modeLabel(rules)}・${RULESET_LABEL(S.matchSettings.newRules)} ／ 対戦相手 ${opponentsText()}（ID ${S.matchSettings.seats.join(',')}）／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
-    この局から再現：URL の末尾に <code>${replayQuery({ seed: S.seedBase, round: S.round, dealer: S.dealer, hand, renchan: label.renchan, len: m.length, mode: LEGACY ? null : rules.config.mode, chars: S.matchSettings.seats, newRules: S.matchSettings.newRules }).replace(/&/g, '&amp;')}</code><br>
+  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ ${label.label}・連荘${label.renchan}（通し第<b>${S.round}</b>局・親 ${POS[S.dealer]}）／ ${m.length}局戦 ／ ${modeLabel(rules)}・${RULESET_LABEL[S.matchSettings.ruleset]} ／ 対戦相手 ${opponentsText()}（ID ${S.matchSettings.seats.join(',')}）／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
+    この局から再現：URL の末尾に <code>${replayQuery({ seed: S.seedBase, round: S.round, dealer: S.dealer, hand, renchan: label.renchan, len: m.length, mode: LEGACY ? null : rules.config.mode, chars: S.matchSettings.seats, ruleset: S.matchSettings.ruleset }).replace(/&/g, '&amp;')}</code><br>
     <span class="report-caveat">このURLでは山・配牌・親・局状態を再現します。持ち点や過去の対局履歴は復元されず、全員100点から開始します。</span></p>`;
 }
 
@@ -1152,7 +1186,7 @@ function rulesHTML() {
   const sp = c.specialHands.filter((s) => s.enabled).map((s) => `<li><span>${s.name}（${s.angles.map((d) => angleText(rules.typeByKey.get(`a:${d}`))).join('・')}）${s.closedOnly ? '・門前限定' : ''}</span><b>${s.points}</b></li>`).join('');
   const ex30 = angleText(rules.typeByKey.get('a:30'));
   const common = `
-    <li>フリテンは未実装。流局は山が尽きたとき。</li>
+    ${S.game && S.game.furitenRule ? '' : '<li>フリテンは未実装。流局は山が尽きたとき。</li>'}
     <li><b>手牌の並び替え</b>：牌を長押し（約0.35秒）して左右に動かし、指を離した位置に入れます。手牌の外で離すと取り消し。表示の順番だけが変わり、ゲームには影響しません。「自動整列」で種類順に戻ります。新しいツモ牌は右端に入ります。</li>`;
   const body = c.rules.koutsu ? `
     <li><b>モード</b>：${modeLabel(rules)}（${c.angleUnit === 'rad' ? '弧度法・0〜2π の17種類' : '度数法・0°〜180° の9種類'}・関数牌 各${rules.types.find((t) => t.kind === 'func').copies}枚・計${rules.deckSize}枚）。モードは設定で選び、新しい対局から切り替わります。</li>
@@ -1175,6 +1209,9 @@ function rulesHTML() {
   const nr = S.game && S.game.newRules ? `
     <li class="nr-rule"><b>新ルール</b>（この対局）：山の最後の14枚を王牌に分けます。<b>ドラ表示牌</b>は最初1枚（卓の右下）。表示牌の<b>次の牌</b>がドラで、ドラは役ではありませんが、通常和了で手牌・槓子のドラ1枚につき <b>+1点</b>（役満には加算しません）。</li>
     <li class="nr-rule"><b>暗カン</b>：ツモした直後に同じ牌が4枚あれば「暗カン」→ 牌を確認して実行。槓子は1面子で、門前のままです（リーチ中・チー／ポン直後は不可）。嶺上牌を1枚ツモし、ドラ表示牌が1枚増えます（最大5枚・暗カンは局で最大4回）。</li>
+    ${S.game.furitenRule ? `<li class="nr-rule"><b>フリテン</b>：次の場合はロンできません（ツモ和了はできます）。①待ちの牌のどれかを自分で捨てている（鳴かれて河から移った牌も含む）。②和了できる牌を見送った（自分の次のツモまで）。③リーチ後に和了できる牌を見送った（その局の終わりまで）。フリテンのときは手牌の上に理由を表示します。</li>
+    <li class="nr-rule"><b>関数牌はポンできません</b>（sin・cos・tan）。角度牌・結果牌のポン、関数牌の暗カン・刻子での和了はできます。</li>
+    <li class="nr-rule"><b>リーチの待ち</b>：リーチすると、待ちの牌と自分から見えていない残り枚数を手牌の上に表示します。</li>` : ''}
     ${rules.config.mode === 'math2' ? `<li class="nr-rule"><b>数学Ⅱの通常ツモ</b>：各自${DRAW_CAP}回まで（親の最初のツモを含み、鳴き・嶺上ツモは数えません）。次の通常ツモが${DRAW_CAP + 1}回目になる時点で流局します。残り回数は卓の中央に表示します。</li>` : ''}` : '';
   return `<h2>ルール（暫定）</h2>
   <ul class="rules-list">${body}${nr}
@@ -1204,11 +1241,6 @@ function settingsHTML() {
       ${Object.values(MODES).map(modeOpt).join('')}
       <p class="note mode-note">いまの対局：${modeLabel(rules)}。${S.nextMode !== rules.config.mode && !LEGACY ? '下の「新しい対局」で切り替わります（いまの局は変わりません）。' : 'モードの変更は「新しい対局」から反映されます。'}</p>
     </fieldset>
-    ${LEGACY ? '' : `<fieldset class="mode-select rule-select"><legend>ルール（新しい対局から）</legend>
-      <label class="setting radio"><input type="radio" name="ruleset" value="legacy" data-action="ruleset" ${S.nextNewRules ? '' : 'checked'}><span>従来ルール</span></label>
-      <label class="setting radio"><input type="radio" name="ruleset" value="new" data-action="ruleset" ${S.nextNewRules ? 'checked' : ''}><span>新ルール（ドラ・暗カン・ツモ回数の上限）</span></label>
-      <p class="note rule-note">いまの対局：${RULESET_LABEL(S.matchSettings.newRules)}。${S.nextNewRules !== S.matchSettings.newRules ? '下の「新しい対局」で切り替わります（いまの局は変わりません）。' : 'ルールの変更は「新しい対局」から反映されます。'}</p>
-    </fieldset>`}
     <label class="setting">AIの速さ <select data-action="speed">${publicSpeedNames().map(opt).join('')}</select></label>
     <label class="setting">視覚演出 <select data-action="fx-mode"><option value="full" ${S.fx.mode === 'full' ? 'selected' : ''}>通常</option><option value="lite" ${S.fx.mode === 'lite' ? 'selected' : ''}>簡易（文字だけ）</option></select></label>
     <label class="setting">効果音 <select data-action="sound"><option value="1" ${S.sound.on ? 'selected' : ''}>オン</option><option value="0" ${S.sound.on ? '' : 'selected'}>オフ</option></select></label>
@@ -1500,13 +1532,13 @@ app.addEventListener('click', (ev) => {
       break;
     case 'reset':
       // 設定画面の「新しい対局」：予約したモード（S.nextMode）・タイトルで選んだ局数と、この試合の3人（座席は選び直す）
-      startMatch({ settings: { mode: S.nextMode, length: S.length, chars: S.matchSettings.chars, newRules: S.nextNewRules } });
+      startMatch({ settings: { mode: S.nextMode, length: S.length, chars: S.matchSettings.chars, ruleset: CURRENT_RULESET } });
       break;
     case 'again':
       // 同じ3人と再戦：終了した試合と同じ設定（モード・局数・3人）で、新しい山・全員100点から。座席は選び直す。
       // 予約中の次回用モード（S.nextMode）やタイトルの選択（S.length）は使わない。
       S.seedBase = Math.floor(Math.random() * 1e9);
-      startMatch({ settings: { mode: S.matchSettings.mode, length: S.matchSettings.length, chars: S.matchSettings.chars, newRules: S.matchSettings.newRules } });
+      startMatch({ settings: { mode: S.matchSettings.mode, length: S.matchSettings.length, chars: S.matchSettings.chars, ruleset: CURRENT_RULESET } }); // 再戦は現行の新ルール
       break;
     case 'change-opponents':
       // 相手を変更：直前の3人を選んだ状態で選択画面へ（1人だけ入れ替えることもできる）
@@ -1615,7 +1647,7 @@ app.addEventListener('click', (ev) => {
       S.seedBase = Math.floor(Math.random() * 1e9);
       S.opp.detail = null;
       S.opp.notice = null;
-      startMatch({ settings: { mode: S.nextMode, length: S.length, chars: S.opp.selected, newRules: S.nextNewRules } });
+      startMatch({ settings: { mode: S.nextMode, length: S.length, chars: S.opp.selected, ruleset: CURRENT_RULESET } });
       break;
     default:
   }
@@ -1647,12 +1679,6 @@ app.addEventListener('change', (ev) => {
   if (ev.target.dataset.action === 'title-mode') {
     const m = parseMode(ev.target.value);
     if (m) { S.nextMode = m; store.set(MODE_KEY, m); }
-  }
-  if (ev.target.dataset.action === 'title-ruleset' || ev.target.dataset.action === 'ruleset') {
-    // 次の新しい対局のルールを選ぶだけ（いまの局・試合のルールは変えない）
-    S.nextNewRules = parseRuleSet(ev.target.value);
-    store.set(RULESET_KEY, S.nextNewRules ? 'new' : 'legacy');
-    if (ev.target.dataset.action === 'ruleset') render();
   }
   if (ev.target.dataset.action === 'title-length') {
     const l = parseLen(ev.target.value);
@@ -1726,13 +1752,14 @@ function leaveGame(screen) {
 //   ai（従来の再現 URL・テスト用）：その難易度の既定の3人を、従来どおりの席の順で使う。
 // 座席は試合の開始時に確定し、試合の途中では変えない。人間は席0。
 function startMatch({ fromUrl = false, settings = null } = {}) {
-  const cfg = settings || { mode: S.nextMode, length: S.length, ai: S.ai, newRules: S.nextNewRules };
+  const cfg = settings || { mode: S.nextMode, length: S.length, ai: S.ai, ruleset: CURRENT_RULESET };
   let chars = cfg.chars, seats = cfg.seats;
   if (!chars) { chars = rosterForLevel(cfg.ai || 'intermediate').map((c) => c.id); seats = chars.slice(); }
   if (!seats) seats = assignSeats(chars, Math.random);
   // この試合の設定（「同じ3人と再戦」「相手を変更」「最終結果」「再現情報」で使う）
-  // newRules：新ルール（docs/61）。明示的に true のときだけ。旧規則（?rules=legacy）では使わない
-  S.matchSettings = { mode: cfg.mode, length: cfg.length, chars: chars.slice(), seats: seats.slice(), newRules: cfg.newRules === true && !LEGACY };
+  // ruleset：ルールの版（docs/62）。通常の開始・再戦・新しい対局は現行の版、再現 URL はその URL の版。旧規則（?rules=legacy）は版0
+  const ruleset = LEGACY ? 0 : [0, 1, 2].includes(cfg.ruleset) ? cfg.ruleset : CURRENT_RULESET;
+  S.matchSettings = { mode: cfg.mode, length: cfg.length, chars: chars.slice(), seats: seats.slice(), ruleset, newRules: ruleset >= 1 };
   PLAYERS = playersFor(seats); // 試合開始時にキャラクター3人と座席を確定
   S.aiDecisionsBySeat = [{}, {}, {}, {}];
   S.publicAiHistory = newPublicHistory();
@@ -1758,5 +1785,6 @@ function startMatch({ fromUrl = false, settings = null } = {}) {
   startRound();
 }
 
-if (REPLAY.kind !== 'none' && REPLAY.ok) startMatch({ fromUrl: true, settings: RV.chars ? { mode: S.nextMode, length: S.length, chars: RV.chars, seats: RV.chars, newRules: RV.newRules } : { mode: S.nextMode, length: S.length, ai: S.ai, newRules: RV.newRules } });
+// 再現 URL：その URL のルールの版で再生する（newrules なし＝従来ルール、1＝新ルール初版、2＝現行）
+if (REPLAY.kind !== 'none' && REPLAY.ok) startMatch({ fromUrl: true, settings: RV.chars ? { mode: S.nextMode, length: S.length, chars: RV.chars, seats: RV.chars, ruleset: RV.ruleset } : { mode: S.nextMode, length: S.length, ai: S.ai, ruleset: RV.ruleset } });
 else render(); // タイトル画面、または再現 URL のエラー画面
