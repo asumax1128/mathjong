@@ -15,16 +15,17 @@ const modeList=['math1','math2'],lengths=[4,8];
 const base={kanata:{...BEGINNER_PARAMS.kanata,pick:BEGINNER_PARAMS.kanata.pick.slice()},mitsuki:{...BEGINNER_PARAMS.mitsuki,pick:BEGINNER_PARAMS.mitsuki.pick.slice()},aoto:{...BEGINNER_PARAMS.aoto}};
 const scenarios={
  baseline:()=>Object.assign(BEGINNER_PARAMS,{kanata:{...base.kanata},mitsuki:{...base.mitsuki},aoto:{...base.aoto}}),
- gentle:()=>{
- BEGINNER_PARAMS.kanata={...base.kanata,pick:[.43,.27,.17,.09,.04],readyBase:.5,readyPerLive:.04,readExact:0,readKind:0,readPerWait:0,readMax:0};
- BEGINNER_PARAMS.mitsuki={...base.mitsuki,pick:[.28,.25,.22,.15,.10]};
- BEGINNER_PARAMS.aoto={...base.aoto,randomDiscard:.7,pon:.9,chi:.85};
+ balanced_mild:()=>{
+ BEGINNER_PARAMS.kanata={...base.kanata,pick:[.58,.26,.11,.05],readyBase:.85,readyPerLive:.07,readMax:.15};
+ BEGINNER_PARAMS.mitsuki={...base.mitsuki,pick:[.36,.29,.19,.11,.05]};
+ BEGINNER_PARAMS.aoto={...base.aoto};
  },
- easy:()=>{
- BEGINNER_PARAMS.kanata={...base.kanata,pick:[.23,.23,.21,.18,.15],readyBase:0,readyPerLive:0,readExact:0,readKind:0,readPerWait:0,readMax:0};
- BEGINNER_PARAMS.mitsuki={...base.mitsuki,pick:[.18,.20,.22,.21,.19],sinTile:2,sinPair:1.5};
- BEGINNER_PARAMS.aoto={...base.aoto,randomDiscard:.9,pon:.95,chi:.9};
+ balanced_soft:()=>{
+ BEGINNER_PARAMS.kanata={...base.kanata,pick:[.38,.26,.19,.11,.06],readyBase:.45,readyPerLive:.03,readExact:0,readKind:0,readPerWait:0,readMax:0};
+ BEGINNER_PARAMS.mitsuki={...base.mitsuki,pick:[.3,.27,.21,.14,.08]};
+ BEGINNER_PARAMS.aoto={...base.aoto};
  },
+
 };
 function novice(g,p,rng){
  if(p.type==='claim') { if(p.ron)return {type:'ron'}; if(process.env.NOVICE_SMART==='1' && p.chi.length && rng.next()<.22 && g.melds[p.seat].length===0)return {type:'chi',option:rng.int(p.chi.length)}; return {type:'pass'}; }
@@ -35,7 +36,7 @@ function novice(g,p,rng){
  if(process.env.NOVICE_SMART==='1' && rng.next()<.85) {const opts=g.riichiOptions(p.seat);if(opts.length){const t=opts[rng.int(opts.length)];return {type:'discard',tile:t.ids[0],riichi:true};}}
  return {type:'discard',tile:rng.next()<.25?rng.pick(view.hand).id:beginnerDiscard(g.rules,view,rng)};
 }
-const all={definition:'proxy: 75% basic keep,25% random; smart variant 85% chance declare simple available riichi and 22% chance chi while no open melds. Always take available win. Not representative of real humans.',smart:process.env.NOVICE_SMART==='1',N,seed0,conditions:{}};
+const all={definition:'research yujin random discard 38% (mild) or 64% (soft) after other beginner-specific balancing; proxy: 75% basic keep,25% random; smart variant 85% chance declare simple available riichi and 22% chance chi while no open melds. Always take available win. Not representative of real humans.',smart:process.env.NOVICE_SMART==='1',N,seed0,conditions:{}};
 for(const mode of modeList)for(const length of lengths){
  const rules=createRules(makeConfig({mode}));const key=mode+'_'+length;all.conditions[key]={};
  for(const [label,settings] of Object.entries(scenarios)){
@@ -51,7 +52,12 @@ for(const mode of modeList)for(const length of lengths){
     const info={...matchInfo(m),publicHistory:history};
     for(let step=0;g.pending();step++){
       if(step>1000)throw Error('step cap');
-      const p=g.pending();const action=p.seat===0?novice(g,p,rng):decideCharacter(g,p.seat,roster[p.seat],rng,info,roster.slice(1));
+      const p=g.pending();let action=p.seat===0?novice(g,p,rng):decideCharacter(g,p.seat,roster[p.seat],rng,info,roster.slice(1));
+      // Research-only imperfect yujin: preserve wins, legal claims, riichi, forced tsumogiri.
+      if(p.seat!==0 && roster[p.seat]==='yujin' && p.type==='turn' && !p.canTsumo && !g.riichi[p.seat] && action.type==='discard' && label!=='baseline'){
+        const errorRate=label==='balanced_mild'?.38:.64;
+        if(rng.next()<errorRate){const hand=g.viewFor(p.seat).hand; action={type:'discard',tile:rng.pick(hand).id};}
+      }
       applyAction(g,p.seat,action);g.checkInvariants();
     }
     if(g.result.type==='draw')st.draws++;
