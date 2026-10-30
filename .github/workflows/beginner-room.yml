@@ -5,6 +5,7 @@ on:
       - 'src/ui/beginner-room.js'
       - 'src/ui/beginner-practice.js'
       - 'src/ui/beginner-progress.js'
+      - 'src/ui/waits-view.js'
       - 'src/ui/app.js'
       - 'src/ui/styles.css'
       - 'tests/beginner-room.test.js'
@@ -39,7 +40,7 @@ jobs:
           npm install --no-save playwright@1.56.1
           npx playwright install --with-deps chromium
       - name: Beginner room browser regression
-        run: node tests/e2e/play.mjs --only v07BeginnerRoom,v07BeginnerRoom2,v06FreeSelect,v07TableHintDock
+        run: node tests/e2e/play.mjs --only v07BeginnerRoom,v07BeginnerRoom2,v13RiichiAssist,v06FreeSelect,v07TableHintDock
       - name: Ver.0.7 UI preview screenshots (320px through desktop)
         run: |
           mkdir -p /tmp/v07-preview

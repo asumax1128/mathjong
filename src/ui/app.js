@@ -19,8 +19,8 @@ import { createHandDrag } from './handdrag.js';
 import { autoTsumogiriDue, autoTsumogiriTile } from './auto-tsumogiri.js';
 import { CHI_AUTOPASS_KEY, PON_AUTOPASS_KEY, parseChiAutoPass, parsePonAutoPass, visibleClaimActions, claimPendingForHint, claimPolicy, autoPassDue, policySettings, autoPassedKind, mergeKind, autoPassNotice } from './autopass.js';
 import { YAKU_GUIDE, GUIDE_NOTES, guideCondition } from './guide.js';
-import { createRoomState, pickRoomTile, checkRoom, nextRoom, roomHint, roomHTML, enterStage, gotoStage, resumeRoom, retryRoom, openRoomList, roomPracticeSelect, roomPracticeAct, roomPracticeContinue, partsOf } from './beginner-room.js';
-import { loadProgress, saveProgress, hasProgress } from './beginner-progress.js';
+import { createRoomState, pickRoomTile, checkRoom, nextRoom, roomHint, roomHTML, enterStage, gotoStage, resumeRoom, retryRoom, restartRoom, openRoomList, roomPracticeSelect, roomPracticeAct, roomPracticeContinue, partsOf, EXAM_OPPONENTS } from './beginner-room.js';
+import { loadProgress, saveProgress, hasProgress, recordExam } from './beginner-progress.js';
 import { SEAT_AREA, SEAT_ROT, riverRows as layoutRiverRows, boardShape as layoutBoardShape } from './table-layout.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, MAX_ROUND } from './params.js';
 import { validateReplay, replayQuery, CURRENT_RULESET } from './replay.js';
@@ -318,6 +318,14 @@ function finishRound() {
     S.match = applyRoundResult(S.match, g.result, { round: S.round, maxRound: MAX_ROUND, riichi: g.riichi });
     S.scores = S.match.scores;
     S.history.push({ round: S.round, result: g.result.type === 'win' ? { ...g.result, analysis: undefined } : g.result });
+    // 卒業試験（初心者の部屋）：1局戦を最後まで打ったら合格。順位を進み具合に記録する（既存の記録は消さない）
+    if (S.match.over && S.matchSettings.exam && !S.examRecorded) {
+      S.examRecorded = true;
+      const prog = loadProgress(roomStorage(), partsOf);
+      recordExam(prog, ranks(S.match.scores)[HUMAN], S.matchSettings.mode);
+      S.examSaveOk = saveProgress(roomStorage(), prog);
+      S.examProgress = prog;
+    }
   }
   closeHint(); // 和了・流局でヒントを閉じる
   S.modal = 'result';
@@ -750,6 +758,8 @@ function handHTML() {
   };
   // リーチ中はツモ牌だけ、リーチの宣言牌を選んでいる間は聴牌になる牌だけを選べる（エンジンも同じ条件で拒否する）
   const allowed = humanDiscardFilter();
+  // リーチできる打牌（聴牌になる種類）に金の小さな印（docs/67）。宣言牌の選択中は従来の riichi-ok（選べる牌だけ光る）
+  const riichiTypes = myTurn && !g.riichi[HUMAN] && !S.ankanSelect ? new Set(g.riichiOptions(HUMAN).map((o) => o.type)) : null;
   // 暗カンの確認の段階：槓子にできる4枚を強調（打牌はできない）。嶺上ツモの牌は区別する
   const kanIds = S.ankanSelect && myTurn ? new Set((p.ankan || []).flatMap((o) => o.ids)) : null;
   const rinshan = myTurn && drawn !== null && (recentKan() || {}).seat === HUMAN;
@@ -759,7 +769,7 @@ function handHTML() {
     return tileHTML(T(g.typeOf(id)), {
       size: 'l', id,
       cls: [ok ? 'tap' : '', myTurn && !ok && !kan ? 'locked' : '', S.selected === id ? 'selected' : '', frame(id),
-        S.riichiSelect && ok ? 'riichi-ok' : '', kan ? 'kan-ok' : '',
+        S.riichiSelect && ok ? 'riichi-ok' : '', kan ? 'kan-ok' : '', !S.riichiSelect && riichiTypes && riichiTypes.has(g.typeOf(id)) ? 'riichi-cand' : '',
         id === drawn ? `${drawnAtEnd ? 'drawn' : 'drawn drawn-mark'}${rinshan ? ' rinshan' : ''}` : ''].join(' '),
       attrs: ok ? `data-action="tile" tabindex="0"` : '',
     });
@@ -832,11 +842,12 @@ function actionsHTML() {
     // リーチの宣言牌を選ぶ：聴牌になる牌だけ選べる（光る牌）
     const tsumo = p.canTsumo ? '<button data-action="tsumo" class="win">ツモ</button>' : '';
     const ok = S.selected !== null && humanDiscardFilter()(S.selected);
+    // 宣言前に待ちを確認：牌を選ぶと手牌の上に「捨てると待ち」（waits-view）。宣言料は確定ボタンに明記
     return `<div class="actions">
-      <span class="status riichi-status">リーチ：宣言して捨てる牌を選択</span>
+      <span class="status riichi-status">${ok ? '待ちを確認して「リーチして捨てる」' : 'リーチ：金の印の牌を選ぶと待ちを表示'}</span>
       ${tsumo}
       <button data-action="riichi-cancel">やめる</button>
-      <button data-action="riichi-discard" class="primary riichi" ${ok ? '' : 'disabled'}>リーチして捨てる</button>
+      <button data-action="riichi-discard" class="primary riichi${depositOf() ? ' with-note' : ''}" ${ok ? '' : 'disabled'}>リーチして捨てる${depositOf() ? `<small>宣言料${depositOf()}点を供託へ</small>` : ''}</button>
     </div>`;
   }
   if (p.type === 'turn' && S.ankanSelect && p.ankan && p.ankan.length) {
@@ -850,7 +861,9 @@ function actionsHTML() {
   }
   if (p.type === 'turn') {
     const tsumo = p.canTsumo ? '<button data-action="tsumo" class="win">ツモ</button>' : '';
-    const riichiBtn = g.riichiOptions(HUMAN).length ? '<button data-action="riichi" class="riichi">リーチ</button>' : '';
+    // リーチできるとき（docs/67）：金色で強調（視覚演出「簡易」・動きを減らす設定では点滅しない）。宣言料（現行ルール）をボタンに明記
+    const riichiBtn = g.riichiOptions(HUMAN).length
+      ? `<button data-action="riichi" class="riichi riichi-ready${S.fx.mode === 'lite' ? ' still' : ''}" aria-label="リーチできます${depositOf() ? `（宣言料${depositOf()}点）` : ''}">リーチ${depositOf() ? `<small>宣言料${depositOf()}点</small>` : ''}</button>` : '';
     // 暗カン（新ルール）：エンジンが選択肢を出したときだけ（ツモ直後・リーチ前・嶺上牌と山の残り・槓子の上限）
     const kanBtn = p.ankan && p.ankan.length ? '<button data-action="ankan" class="kan">暗カン</button>' : '';
     const kan = recentKan();
@@ -1098,8 +1111,17 @@ function finalHTML() {
       <li class="note">開始時の持ち点は各${START_POINTS}点（合計${START_POINTS * 4}点）。同点は同順位。点数配分は試作段階の暫定値です。</li>
     </ul>
     ${matchLogHTML(m)}
-    <div class="modal-actions final-actions"><button data-action="again" class="primary">同じ3人と再戦</button><button data-action="change-opponents">相手を変更</button><button data-action="to-title">タイトルへ戻る</button></div>
+    ${S.matchSettings.exam ? examResultHTML(rk[HUMAN]) : ''}
+    <div class="modal-actions final-actions">${S.matchSettings.exam ? '<button data-action="br-back" class="primary">初心者の部屋へ戻る</button>' : ''}<button data-action="again" class="${S.matchSettings.exam ? '' : 'primary'}">同じ3人と再戦</button><button data-action="change-opponents">相手を変更</button><button data-action="to-title">タイトルへ戻る</button></div>
   </div>`;
+}
+
+// 卒業試験（初心者の部屋）の結果：最後まで打てば修了。1位なら特別なメッセージ
+function examResultHTML(rank) {
+  const e = S.examProgress ? S.examProgress.exam : null;
+  return `<div class="exam-result" role="status"><p class="exam-title">${rank === 1 ? '卒業試験 1位で合格！' : '卒業試験 合格（修了）'}</p>
+    <p>${rank === 1 ? 'おめでとう！　リーチと待ちを使いこなして1位になれたね。' : `${rank}位で1局戦を打ち切ったよ。次は1位を目指そう。初心者の部屋の段階を受け直して復習することもできるよ。`}</p>
+    ${e ? `<p class="note">卒業試験 ${e.plays}回（1位 ${e.firsts}回・最高 ${e.best}位）${S.examSaveOk === false ? '・この端末では保存できませんでした' : ''}</p>` : ''}</div>`;
 }
 
 // 対局履歴（各局の結果）。四家立直は山切れの流局と区別して表示する
@@ -1649,7 +1671,7 @@ app.addEventListener('click', (ev) => {
       // 同じ3人と再戦：終了した試合と同じ設定（モード・局数・3人）で、新しい山・全員100点から。座席は選び直す。
       // 予約中の次回用モード（S.nextMode）やタイトルの選択（S.length）は使わない。
       S.seedBase = Math.floor(Math.random() * 1e9);
-      startMatch({ settings: { mode: S.matchSettings.mode, length: S.matchSettings.length, chars: S.matchSettings.chars, ruleset: CURRENT_RULESET } }); // 再戦は現行の新ルール
+      startMatch({ settings: { mode: S.matchSettings.mode, length: S.matchSettings.length, chars: S.matchSettings.chars, ruleset: CURRENT_RULESET, exam: S.matchSettings.exam } }); // 再戦は現行の新ルール（卒業試験の再戦も卒業試験）
       break;
     case 'change-opponents':
       // 相手を変更：直前の3人を選んだ状態で選択画面へ（1人だけ入れ替えることもできる）
@@ -1688,6 +1710,27 @@ app.addEventListener('click', (ev) => {
       if (S.screen !== 'beginner-room') break;
       if (gotoStage(S.beginnerRoom, rulesForMode('math1'), Number(el.dataset.stage))) { saveRoom(); render(); window.scrollTo(0, 0); }
       break;
+    case 'br-restart':
+      // 最初から受け直す（クリア・修了の記録は消さない）
+      if (S.screen !== 'beginner-room') break;
+      restartRoom(S.beginnerRoom, rulesForMode('math1')); saveRoom(); render(); window.scrollTo(0, 0); break;
+    case 'br-exam': {
+      // 卒業試験：初級の3人と1局戦（現行ルール）。通常の対局画面で打ち、試合の終わりに結果を初心者の部屋の進み具合へ記録する
+      if (S.screen !== 'beginner-room') break;
+      const mode = el.dataset.mode === 'math2' ? 'math2' : 'math1';
+      S.seedBase = Math.floor(Math.random() * 1e9);
+      startMatch({ settings: { mode, length: 1, chars: EXAM_OPPONENTS.slice(), ruleset: CURRENT_RULESET, exam: true } });
+      window.scrollTo(0, 0);
+      break;
+    }
+    case 'br-back': {
+      // 卒業試験の最終結果から初心者の部屋（一覧）へ戻る
+      const room = createRoomState(loadProgress(roomStorage(), partsOf));
+      openRoomList(room);
+      S.beginnerRoom = room;
+      leaveGame('beginner-room');
+      break;
+    }
     case 'br-resume':
       if (S.screen !== 'beginner-room') break;
       resumeRoom(S.beginnerRoom, rulesForMode('math1')); saveRoom(); render(); window.scrollTo(0, 0); break;
@@ -1874,7 +1917,8 @@ function startMatch({ fromUrl = false, settings = null } = {}) {
   // この試合の設定（「同じ3人と再戦」「相手を変更」「最終結果」「再現情報」で使う）
   // ruleset：ルールの版（docs/62）。通常の開始・再戦・新しい対局は現行の版、再現 URL はその URL の版。旧規則（?rules=legacy）は版0
   const ruleset = LEGACY ? 0 : [0, 1, 2].includes(cfg.ruleset) ? cfg.ruleset : CURRENT_RULESET;
-  S.matchSettings = { mode: cfg.mode, length: cfg.length, chars: chars.slice(), seats: seats.slice(), ruleset, newRules: ruleset >= 1 };
+  S.matchSettings = { mode: cfg.mode, length: cfg.length, chars: chars.slice(), seats: seats.slice(), ruleset, newRules: ruleset >= 1, exam: !!cfg.exam };
+  S.examRecorded = false; // 卒業試験（初心者の部屋）の結果を記録したか（試合ごとに1回）
   PLAYERS = playersFor(seats); // 試合開始時にキャラクター3人と座席を確定
   S.aiDecisionsBySeat = [{}, {}, {}, {}];
   S.publicAiHistory = newPublicHistory();

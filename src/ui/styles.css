@@ -488,6 +488,15 @@ table.values td.undef { color: #999; font-size: 12px; }
 .hand .tile.riichi-ok { box-shadow: 0 0 0 3px #e74c3c; }
 .actions button.riichi { background: #c0392b; color: #fff; border-color: #c0392b; font-weight: 700; }
 .actions button.riichi[disabled] { opacity: 0.5; }
+/* docs/67：リーチできるときは金色で強調（ゆっくり光る）。視覚演出「簡易」（still）・動きを減らす設定では光らない */
+.actions button.riichi.riichi-ready, .br-actions button.riichi-ready:not([disabled]) { background: linear-gradient(#f3d77a, #c9a227); color: #2a1d00; border-color: #fff1b8; box-shadow: 0 0 0 2px rgba(243, 215, 122, .45), 0 0 12px rgba(243, 215, 122, .55); animation: riichi-ready 1.6s ease-in-out infinite; }
+.actions button.riichi.riichi-ready.still, .br-actions button.riichi-ready.still { animation: none; }
+@keyframes riichi-ready { 0%, 100% { box-shadow: 0 0 0 2px rgba(243, 215, 122, .45), 0 0 6px rgba(243, 215, 122, .35); } 50% { box-shadow: 0 0 0 3px rgba(255, 241, 184, .9), 0 0 16px rgba(243, 215, 122, .8); } }
+@media (prefers-reduced-motion: reduce) { .actions button.riichi.riichi-ready, .br-actions button.riichi-ready { animation: none; } }
+.actions button.riichi small, .br-actions button.riichi-ready small { display: block; font-size: 10px; font-weight: 400; line-height: 1.1; }
+.actions button.riichi { line-height: 1.15; }
+/* リーチできる打牌（聴牌になる種類）：金の点線の枠。宣言牌の選択中は従来の riichi-ok */
+.hand .tile.riichi-cand, .bp-hand .br-pick.riichi-cand { outline: 2px dashed var(--gold); outline-offset: -3px; }
 .riichi-status { color: #ffb4a8; font-weight: 700; }
 .yaku .riichi-li span { color: var(--ink-dim); }
 
@@ -803,8 +812,8 @@ table.values td.undef { color: #999; font-size: 12px; }
 .beginner-room { max-width: 640px; margin: 0 auto; padding: 16px 14px calc(22px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; }
 .beginner-room h1 { margin: 0; text-align: center; font-size: 24px; color: var(--gold); }
 .br-sub { margin: 0; text-align: center; font-size: 14px; color: var(--ink-dim); }
-.br-progress { display: flex; justify-content: center; gap: 12px; }
-.br-progress span { width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--felt-line); display: flex; align-items: center; justify-content: center; color: var(--ink-dim); }
+.br-progress { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; }
+.br-progress span { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--felt-line); display: flex; align-items: center; justify-content: center; color: var(--ink-dim); }
 .br-progress span.current { color: var(--felt); background: var(--gold); border-color: var(--gold); font-weight: 700; }
 .br-progress span.past { color: var(--gold); border-color: var(--gold); }
 .br-panel { background: var(--felt-2); padding: 14px; border: 1px solid var(--felt-line); border-radius: 12px; }
@@ -857,6 +866,24 @@ table.values td.undef { color: #999; font-size: 12px; }
 .bp-actions button { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; }
 .bp-actions .bp-decl .formula { font-size: 15px; }
 .bp-warn { border-left-color: #ff9d6b; }
+/* 待ち・フリテン（実戦形式の課題）。通常対局の手牌の上の欄と同じ考え方 */
+.bp-info { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 13px; background: rgba(0,0,0,.2); border-radius: 6px; padding: 6px 8px; }
+.bp-waits { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.bp-waits b { color: var(--gold); }
+.bp-waits.none { color: var(--ink-dim); }
+.bp-wait { display: inline-flex; align-items: center; gap: 2px; }
+.bp-wait small { font-size: 11px; color: var(--ink-dim); }
+.bp-wait.no-yaku { opacity: .55; }
+.bp-furiten { color: #ffb4a8; }
+.bp-furiten b { margin-right: 4px; color: #ff8a7a; }
+/* 待ち牌クイズ・卒業試験 */
+.br-quiz-hand { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; margin: 8px 0; }
+.br-exam-points { padding-left: 1.2em; line-height: 1.6; font-size: 14px; }
+.br-graduated { color: var(--gold); font-weight: 700; margin: 4px 0; }
+.br-exam-record { margin: 0 0 8px; font-size: 13px; color: var(--ink-dim); }
+.exam-result { margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: #fdf3d4; border: 1px solid #c9a227; }
+.exam-result .exam-title { margin: 0 0 4px; font-weight: 800; color: #7a5a00; }
+.exam-result p { margin: 2px 0; font-size: 14px; }
 .bp-result { background: #1c4033; border: 1px solid var(--gold); border-radius: 8px; padding: 10px 12px; }
 .bp-win { margin: 0 0 6px; font-weight: 700; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .bp-yaku { margin: 0 0 6px; padding-left: 20px; }
