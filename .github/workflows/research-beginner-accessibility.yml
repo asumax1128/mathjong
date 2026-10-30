@@ -20,8 +20,8 @@ jobs:
       - name: Simulate paired novice proxy vs baseline/gentle/easy AI
         run: |
           mkdir -p /tmp/beginner
-          BEGINNER_MATCHES=24 NOVICE_SMART=0 node tools/research-beginner-accessibility.mjs | tee /tmp/beginner/basic.json
-          BEGINNER_MATCHES=24 NOVICE_SMART=1 node tools/research-beginner-accessibility.mjs | tee /tmp/beginner/smart.json
+          BEGINNER_MATCHES=48 NOVICE_SMART=0 node tools/research-beginner-accessibility.mjs | tee /tmp/beginner/basic.json
+          BEGINNER_MATCHES=48 NOVICE_SMART=1 node tools/research-beginner-accessibility.mjs | tee /tmp/beginner/smart.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
