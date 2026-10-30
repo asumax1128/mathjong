@@ -301,6 +301,7 @@ export function decide(game, seat, personality, rng, level = 'intermediate', inf
   if (level !== 'beginner' && level !== 'intermediate' && level !== 'advanced') throw new Error(`unknown AI level ${level}`);
   // リーチ中（規則 riichi のとき）：ツモ和了できればツモ、できなければツモ切り（難易度によらない。鳴きはエンジンが出さない）
   const p = game.pending();
+  if (p && p.type === 'turn' && p.ankan?.length && !p.canTsumo) return {type:'ankan',tileType:p.ankan[0].type};
   if (p && p.type === 'turn' && game.riichi && game.riichi[seat]) {
     if (p.canTsumo) return { type: 'tsumo' };
     return { type: 'discard', tile: game.drawn };
@@ -356,5 +357,6 @@ function decideIntermediate(game, seat, personality, rng) {
 export function applyAction(game, seat, action) {
   if (action.type === 'discard') game.discard(seat, action.tile, action.riichi ? { riichi: true } : undefined);
   else if (action.type === 'tsumo') game.tsumo(seat);
+  else if (action.type === 'ankan') game.ankan(seat, action.tileType);
   else game.respond(seat, action);
 }
