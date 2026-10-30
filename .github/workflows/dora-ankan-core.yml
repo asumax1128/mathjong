@@ -1,0 +1,21 @@
+name: Dora ankan cap24 core validation (no deploy)
+on:
+  pull_request:
+    paths:
+      - 'src/engine/**'
+      - 'tests/dora-ankan.test.js'
+      - '.github/workflows/dora-ankan-core.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check src/engine/dead-wall.js && node --check src/engine/game.js && node --check src/engine/rules.js && node --check src/engine/ai.js
+      - run: npm test
