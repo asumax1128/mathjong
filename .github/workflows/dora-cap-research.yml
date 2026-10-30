@@ -1,0 +1,29 @@
+name: Research 24 draw cap (no deploy)
+on:
+  pull_request:
+    paths:
+      - 'tools/dora-cap-compare.mjs'
+      - '.github/workflows/dora-cap-research.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check tools/dora-cap-compare.mjs
+      - name: Run paired 24 draw cap simulations
+        run: |
+          mkdir -p /tmp/dora-cap
+          CAP_GAMES=300 node tools/dora-cap-compare.mjs | tee /tmp/dora-cap/result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dora-draw-cap24
+          path: /tmp/dora-cap/result.json
+          if-no-files-found: error
