@@ -3934,7 +3934,9 @@ const fxLook = (page) => page.evaluate(() => {
 });
 // 設定画面で通常／簡易を切り替える（実際の画面操作）。閉じると再描画される。
 async function fxSetMode(page, mode) {
-  await page.locator('button[data-action="settings"]').tap();
+  // Ver.0.7麻雀卓：設定ボタンは下部（手牌の下の道具の列）＝揺れる卓（.table）の中。Playwright は動いている要素の
+  // 静止を待つため、ロンの揺れ（約0.7秒）が終わるまで押下が遅れる。利用者のタップは揺れの間も受け付けるので、静止待ちをしない。
+  await page.locator('button[data-action="settings"]').tap({ force: true });
   await page.locator('select[data-action="fx-mode"]').selectOption(mode);
   await page.locator('.modal-actions button[data-action="close"]').tap();
 }
