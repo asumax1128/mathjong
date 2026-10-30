@@ -18,4 +18,6 @@ jobs:
         with:
           node-version: '22'
       - run: node --check src/engine/dead-wall.js && node --check src/engine/game.js && node --check src/engine/rules.js && node --check src/engine/ai.js
+      - name: Focused new-rules tests
+        run: node --test tests/dora-ankan.test.js
       - run: npm test
