@@ -398,12 +398,12 @@ async function publicMode(browser) {
   // ?round=3 で第3局（親は対面）から始まる。round 1 から3局進めたときと同じ山。
   await page.goto(`${PUBLIC}?seed=123&round=3`);
   await page.waitForSelector('.panel.seat-2 .oya');
-  assert.match(await page.locator('.top .info').innerText(), /東3局/);
+  assert.match(await page.locator('.board-center').innerText(), /東3局/);
   // 不正な値は無視される（エラーにならない）。seed が不正なら再現 URL ではないのでタイトル画面から（Ver.0.4-A）
   await page.goto(`${PUBLIC}?seed=abc&round=-1&speed=%3Cscript%3E&len=9&hand=-2&dealer=7`);
   await page.waitForSelector('.title-screen');
   await chooseAndStart(page);
-  assert.match(await page.locator('.top .info').innerText(), /東1局/);
+  assert.match(await page.locator('.board-center').innerText(), /東1局/);
   // seed が正しくても、ほかの値が不正なら別の局面として黙って始めない（エラー画面）。Ver.0.4-A の最終修正
   await page.goto(`${PUBLIC}?seed=77&round=-1&len=9&hand=-2&dealer=7&renchan=abc`);
   await page.waitForSelector('.replay-error');
@@ -425,11 +425,11 @@ async function badSpeeds(browser) {
   // AI が1手以上打つまで（山の枚数が減るまで）進行することを確認
   async function progresses(page) {
     await page.waitForSelector('.hand .tile.tap');
-    const wall0 = Number(await page.locator('.wall b').innerText());
+    const wall0 = Number(await page.locator('.bc-wall strong').innerText());
     const drawn = page.locator('.hand .tile.tap').last();
     await drawn.tap();
     await drawn.tap();
-    await page.waitForFunction((w) => Number(document.querySelector('.wall b').textContent) < w, wall0, { timeout: 5000 });
+    await page.waitForFunction((w) => Number(document.querySelector('.bc-wall strong').textContent) < w, wall0, { timeout: 5000 });
   }
   for (const v of ['toString', 'constructor', '__proto__', 'unknown', '', 'hasOwnProperty']) {
     const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
@@ -2344,7 +2344,8 @@ async function v03Rules(browser) {
     assert.equal(st.hand0, 6);
     assert.equal(st.status, 'ポン後：捨てる牌を選択');
     assert.equal(await page.locator('.melds.mine .meld.pon .tile').count(), 3, '公開刻子を表示');
-    assert.match(await page.locator('.msg').innerText(), /あなた がポン/);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game.events.at(-1).type), 'pon', '成立イベントは維持');
+    assert.equal(await page.locator('.msg').count(), 0, '実況行は表示しない');
     // 打牌（=-√3）→ 上家（seat3）は飛ばされ、下家の手番
     const t1 = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'v:-√3'); });
     await page.locator(`.hand .tile[data-id="${t1}"]`).tap();
@@ -2477,7 +2478,7 @@ async function v03Rules(browser) {
     assert.equal(st.max, 180);
     assert.equal(st.n, 124);
     assert.ok(st.labels.every((l) => /^\d+°$/.test(l)), st.labels.join());
-    assert.equal(await page.locator('.top .mode').innerText(), '数Ⅰ');
+    assert.equal(await page.locator('.board-center .bc-mode').innerText(), '数学Ⅰ');
     await page.locator('button[data-action="hint"]').tap();
     await page.locator('.hint-tools [data-action="table"]').tap();
     assert.equal(await page.locator('.values tr').count(), 10, '値表は0°〜180°の9行');
@@ -2493,7 +2494,7 @@ async function v03Rules(browser) {
     // 縦組みの分数（分子 π・分母 6）、0 と 2π は別の牌
     const frac = await page.locator('.gallery.sz-row-l .tile[aria-label="π/6"] .afrac').evaluate((e) => ({ num: e.querySelector('.num').textContent, den: e.querySelector('.den').textContent, dir: getComputedStyle(e).flexDirection }));
     assert.deepEqual(frac, { num: 'π', den: '6', dir: 'column' });
-    assert.equal(await page.locator('.top .mode').innerText(), '数Ⅱ');
+    assert.equal(await page.locator('.board-center .bc-mode').innerText(), '数学Ⅱ');
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -2805,11 +2806,11 @@ const matchState = (page) => page.evaluate(() => {
   const { S } = window.__mathjong;
   const m = S.match;
   return {
-    screen: S.screen, modal: S.modal, label: m && document.querySelector('.top .hand-label') ? document.querySelector('.top .hand-label').textContent : null,
+    screen: S.screen, modal: S.modal, label: m && document.querySelector('.board-center .hand-label') ? document.querySelector('.board-center .hand-label').textContent : null,
     hand: m && m.hand, renchan: m && m.renchan, played: m && m.played, over: m && m.over, length: m && m.length, scores: m && m.scores.slice(),
     sum: m ? m.scores.reduce((a, b) => a + b, 0) : null, dealer: S.dealer, round: S.round, ai: S.ai, mode: window.__mathjong.rules.config.mode,
     chars: S.matchSettings ? S.matchSettings.chars.slice() : null, seats: S.matchSettings ? S.matchSettings.seats.slice() : null,
-    info: (document.querySelector('.top .info') || {}).textContent || '',
+    info: (document.querySelector('.board-center') || {}).textContent || '',
   };
 });
 // 流局させる（テスト用：山を空にして、手番の人がツモ牌を捨てる。宣言はすべて見送る）
@@ -3537,9 +3538,10 @@ async function v05Riichi(browser) {
     await page.locator('button[data-action="riichi-discard"]').tap();
     st = await riState(page);
     assert.deepEqual(st.riichi, [true, false, false, false]);
-    assert.equal(await page.locator('.self .riichi-badge').count(), 1, '自分の表示にリーチ');
+    assert.equal(await page.locator('.me-board .riichi-badge').count(), 1, '自分の名札にリーチ');
     assert.equal(await page.locator('.river.mine .tile.riichi-decl').count(), 1, '宣言牌に印');
-    assert.match(await page.locator('.msg').innerText(), /リーチ/);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.game.events.filter(e => e.type === 'riichi' && e.seat === 0).length), 1, 'リーチ成立は1回');
+    assert.equal(await page.locator('.msg').count(), 0, '実況行は表示しない');
     // 他家は（強制的に）ツモ切り → 自分の番：ツモ切りだけ
     await apForce(page, 1); await apForce(page, 2); await apForce(page, 3);
     await riWaitTurn(page);
@@ -5992,7 +5994,8 @@ async function v06TrioIntegration(browser) {
     await page.locator('button[data-action="start-match"]').tap();
     await page.waitForSelector('.hand .tile');
     assert.deepEqual((await page.locator('.panel .name').allInnerTexts()).sort(),['ゆうじん','たら','のっち'].sort());
-    const oldWidths={320:29.1667,375:34.8958,390:36.4583,430:40.625,844:56};
+    // Ver.0.7麻雀卓：縦画面は従来の牌幅。スマホ横（844×390）は卓の右に手牌を置くため 44px（縦画面より大きい）
+    const oldWidths={320:29.1667,375:34.8958,390:36.4583,430:40.625,844:44};
     const tileWidth=(await page.locator('.hand .tile').first().boundingBox()).width;
     assert.ok(Math.abs(tileWidth-oldWidths[width])<.5,`従来の牌幅を維持 ${width}px: ${tileWidth}`);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
@@ -6552,8 +6555,8 @@ async function v07TableHintDock(browser) {
     async function geometry(stage) {
       const g = await page.evaluate(() => {
         const box=s=>{const b=document.querySelector(s).getBoundingClientRect();return {top:b.top,bottom:b.bottom,left:b.left,right:b.right,width:b.width,height:b.height};};
-        return {table:box('.table'), board:box('.opponents'),center:box('.board-center'),hand:box('.self'),
-          dock:box('.study-dock'),bar:box('.bar'),panels:[1,2,3].map(s=>box(`.seat-${s}`)),
+        return {table:box('.table'), board:box('.board-wrap'),center:box('.board-center'),hand:box('.self'),
+          dock:box('.study-dock'),bar:box('.bar'),panels:[1,2,3].flatMap(s=>[box(`.panel.seat-${s} .rb-river-block`),box(`.panel.seat-${s} .rb-backs-block`),box(`.panel.seat-${s} > .seat-tag`)]),
           overflow:document.documentElement.scrollWidth-innerWidth};
       });
       const label=`${width}x${height} ${stage} ${JSON.stringify(g)}`;
@@ -6579,7 +6582,9 @@ async function v07TableHintDock(browser) {
     }
     await geometry('OFF');
     if(width===320) {
-      const all=await page.evaluate(()=>[...document.querySelectorAll('.panel,.self .hand')].every(e=>{const b=e.getBoundingClientRect(),t=document.querySelector('.table').getBoundingClientRect();return b.top>=t.top-2&&b.bottom<=t.bottom+2;}));
+      // 初期表示＝卓内スクロールが先頭（直前の検査で学習エリアまでスクロールしたので戻す）
+      await page.evaluate(()=>{document.querySelector('.table').scrollTop=0;});
+      const all=await page.evaluate(()=>[...document.querySelectorAll('.mj-table,.self .hand')].every(e=>{const b=e.getBoundingClientRect(),t=document.querySelector('.table').getBoundingClientRect();return b.top>=t.top-2&&b.bottom<=t.bottom+2;}));
       assert.ok(all,'320pxの初期表示で3人と手牌を同時に確認できる');
     }
     await page.locator('button[data-action="hint"]').tap();
@@ -6629,18 +6634,23 @@ async function v07TableHintDock(browser) {
           }
           g.checkInvariants();
         };
-        const read=()=>{const e=document.querySelector('.seat-1 .river'),b=e.getBoundingClientRect(),t=e.lastElementChild.getBoundingClientRect();
-          return {top:e.scrollTop,max:e.scrollHeight-e.clientHeight,lastVisible:t.bottom<=b.bottom+2,last:Number(e.lastElementChild.dataset.id)};};
-        advanceTo(20);m.render();const first=read();
-        document.querySelector('.seat-1 .river').scrollTop=0;m.render();const retained=read();
-        advanceTo(21);m.render();const next=read();
+        // 卓の河はスクロールしない：全ての牌が卓の中に見え、最後の牌は最新の打牌（物理ID）
+        const read=()=>{const e=document.querySelector('.seat-1 .river'),tiles=[...e.querySelectorAll('.tile')],t=document.querySelector('.mj-table').getBoundingClientRect();
+          const inside=tiles.every(x=>{const b=x.getBoundingClientRect();return b.left>=t.left-1&&b.right<=t.right+1&&b.top>=t.top-1&&b.bottom<=t.bottom+1;});
+          return {scrolls:e.scrollHeight>e.clientHeight+1,inside,count:tiles.length,ids:tiles.map(x=>Number(x.dataset.id)),last:Number(tiles.at(-1).dataset.id)};};
+        advanceTo(20);m.render();const first=read();first.expected=g.rivers[1].map(r=>r.id);
+        const retained=first;
+        advanceTo(21);m.render();const next=read();next.expected=g.rivers[1].map(r=>r.id);
         const table=document.querySelector('.table');table.scrollTop=75;const scroll=table.scrollTop;m.render();
         const result={first,retained,next,expectedLast:g.rivers[1].at(-1).id,scroll,restored:document.querySelector('.table').scrollTop};
         m.startRound();result.reset=document.querySelector('.table').scrollTop;return result;
       });
-      assert.ok(river.first.max>0 && river.first.top>=river.first.max-2 && river.first.lastVisible,'長い河の最新牌が見える');
-      assert.equal(river.retained.top,0,'過去の河を読む位置を再描画で維持');
-      assert.ok(river.next.top>=river.next.max-2 && river.next.lastVisible,'新しい打牌の追加で末尾へ移動');
+      for (const r of [river.first, river.next]) {
+        assert.equal(r.scrolls,false,'河はスクロールせず全部を表示');
+        assert.ok(r.inside,'長い河の全ての牌が卓の中');
+        assert.deepEqual(r.ids,r.expected,'河の全物理IDと順序');
+      }
+      assert.equal(river.retained.count,20);
       assert.equal(river.next.last,river.expectedLast,'物理牌IDも一致');
       assert.equal(river.restored,river.scroll,'卓全体のスクロールも再描画で維持');
       assert.equal(river.reset,0,'次局にはスクロールを持ち越さない');
@@ -6649,6 +6659,202 @@ async function v07TableHintDock(browser) {
     await ctx.close();
   }
   console.log('✓ Ver.0.7：11画面・卓と局情報の非重複・縦の学習ドック・横タブレット62/38・数学ⅠⅡ・2段階・スクロール維持・2回タップ');
+}
+
+// Ver.0.7 麻雀卓：4人が1つの卓を囲む配置。局面は実Gameの合法な打牌・チー・ポン・リーチ・見送りだけで作る
+// （表示用に牌を増やさない）。河の6枚折り返し・席の向き・密着・非重複・公開面子の位置・下部のガイド/設定を検査。
+const MJ_SCENES = {
+  start: { until: () => true },
+  r6: { until: (g) => g.rivers.every((r) => r.length >= 6) },
+  r12: { until: (g) => g.rivers.every((r) => r.length >= 12) },
+  r19: { until: (g) => g.rivers.every((r) => r.length >= 19) },
+  me2: { until: (g) => g.melds[0].length === 2 && g.rivers[0].length >= 4, call: (g, s) => s === 0 },
+  all2: { until: (g) => [1, 2, 3].every((s) => g.melds[s].length === 2) && g.rivers[1].length >= 8, call: () => true },
+  riichi: { until: (g) => g.riichi[0] && [1, 2, 3].some((s) => g.riichi[s]) && g.rivers[0].length >= 7, riichi: true },
+};
+async function mjScene(page, name, seed = 7) {
+  return page.evaluate(({ name, seed, src }) => {
+    const sc = new Function(`return ${src}`)()[name];
+    const m = window.__mathjong;
+    clearTimeout(m.S.timer); m.S.timer = null; m.fx.clear();
+    const old = m.S.game;
+    // その seed で局面に届かず流局したら、次の seed で作り直す（合法な操作だけ）
+    let g;
+    for (let k = 0; k < 30 && !g; k++) g = build(seed + k);
+    if (!g) throw new Error('局面を作れない');
+    g.checkInvariants(); m.S.game = g; m.S.selected = null; m.render();
+    return { rivers: g.rivers.map((r) => r.length), melds: g.melds.map((x) => x.length), riichi: g.riichi.map((r) => (r ? r.tile : null)), events: g.events.length };
+    function build(sd) {
+    const g = new old.constructor({ rules: m.rules, seed: sd, dealer: 0, players: old.players });
+    let reached = false;
+    for (let i = 0; i < 4000; i++) {
+      const p = g.pending(); if (!p) return null;
+      if (!reached && sc.until(g)) reached = true;
+      if (reached && p.seat === 0) break;
+      if (p.type === 'claim') {
+        const take = sc.call && sc.call(g, p.seat) && g.melds[p.seat].length < 2;
+        g.respond(p.seat, take && p.pon ? { type: 'pon' } : take && p.chi.length ? { type: 'chi', option: 0 } : { type: 'pass' });
+      } else {
+        const ro = sc.riichi && !g.riichi[p.seat] ? g.riichiOptions(p.seat) : [];
+        if (ro.length) g.discard(p.seat, ro[0].ids[0], { riichi: true });
+        else g.discard(p.seat, g.drawn ?? g.hands[p.seat].at(-1));
+      }
+    }
+    return reached ? g : null;
+    }
+  }, { name, seed, src: `{${Object.entries(MJ_SCENES).map(([k, v]) => `${k}:{${Object.entries(v).map(([a, f]) => `${a}:${f}`).join(',')}}`).join(',')}}` });
+}
+async function mjMeasure(page) {
+  return page.evaluate(() => {
+    const m = window.__mathjong, g = m.S.game;
+    const box = (e) => { const b = e.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width, height: b.height }; };
+    const q = (s) => document.querySelector(s);
+    const seatSel = (s) => (s === 0 ? '.me-board' : `.panel.seat-${s}`);
+    const seats = [0, 1, 2, 3].map((s) => {
+      const root = q(seatSel(s));
+      const river = root.querySelector('.river');
+      const block = root.querySelector('.mj-rot.river-block');
+      return {
+        seat: s,
+        rows: [...river.querySelectorAll('.rv-row')].map((r) => [...r.querySelectorAll('.tile')].map((t) => Number(t.dataset.id))),
+        expected: g.rivers[s].map((r) => r.id),
+        riichi: g.riichi[s] ? g.riichi[s].tile : null,
+        decl: [...river.querySelectorAll('.tile.riichi-decl')].map((t) => ({ id: Number(t.dataset.id), box: box(t) })),
+        tiles: [...river.querySelectorAll('.tile')].map((t) => ({ id: Number(t.dataset.id), decl: t.classList.contains('riichi-decl'), box: box(t) })),
+        transform: getComputedStyle(block).transform,
+        riverBox: box(root.querySelector('.rb-river-block')),
+        tag: box(root.querySelector('.seat-tag')),
+        melds: s === 0 ? [] : [...root.querySelectorAll('.mj-melds .meld')].map((e, i) => ({ box: box(e), claimed: Number(e.dataset.claimed), expected: g.melds[s][i].claimed,
+          ids: [...e.querySelectorAll('.tile')].length, tiles: [...e.querySelectorAll('.tile')].map((t) => box(t)) })),
+        backs: s === 0 ? null : { box: box(root.querySelector('.rb-backs-block')), n: root.querySelectorAll('.back').length, expected: g.hands[s].length },
+      };
+    });
+    const hand = box(q('.self .hand'));
+    const myMelds = [...document.querySelectorAll('.self .hand-row .melds.mine .meld')].map((e, i) => ({ box: box(e), n: e.querySelectorAll('.tile').length, claimed: Number(e.dataset.claimed), expected: g.melds[0][i].claimed }));
+    return {
+      seats, hand, myMelds, myMeldCount: g.melds[0].length,
+      handTileW: q('.hand .tile').getBoundingClientRect().width,
+      table: box(q('.mj-table')), center: box(q('.board-center')), centerText: q('.board-center').innerText,
+      top: box(q('.top')), topHasInfo: document.querySelectorAll('.top .info, .top [data-action]').length,
+      guide: box(q('.self .hand-help [data-action="guide"]')), settings: box(q('.self .hand-help [data-action="settings"]')),
+      guideCount: document.querySelectorAll('[data-action="guide"]').length, settingsCount: document.querySelectorAll('[data-action="settings"]').length,
+      narration: document.querySelectorAll('.msg').length, overflow: document.documentElement.scrollWidth - innerWidth,
+      wall: g.wall.length, vw: innerWidth, vh: innerHeight,
+    };
+  });
+}
+const mjOverlap = (a, b, eps = 0.75) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > eps && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > eps;
+async function v07MahjongTable(browser) {
+  const sizes = [[320, 568], [375, 667], [390, 844], [430, 932], [568, 320], [844, 390], [768, 1024], [1024, 768], [1366, 768]];
+  const portrait = new Set(['320x568', '375x667', '390x844', '430x932']);
+  for (const [width, height] of sizes) {
+    const key = `${width}x${height}`;
+    const scenes = portrait.has(key) ? Object.keys(MJ_SCENES) : ['r12', 'all2', 'riichi'];
+    for (const mode of portrait.has(key) || width === 1024 ? ['math1', 'math2'] : ['math1']) {
+      const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
+      const page = await ctx.newPage(), errors = watchErrors(page);
+      await page.goto(LOCAL + `?mode=${mode}&seed=7&speed=slow`);
+      await page.locator('.hand .tile').first().waitFor();
+      for (const scene of scenes) {
+        const st = await mjScene(page, scene);
+        const d = await mjMeasure(page);
+        const label = `${key} ${mode} ${scene} ${JSON.stringify(st)}`;
+        // 上部はロゴだけ、局情報は卓中央に1回、実況なし、ガイド・設定は下部（手牌の下の道具）
+        assert.equal(d.narration, 0, '実況なし ' + label);
+        assert.equal(d.topHasInfo, 0, '上部に局情報・ボタンなし ' + label);
+        assert.equal(d.guideCount, 1); assert.equal(d.settingsCount, 1);
+        assert.ok(d.guide.top >= d.hand.bottom - 1 && d.settings.top >= d.hand.bottom - 1, 'ガイド・設定は手牌より下 ' + label);
+        assert.ok(d.guide.height >= 34 && d.settings.height >= 34, 'ガイド・設定は押せる大きさ');
+        assert.match(d.centerText, new RegExp(`${mode === 'math1' ? '数学Ⅰ' : '数学Ⅱ'}[\\s\\S]*東1局[\\s\\S]*${d.wall}`), '卓中央：モード・局・残り山牌 ' + label);
+        assert.ok(d.overflow <= 1, '横スクロールなし ' + label);
+        const [me, right, top, left] = d.seats;
+        // 4人が卓を囲む：対面の河は中央の上、自分は下、上家は左、下家は右。名札は中央の各辺。
+        assert.ok(top.riverBox.bottom <= d.center.top + 1 && me.riverBox.top >= d.center.bottom - 1, '上下の河 ' + label);
+        assert.ok(left.riverBox.right <= d.center.left + 1 && right.riverBox.left >= d.center.right - 1, '左右の河 ' + label);
+        assert.ok(top.tag.bottom <= d.center.top + 1 && me.tag.top >= d.center.bottom - 1 && left.tag.right <= d.center.left + 1 && right.tag.left >= d.center.right - 1, '名札は中央の四辺 ' + label);
+        assert.ok(left.backs.box.right <= left.riverBox.left + 1 && right.backs.box.left >= right.riverBox.right - 1 && top.backs.box.bottom <= top.riverBox.top + 1, '他家の手牌は外側 ' + label);
+        for (const o of [left, right, top]) assert.equal(o.backs.n, o.backs.expected, '他家の手牌の枚数');
+        // 席の向き：下家 −90°・対面 180°・上家 90°・自分 0°
+        const mat = (t) => (t === 'none' ? [1, 0, 0, 1] : t.match(/matrix\(([^)]+)\)/)[1].split(',').slice(0, 4).map((x) => Math.round(Number(x))));
+        assert.deepEqual([me, right, top, left].map((x) => mat(x.transform)), [[1, 0, 0, 1], [0, -1, 1, 0], [-1, 0, 0, -1], [0, 1, -1, 0]], '席の向き ' + label);
+        for (const s of d.seats) {
+          // 河：全物理IDを順に1回ずつ。自分・対面は6枚で折り返し、左右は6・6・残り
+          assert.deepEqual(s.rows.flat(), s.expected, `河の物理IDと順序 seat${s.seat} ` + label);
+          const n = s.expected.length, sizes = s.rows.map((r) => r.length);
+          const want = [];
+          for (let i = 0; i < n; i += 6) { if ((s.seat === 1 || s.seat === 3) && i >= 12) { want.push(n - i); break; } want.push(Math.min(6, n - i)); }
+          assert.deepEqual(sizes, want, `河の行 seat${s.seat} ` + label);
+          // 密着：同じ行の隣り合う牌の隙間は1px以下、牌どうしは重ならない
+          let idx = 0;
+          for (const row of s.rows) {
+            const ts = s.tiles.slice(idx, idx + row.length); idx += row.length;
+            for (let i = 1; i < ts.length; i++) {
+              const a = ts[i - 1].box, b = ts[i].box;
+              const gap = Math.max(Math.max(a.left, b.left) - Math.min(a.right, b.right), Math.max(a.top, b.top) - Math.min(a.bottom, b.bottom));
+              assert.ok(gap <= 1.2, `河の牌が密着 seat${s.seat} gap=${gap} ` + label);
+            }
+          }
+          for (let i = 0; i < s.tiles.length; i++) for (let j = i + 1; j < s.tiles.length; j++) assert.ok(!mjOverlap(s.tiles[i].box, s.tiles[j].box), `河の牌が重ならない seat${s.seat} ` + label);
+          for (const t of s.tiles) {
+            assert.ok(t.box.left >= d.table.left - 1 && t.box.right <= d.table.right + 1 && t.box.top >= d.table.top - 1 && t.box.bottom <= d.table.bottom + 1, '河は卓の中 ' + label);
+            assert.ok(!mjOverlap(t.box, d.center) && !mjOverlap(t.box, s.tag), '河と中央・名札は重ならない ' + label);
+          }
+          // リーチ宣言牌：宣言した物理ID、同じ河の他の牌と縦横が逆（席の向き＋90°）
+          if (s.riichi !== null && s.expected.includes(s.riichi)) {
+            assert.deepEqual(s.decl.map((x) => x.id), [s.riichi], `宣言牌のID seat${s.seat} ` + label);
+            const other = s.tiles.find((t) => !t.decl).box, dc = s.decl[0].box;
+            assert.ok((other.width > other.height) !== (dc.width > dc.height), `宣言牌は横向き seat${s.seat} ` + label);
+          } else assert.equal(s.decl.length, 0);
+        }
+        // 他家の公開面子：その席の右手側の角（対面は左上、下家は右上、上家は左下）。3枚ずつ、面子どうし・河と重ならない
+        const all = d.seats.flatMap((s) => s.tiles.map((t) => t.box));
+        for (const o of [left, right, top]) for (const g of o.melds) {
+          assert.equal(g.ids, 3); assert.equal(g.claimed, g.expected, '面子の取得牌');
+          for (const t of g.tiles) for (const r of all) assert.ok(!mjOverlap(t, r), '面子と河が重ならない ' + label);
+        }
+        for (const g of top.melds) assert.ok(g.box.right <= top.riverBox.left + 1 && g.box.bottom <= d.center.top + 1, '対面の面子は左上 ' + label);
+        for (const g of right.melds) assert.ok(g.box.left >= top.riverBox.right - 1 && g.box.bottom <= d.center.top + 1, '下家の面子は右上 ' + label);
+        for (const g of left.melds) assert.ok(g.box.right <= me.riverBox.left + 1 && g.box.top >= d.center.bottom - 1, '上家の面子は左下 ' + label);
+        for (const o of [left, right, top]) for (let i = 1; i < o.melds.length; i++) assert.ok(!mjOverlap(o.melds[i - 1].box, o.melds[i].box), '2つの面子は区別できる');
+        // 自分：公開面子は手牌の右、同じ列。面子ごとに3枚、間に区切り
+        assert.equal(d.myMelds.length, d.myMeldCount);
+        for (const g of d.myMelds) {
+          assert.equal(g.n, 3); assert.equal(g.claimed, g.expected);
+          assert.ok(g.box.left >= d.hand.right - 1, '自分の面子は手牌の右 ' + label);
+          assert.ok(g.box.bottom > d.hand.top && g.box.top < d.hand.bottom, '手牌と同じ列 ' + label);
+        }
+        for (let i = 1; i < d.myMelds.length; i++) assert.ok(d.myMelds[i].box.left - d.myMelds[i - 1].box.right >= 2, '2つの面子の区切り');
+        // 自分の手牌の牌幅は従来どおり（縦画面）
+        if (portrait.has(key)) assert.ok(Math.abs(d.handTileW - Math.min((width - 40) / 9.6, 58)) < 0.6, `手牌の牌幅 ${d.handTileW} ` + label);
+        // 表示はゲームを変えない
+        const ev = await page.evaluate(() => { const m = window.__mathjong; m.render(); m.S.game.checkInvariants(); return m.S.game.events.length; });
+        assert.equal(ev, st.events);
+        if (SHOTS && (mode === 'math1' || scene === 'r19')) await page.screenshot({ path: `${SHOTS}/v07-table-${key}-${mode}-${scene}.png` });
+      }
+      // 河の長い卓でも2回タップ打牌とヒント2段階（数式確認）が使える
+      // （数式確認のボタンは手牌に数式があるときだけ出る。数式を含む実際の局面を、河の長いものから順に探す）
+      let found = false;
+      for (const [scene, sd] of [['r12', 7], ['r12', 8], ['r12', 9], ['r6', 7], ['r6', 8], ['start', 7]]) {
+        await mjScene(page, scene, sd);
+        await page.locator('button[data-action="hint"]').tap();
+        if (await page.locator('[data-action="fh-confirm"]').count()) { found = true; break; }
+        await page.locator('button[data-action="hint"]').tap();
+      }
+      assert.ok(found, '数式を含む局面');
+      const drawn = page.locator('.hand .tile.drawn');
+      const id = Number(await drawn.getAttribute('data-id'));
+      await page.locator('[data-action="fh-confirm"]').first().tap();
+      assert.equal(await page.locator('.study-dock.open .fh').count(), 1, '数式確認');
+      if (SHOTS && mode === 'math1') { await page.locator('.study-dock-content').evaluate((e) => { e.scrollTop = 0; }); await page.screenshot({ path: `${SHOTS}/v07-table-${key}-${mode}-hint.png` }); }
+      await drawn.scrollIntoViewIfNeeded();
+      await drawn.tap();
+      await page.locator(`.hand .tile[data-id="${id}"]`).tap();
+      assert.equal(await page.evaluate((id) => window.__mathjong.S.game.events.filter((e) => e.type === 'discard' && e.seat === 0 && e.tile === id).length, id), 1, '2回タップで1回だけ打牌');
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  }
+  console.log('✓ Ver.0.7 麻雀卓：9画面×実Gameの局面（開始・6/12/19枚・自分2鳴き・全員2鳴き・リーチ）、4人の配置・6枚折り返し・席の向き・密着・非重複・宣言牌・面子の位置・下部のガイド/設定・実況なし');
 }
 
 // 公開モードではサーバーも転送先も作らない。接続失敗をローカル成功で隠さない。
@@ -6668,7 +6874,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -6721,6 +6927,7 @@ try {
   await v07BeginnerRoom(browser);
   await v07BeginnerRoom2(browser);
   await v07TableHintDock(browser);
+  await v07MahjongTable(browser);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));

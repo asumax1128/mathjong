@@ -19,6 +19,7 @@ import { CHI_AUTOPASS_KEY, PON_AUTOPASS_KEY, parseChiAutoPass, parsePonAutoPass,
 import { YAKU_GUIDE, GUIDE_NOTES, guideCondition } from './guide.js';
 import { createRoomState, pickRoomTile, checkRoom, nextRoom, roomHint, roomHTML, enterStage, gotoStage, resumeRoom, retryRoom, openRoomList, roomPracticeSelect, roomPracticeAct, roomPracticeContinue, partsOf } from './beginner-room.js';
 import { loadProgress, saveProgress, hasProgress } from './beginner-progress.js';
+import { SEAT_AREA, SEAT_ROT, riverRows as layoutRiverRows, boardShape as layoutBoardShape } from './table-layout.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, MAX_ROUND } from './params.js';
 import { validateReplay, replayQuery } from './replay.js';
 import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, scanEffects, fxOffer, fxAdvance, fxTimes, fxProgress, isLiteEffect } from './effects.js';
@@ -487,7 +488,7 @@ function fxApply() {
   if (!c || !active || !S.game) return;
   const delay = `-${Math.round(elapsed)}ms`;
   // 宣言者の席（自分は手牌の欄、AI は各席の欄）。ゲームの記録の seat から決める
-  const seatEl = app.querySelector(c.seat === HUMAN ? '.self' : `.panel.seat-${c.seat}`);
+  const seatEl = app.querySelector(c.seat === HUMAN ? '.self' : `.panel.seat-${c.seat} > .seat-tag`);
   if (c.lite) {
     // 簡易表示：席は点滅させず、枠の色だけで示す（動き・閃光なし）
     if (seatEl) seatEl.classList.add('fx-seat-lite', `fx-seat-${c.kind}`);
@@ -515,23 +516,6 @@ function fxApply() {
 
 // ---------- 描画 ----------
 
-function lastEventText() {
-  const g = S.game;
-  for (let i = g.events.length - 1; i >= 0; i--) {
-    const e = g.events[i];
-    if (e.type === 'discard') {
-      const decl = i > 0 && g.events[i - 1].type === 'riichi' && g.events[i - 1].tile === e.tile;
-      return decl ? `${nameOf(e.seat)} が<b class="riichi-word">リーチ</b>： ${tileHTML(T(g.typeOf(e.tile)), { size: 's' })} を捨てました`
-        : `${nameOf(e.seat)} が ${tileHTML(T(g.typeOf(e.tile)), { size: 's' })} を捨てました`;
-    }
-    if (e.type === 'chi') return `${nameOf(e.seat)} がチー： ${formulaHTML(rules, e.meld)}`;
-    if (e.type === 'pon') return `${nameOf(e.seat)} がポン： ${formulaHTML(rules, e.meld)}`;
-    if (e.type === 'win') return `${nameOf(e.seat)} の${e.how === 'ron' ? 'ロン' : 'ツモ'}和了！`;
-    if (e.type === 'exhaustive-draw') return '流局（山がなくなりました）';
-  }
-  return `${nameOf(g.dealer)} が親です`;
-}
-
 function meldsHTML(seat, size) {
   const g = S.game;
   return g.melds[seat].map((m) => {
@@ -540,33 +524,69 @@ function meldsHTML(seat, size) {
   }).join('');
 }
 
+// ---- Ver.0.7 麻雀卓：4人が1つの卓を囲む ----
+// 席の向き（自分0°・下家−90°・対面180°・上家90°）。河・公開面子・裏向きの手牌は、その席の人から見て正しい向きの
+// まとまり（行は卓の中央に近い順）を作り、まとまりごと回転する。牌の物理 id・並び順はエンジンのまま。
 function riverHTML(seat, size) {
   const g = S.game;
   const last = [...g.events].reverse().find((e) => e.type === 'discard');
   const claimTile = g.claim ? g.claim.tile : null;
-  return g.rivers[seat].map((r) => tileHTML(T(g.typeOf(r.id)), {
+  const tile = (r) => tileHTML(T(g.typeOf(r.id)), {
     size, id: r.id,
     cls: [r.tsumogiri ? 'tsumogiri' : '', r.riichi ? 'riichi-decl' : '', last && last.tile === r.id ? 'last' : '', claimTile === r.id ? 'claimable' : ''].join(' '),
-  })).join('');
+  });
+  return riverRows(seat).map(([a, b]) => `<span class="rv-row">${g.rivers[seat].slice(a, b).map(tile).join('')}</span>`).join('');
 }
-
-function panelHTML(seat) {
+const riverRows = (seat) => layoutRiverRows(seat, S.game.rivers[seat].length);
+const boardShape = () => layoutBoardShape(S.game.rivers.map((r) => r.length));
+// 席の名札（卓中央の縁）：名前・点数・親・リーチ。自分は門前／鳴き。
+function seatTagHTML(seat) {
+  const g = S.game;
+  const me = seat === HUMAN;
+  const name = me ? 'あなた' : PLAYERS[seat].name;
+  // 鳴き：鳴いた手は役が必要（自分は門前も示す）。リーチは点棒の形で示す（文字は読み上げ用）。
+  const state = !g.isClosed(seat) ? '<span class="naki" title="鳴き（役が必要）">鳴</span>' : me ? '<span class="menzen">門前</span>' : '';
+  return `<div class="seat-tag tag-${SEAT_AREA[seat]} seat-${seat}" title="${POS[seat]} ${name} ${S.scores[seat]}点">
+    <span class="pos">${me ? '自分' : POS[seat]}</span><span class="name">${name}</span><span class="score">${S.scores[seat]}<small>点</small></span>${g.dealer === seat ? '<span class="oya">親</span>' : ''}${g.riichi[seat] ? '<span class="riichi-badge" title="リーチ"><span class="sr">リーチ</span></span>' : ''}${state}
+  </div>`;
+}
+// 回転したまとまり：中身はその席の人から見た向きで作り、回転後の大きさの枠（rot-box）の中央で回転する
+const rotHTML = (seat, cls, inner, style = '') => `<div class="rot-box rb-${cls}" style="${style}"><div class="mj-rot ${cls}" style="--rot:${SEAT_ROT[seat]}deg">${inner}</div></div>`;
+function opponentHTML(seat, sh) {
   const g = S.game;
   const p = g.pending();
   const active = p && p.seat === seat && p.type === 'turn';
-  const pl = PLAYERS[seat];
-  const pers = ''; // Ver.0.6：対局中はキャラ名だけを出し、牌の表示領域を優先
-  return `<section class="panel seat-${seat} ${active ? 'active' : ''}">
-    <header>
-      <span class="pos">${POS[seat]}</span><span class="name">${pl.name}</span>${pers}
-      ${g.dealer === seat ? '<span class="oya">親</span>' : ''}
-      ${g.riichi[seat] ? '<span class="riichi-badge">リーチ</span>' : ''}
-      ${!g.isClosed(seat) ? '<span class="naki">鳴き</span>' : ''}
-      <span class="score">${S.scores[seat]}点</span>
-    </header>
-    <div class="row">${backHTML(g.hands[seat].length)}<span class="melds">${meldsHTML(seat, 's')}</span></div>
-    <div class="river">${riverHTML(seat, 'xs')}</div>
+  const a = SEAT_AREA[seat];
+  const rows = riverRows(seat).length;
+  const m = g.melds[seat].length;
+  const melds = m ? `<span class="melds">${meldsHTML(seat, 'xs')}</span>` : '';
+  const len = seat === 1 ? sh.lenRight : seat === 3 ? sh.lenLeft : 6;
+  // 席の要素（display: contents）の子を卓のグリッドへ配置する
+  return `<section class="panel seat-${seat} pos-${a}${active ? ' active' : ''}" data-seat="${seat}" aria-label="${POS[seat]} ${PLAYERS[seat].name}">
+    ${seatTagHTML(seat)}
+    <div class="mj-cell mj-hand hand-${a}">${rotHTML(seat, 'backs-block', backHTML(g.hands[seat].length))}</div>
+    <div class="mj-cell mj-melds melds-${a}">${melds ? rotHTML(seat, 'melds-block', melds, `--m:${m}`) : ''}</div>
+    <div class="mj-cell mj-river river-${a}">${rotHTML(seat, 'river-block', `<div class="river" data-rows="${rows}">${riverHTML(seat, 'xs')}</div>`, `--len:${len}`)}</div>
   </section>`;
+}
+function boardHTML() {
+  const g = S.game;
+  const sh = boardShape();
+  const cur = S.scored && S.lastRound ? S.lastRound : { label: handLabel(S.match), renchan: S.match.renchan };
+  return `<div class="board-wrap"><div class="mj-table" style="--tv-rows:${sh.top};--bv-rows:${sh.bottom};--lv:${sh.side}" aria-label="対局卓">
+    <div class="mj-center" aria-hidden="true"></div>
+    <div class="board-center" aria-label="現在の局情報">
+      <span class="bc-mode">${modeLabel(rules)}</span>
+      <b class="bc-round hand-label">${cur.label}</b>
+      <span class="bc-state">${cur.renchan ? `連荘${cur.renchan}` : ''}</span>
+      <span class="bc-wall">残り <strong>${g.wall.length}</strong>枚</span>
+    </div>
+    ${[2, 3, 1].map((seat) => opponentHTML(seat, sh)).join('')}
+    <section class="me-board seat-0 pos-me${g.pending() && g.pending().seat === HUMAN && g.pending().type === 'turn' ? ' active' : ''}" data-seat="0" aria-label="自分の河">
+      ${seatTagHTML(HUMAN)}
+      <div class="mj-cell mj-river river-me">${rotHTML(HUMAN, 'river-block', `<div class="river mine" data-rows="${riverRows(HUMAN).length}">${riverHTML(HUMAN, 'xs')}</div>`)}</div>
+    </section>
+  </div></div>`;
 }
 
 // 手牌の表示順（画面だけの状態）をエンジンの手牌と突き合わせて返す。エンジンには反映しない。
@@ -609,8 +629,10 @@ function handHTML() {
     });
   };
   const body = order.map((id) => (drawnAtEnd && id === drawn ? `<span class="drawn-gap"></span>${tile(id)}` : tile(id))).join('');
-  return `<div class="hand">${body}</div>
-    <div class="hand-help"><span>長押しで並び替え・タップ2回で捨てる</span><span class="hh-tools">${autoPassToggleHTML('chi')}${autoPassToggleHTML('pon')}<button data-action="autosort" class="small">自動整列</button><button data-action="hint" class="small hint-btn" aria-pressed="${!!S.hintOpen}">ヒント</button></span></div>`;
+  // 手牌（左）と公開面子（右）は同じ列。面子は手牌より少し小さく、手牌のタップの大きさは変えない。
+  const melds = g.melds[HUMAN].length ? `<div class="melds mine" aria-label="自分の公開面子">${meldsHTML(HUMAN, 'm')}</div>` : '';
+  return `<div class="hand-row${melds ? ' has-melds' : ''}"><div class="hand">${body}</div>${melds}</div>
+    <div class="hand-help"><span class="hh-tools">${autoPassToggleHTML('chi')}${autoPassToggleHTML('pon')}<button data-action="autosort" class="small">自動整列</button><button data-action="hint" class="small hint-btn" aria-pressed="${!!S.hintOpen}">ヒント</button></span><span class="hh-menu"><button data-action="guide" class="small">ガイド</button><button data-action="settings" class="small" aria-label="設定">⚙</button></span></div>`;
 }
 
 // チー・ポンの自動パスの切替（対戦画面。Ver.0.5-A で設定画面から移動）。ON/OFF を色と文字で示す。
@@ -704,17 +726,7 @@ function actionsHTML() {
 }
 
 function headerHTML() {
-  const g = S.game;
-  // 局の表示：終局後（精算済み）はその局の名前のまま（試合の状態は次の局へ進んでいる）
-  const cur = S.scored && S.lastRound ? S.lastRound : { label: handLabel(S.match), renchan: S.match.renchan };
-  return `<header class="top">
-    <span class="logo">数雀 <small>Ver.${APP_VERSION}</small></span>
-    <span class="info"><span class="mode" title="${modeLabel(rules)}">${({ math1: '数Ⅰ', math2: '数Ⅱ' })[rules.config.mode] || '旧'}</span> <b class="hand-label">${cur.label}</b>${cur.renchan ? ` <span class="renchan">連荘${cur.renchan}</span>` : ''} <span class="wall" aria-label="山の残り">山 <b>${g.wall.length}</b></span></span>
-    <span class="tools">
-      <button data-action="guide" class="small">ガイド</button>
-      <button data-action="settings" class="small" aria-label="設定">⚙</button>
-    </span>
-  </header>`;
+  return `<header class="top"><span class="logo">数雀 <small>Ver.${APP_VERSION}</small></span></header>`;
 }
 
 // DOMの再生成で、閲覧中の河や学習エリアを毎回先頭へ戻さない。ゲーム・乱数には使用しない。
@@ -722,8 +734,7 @@ let renderedTableGame = null;
 let renderedHintKey = null;
 function tableScrollSnapshot(g) {
   if (renderedTableGame !== g) return [];
-  const selectors = ['.table', '.opponents', '.study-dock-content', '.fh-list', '.self > .river',
-    ...[1, 2, 3].map(s => `.seat-${s} .river`)];
+  const selectors = ['.table', '.study-dock-content', '.fh-list'];
   return selectors.flatMap(selector => {
     const e = app.querySelector(selector);
     return e ? [{ selector, top: e.scrollTop, last: e.lastElementChild?.dataset.id }] : [];
@@ -756,31 +767,8 @@ function render() {
   app.innerHTML = `
     ${headerHTML()}
     <main class="table">
-      <div class="opponents" aria-label="対局卓">
-        <div class="area-top">${panelHTML(2)}</div>
-        <div class="area-left">${panelHTML(3)}</div>
-        <div class="area-right">${panelHTML(1)}</div>
-        <div class="area-center">
-          <div class="board-center" aria-label="現在の局情報">
-            <span class="bc-mode">${modeLabel(rules)}</span>
-            <b class="bc-round">${S.scored && S.lastRound ? S.lastRound.label : handLabel(S.match)}</b>
-            <span class="bc-state">${(S.scored && S.lastRound ? S.lastRound.renchan : S.match.renchan) ? `連荘${S.scored && S.lastRound ? S.lastRound.renchan : S.match.renchan}` : '' }</span>
-            <span class="bc-wall">残り山牌 <strong>${g.wall.length}</strong>枚</span>
-            <span class="bc-parent">親：${nameOf(g.dealer)}</span>
-          </div>
-        </div>
-      </div>
-      <div class="msg" aria-live="polite">${lastEventText()}</div>
-      <section class="self ${g.pending() && g.pending().seat === HUMAN && g.pending().type === 'turn' ? 'active' : ''}">
-        <header>
-          <span class="pos">自分</span><span class="name">あなた</span>
-          ${g.dealer === HUMAN ? '<span class="oya">親</span>' : ''}
-          ${g.riichi[HUMAN] ? '<span class="riichi-badge">リーチ</span>' : ''}
-          ${!g.isClosed(HUMAN) ? '<span class="naki">鳴き（役が必要）</span>' : '<span class="menzen">門前</span>'}
-          <span class="score">${S.scores[HUMAN]}点</span>
-        </header>
-        <div class="river mine">${riverHTML(HUMAN, 'xs')}</div>
-        <div class="melds mine">${meldsHTML(HUMAN, 'm')}</div>
+      ${boardHTML()}
+      <section class="self ${g.pending() && g.pending().seat === HUMAN && g.pending().type === 'turn' ? 'active' : ''}" aria-label="あなたの手牌">
         ${handHTML()}
       </section>
       <section class="study-dock${S.hintOpen ? ' open' : ' idle'}" aria-labelledby="study-heading">

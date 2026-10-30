@@ -4,6 +4,7 @@ on:
     paths:
       - 'src/ui/app.js'
       - 'src/ui/styles.css'
+      - 'src/ui/table-layout.js'
       - 'tests/e2e/play.mjs'
       - '.github/workflows/v07-layout-preview.yml'
   workflow_dispatch:
@@ -12,14 +13,16 @@ permissions:
 jobs:
   layout:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Check syntax
-        run: node --check src/ui/app.js && node --check tests/e2e/play.mjs
+        run: node --check src/ui/app.js && node --check src/ui/table-layout.js && node --check tests/e2e/play.mjs
+      - name: Table layout unit tests
+        run: node --test tests/table-layout.test.js
       - name: Install browser
         run: |
           npm install --no-save playwright@1.56.1
@@ -28,6 +31,8 @@ jobs:
         run: |
           mkdir -p /tmp/v07-layout
           node tests/e2e/play.mjs --only v07TableHintDock --shots /tmp/v07-layout
+      - name: Mahjong table (4 seats, 6-tile rows, rotation, dense real games, 9 viewports)
+        run: node tests/e2e/play.mjs --only v07MahjongTable --shots /tmp/v07-layout
       - name: Real touch and mouse hand reorder regression
         run: node tests/e2e/play.mjs --only handReorder
       - uses: actions/upload-artifact@v4
