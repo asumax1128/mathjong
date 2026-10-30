@@ -15,6 +15,7 @@ import { analyzeFormulas, initialSelection, assignColors, exposedSummary } from 
 import { createMatch, applyRoundResult, dealerOf, handLabel, ranks, matchAt, START_POINTS } from '../engine/match.js';
 import { reconcileOrder, defaultOrder } from './handorder.js';
 import { createHandDrag } from './handdrag.js';
+import { autoTsumogiriDue, autoTsumogiriTile } from './auto-tsumogiri.js';
 import { CHI_AUTOPASS_KEY, PON_AUTOPASS_KEY, parseChiAutoPass, parsePonAutoPass, visibleClaimActions, claimPendingForHint, claimPolicy, autoPassDue, policySettings, autoPassedKind, mergeKind, autoPassNotice } from './autopass.js';
 import { YAKU_GUIDE, GUIDE_NOTES, guideCondition } from './guide.js';
 import { createRoomState, pickRoomTile, checkRoom, nextRoom, roomHint, roomHTML, enterStage, gotoStage, resumeRoom, retryRoom, openRoomList, roomPracticeSelect, roomPracticeAct, roomPracticeContinue, partsOf } from './beginner-room.js';
@@ -126,6 +127,9 @@ S.chiAutoPass = parseChiAutoPass(store.get(CHI_AUTOPASS_KEY, null));
 S.ponAutoPass = parsePonAutoPass(store.get(PON_AUTOPASS_KEY, null));
 // 自動パスの回数（手動操作の S.input とは別に数える）と、次の自分の手番に出す通知（noticeKind：見送った鳴きの種類）
 S.autoPass = { count: 0, failed: 0, noticePending: false, noticeKind: null, noticeKey: null, shownKind: null };
+// リーチ後のオートツモ切り（src/ui/auto-tsumogiri.js）。on：設定（局ごと・既定 OFF・保存しない）。key：予約した自動操作の局面（stateKey）。
+// count：自動で捨てた回数、stopped：和了できるので止まった回数（確認用。判断には使わない）
+S.autoTsumo = { on: false, key: null, count: 0, stopped: 0 };
 // 人間の入力の処理回数（多重処理の検出用。accepted=打牌などが成立、ignored=手番外の入力）
 S.input = { accepted: 0, ignored: 0, failed: 0 };
 // AI の判断回数（難易度ごと）。表示・判断には使わない（E2E で採用された難易度の確認に使う）
@@ -172,6 +176,8 @@ function startRound() {
   S.claimPolicy = null; // 宣言ごとの表示方針（局ごとに初期化）
   S.riichiSelect = false; // リーチの宣言牌を選んでいる途中か（局ごとに初期化）
   S.ankanSelect = false; // 暗カンの確認の段階か（新ルール。局ごとに初期化）
+  S.autoTsumo.on = false; // オートツモ切りは局ごと（リーチは局の終わりまで）。新しい局・再戦では OFF から
+  S.autoTsumo.key = null;
   fxClear(); // 前の局の演出を残さない
   sound.silence(); // 前の局の効果音の残りも止める
   S.autoPass.noticePending = false;
@@ -238,7 +244,9 @@ function step(changed = false) {
       S.autoPass.shownKind = S.autoPass.noticeKind;
       S.autoPass.noticeKind = null;
     }
-    return render();
+    render();
+    scheduleAutoTsumogiri();
+    return;
   }
   if (changed) render();
   const [turnDelay, claimDelay] = speedDelays(S.speed, IS_LOCAL);
@@ -264,6 +272,34 @@ function step(changed = false) {
     // 描画は step() が行う（自分の宣言を自動で見送る場合は、宣言ボタンを一度も描画しない）
     step(true);
   }, p.type === 'turn' ? turnDelay : claimDelay);
+}
+
+// リーチ後のオートツモ切り：自分の手番で条件を満たすときだけ、AI の手番と同じ間をおいて1回だけ捨てる。
+// 予約は S.timer（step() のたびに取り消される）と局面の識別子で1つに限る。実行の直前にも、局・局面・設定・条件を確かめ直す
+// （手動でツモ切りした・ツモ和了した・OFF にした・局が変わった場合は何もしない）。和了できる局面と宣言（ロン）では予約しない。
+function scheduleAutoTsumogiri() {
+  const g = S.game;
+  if (!autoTsumogiriDue(g, HUMAN, S.autoTsumo.on)) {
+    if (S.autoTsumo.on && g && g.riichi[HUMAN]) {
+      const p = g.pending();
+      if (p && p.seat === HUMAN && p.type === 'turn' && p.canTsumo && S.autoTsumo.key !== `stop:${stateKey()}`) { S.autoTsumo.stopped++; S.autoTsumo.key = `stop:${stateKey()}`; }
+    }
+    return;
+  }
+  const key = stateKey();
+  S.autoTsumo.key = key;
+  const [turnDelay] = speedDelays(S.speed, IS_LOCAL);
+  clearTimeout(S.timer);
+  S.timer = setTimeout(() => {
+    S.timer = null;
+    if (g !== S.game || stateKey() !== key || !autoTsumogiriDue(g, HUMAN, S.autoTsumo.on)) return;
+    if (drag && drag.isDragging()) { S.stepDeferred = true; return; } // 並び替え中は待つ（指を離すと step() から予約し直す）
+    const r = applyHumanAction({ type: 'discard', tile: autoTsumogiriTile(g) });
+    if (r !== 'ok') { S.autoTsumo.on = false; render(); return; } // 拒否されたら自動をやめて手動へ（局面は変わらない）
+    S.autoTsumo.count++;
+    S.selected = null;
+    step(true);
+  }, turnDelay);
 }
 
 function finishRound() {
@@ -718,7 +754,7 @@ function handHTML() {
   // 手牌（左）と公開面子（右）は同じ列。面子は手牌より少し小さく、手牌のタップの大きさは変えない。
   const melds = g.melds[HUMAN].length ? `<div class="melds mine" aria-label="自分の公開面子">${meldsHTML(HUMAN, 'm')}</div>` : '';
   return `${selfInfoHTML()}<div class="hand-row${melds ? ' has-melds' : ''}"><div class="hand">${body}</div>${melds}</div>
-    <div class="hand-help"><span class="hh-tools">${autoPassToggleHTML('chi')}${autoPassToggleHTML('pon')}<button data-action="autosort" class="small">自動整列</button><button data-action="hint" class="small hint-btn" aria-pressed="${!!S.hintOpen}">ヒント</button></span><span class="hh-menu"><button data-action="guide" class="small">ガイド</button><button data-action="settings" class="small" aria-label="設定">⚙</button></span></div>`;
+    <div class="hand-help"><span class="hh-tools">${g.riichi[HUMAN] ? autoTsumoToggleHTML() : `${autoPassToggleHTML('chi')}${autoPassToggleHTML('pon')}`}<button data-action="autosort" class="small">自動整列</button><button data-action="hint" class="small hint-btn" aria-pressed="${!!S.hintOpen}">ヒント</button></span><span class="hh-menu"><button data-action="guide" class="small">ガイド</button><button data-action="settings" class="small" aria-label="設定">⚙</button></span></div>`;
 }
 
 // チー・ポンの自動パスの切替（対戦画面。Ver.0.5-A で設定画面から移動）。ON/OFF を色と文字で示す。
@@ -727,6 +763,12 @@ function autoPassToggleHTML(kind) {
   const on = kind === 'chi' ? S.chiAutoPass : S.ponAutoPass;
   const name = kind === 'chi' ? 'チー' : 'ポン';
   return `<button data-action="toggle-${kind}-autopass" class="small ap-toggle ${on ? 'on' : 'off'}" aria-pressed="${on}" aria-label="${name}の自動パス ${on ? 'ON' : 'OFF'}"><span class="apt-name">${name}自動</span><span class="apt-state">${on ? 'ON' : 'OFF'}</span></button>`;
+}
+
+// リーチ後のオートツモ切りの切替（リーチ中だけ、チー・ポンの自動パスの切替の位置に出す。リーチ中は鳴けないため）
+function autoTsumoToggleHTML() {
+  const on = S.autoTsumo.on;
+  return `<button data-action="toggle-auto-tsumogiri" class="small ap-toggle auto-tsumo ${on ? 'on' : 'off'}" aria-pressed="${on}" aria-label="オートツモ切り ${on ? 'ON' : 'OFF'}"><span class="apt-name">オートツモ切り</span><span class="apt-state">${on ? 'ON' : 'OFF'}</span></button>`;
 }
 
 // 自分の打牌番で、いま捨てられる牌の条件（リーチ中はツモ牌だけ、宣言牌の選択中は聴牌になる種類だけ）
@@ -766,7 +808,7 @@ function actionsHTML() {
     // リーチ中：ツモ和了かツモ切りだけ
     const tsumo = p.canTsumo ? '<button data-action="tsumo" class="win">ツモ</button>' : '';
     return `<div class="actions">
-      <span class="status riichi-status">${p.canTsumo ? 'リーチ中・和了できます！' : 'リーチ中：ツモ切り'}</span>
+      <span class="status riichi-status">${p.canTsumo ? `リーチ中・和了できます！${S.autoTsumo.on ? '（自動ツモ切りは停止中）' : ''}` : S.autoTsumo.on ? 'リーチ中：自動でツモ切りします' : 'リーチ中：ツモ切り'}</span>
       ${tsumo}
       <button data-action="tsumogiri" class="primary">ツモ切り</button>
     </div>`;
@@ -1452,6 +1494,20 @@ app.addEventListener('click', (ev) => {
       if (gg.riichi[HUMAN] && gg.drawn !== null && gg.drawn !== undefined) humanAct({ type: 'discard', tile: gg.drawn });
       break;
     }
+    case 'toggle-auto-tsumogiri': {
+      // リーチ中だけ。ON：自分の手番でツモ切りできる局面なら、そこから自動で進める。OFF：予約した自動操作を取り消して手動へ
+      const gg = S.game;
+      if (!gg || !gg.riichi[HUMAN]) break;
+      S.autoTsumo.on = !S.autoTsumo.on;
+      if (!S.autoTsumo.on) {
+        const p = gg.pending();
+        if (p && p.seat === HUMAN) { clearTimeout(S.timer); S.timer = null; } // 自分の番で予約していた自動操作だけを取り消す（AI の番の進行は止めない）
+        S.autoTsumo.key = null;
+      }
+      render();
+      if (S.autoTsumo.on) scheduleAutoTsumogiri();
+      break;
+    }
     case 'toggle-chi-autopass':
     case 'toggle-pon-autopass': {
       // 設定の保存だけ（ゲームは進めない・全体を描画し直さない：ドラッグ中や宣言の表示を妨げない）。次の宣言から反映。
@@ -1741,6 +1797,8 @@ function leaveGame(screen) {
   S.confirmTitle = false;
   S.modal = null;
   S.game = null;
+  S.autoTsumo.on = false; // タイトル・相手選択へ戻ったら OFF
+  S.autoTsumo.key = null;
   S.publicAiHistory = newPublicHistory();
   S.screen = screen;
   render();
