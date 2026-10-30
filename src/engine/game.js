@@ -8,9 +8,16 @@ const next = (s, k = 1) => (s + k) % SEAT_COUNT;
 
 export class Game {
   // players: [{ name, kind: 'human' | 'ai', personality }]
-  constructor({ rules, seed = 1, dealer = 0, players, round = 1, presetWall = null, newRules = false }) {
+  // ルールの版（ruleset）：0＝従来ルール、1＝新ルール初版（PR #44：王牌・ドラ・暗カン・数学Ⅱ24回）、
+  // 2＝現行の新ルール（1 に加えてフリテン・関数牌のポン禁止）。newRules: true は ruleset 1（従来の呼び出し・再現 URL newrules=1）。
+  // 過去の局（従来・初版）を同じ seed で同じ進行に再現できるよう、版ごとに規則を切り替える。
+  constructor({ rules, seed = 1, dealer = 0, players, round = 1, presetWall = null, newRules = false, ruleset = newRules ? 1 : 0 }) {
     this.rules = rules;
-    this.newRules = !!newRules;
+    this.ruleset = ruleset;
+    this.newRules = ruleset >= 1;
+    // ruleset 2：フリテン（捨て牌・同巡（見逃し）・リーチ後の見逃し）と関数牌のポン禁止
+    this.furitenRule = ruleset >= 2;
+    this.funcPonBan = ruleset >= 2;
     this.seed = seed;
     this.dealer = dealer;
     this.round = round;
@@ -32,6 +39,14 @@ export class Game {
     // リーチ（規則 rules.riichi のときだけ）：席ごとに null または { tile: 宣言牌の id, turn: 宣言時の turnCount }
     this.riichi = [null, null, null, null];
     this._riichiMemo = null;
+    // ruleset 2：リーチ確定時の待ち（その席だけの非公開情報。riichi[] は他家の AI にも渡るので別に持つ）
+    this.riichiWaits = [null, null, null, null];
+    // ruleset 2：フリテン。discarded：その局に捨てた牌の種類（鳴かれて河から移った牌も含む）。
+    // temporary：ロンできる牌を見送った（自分の次の通常ツモで解除）。riichiMissed：リーチ後に見送った（局の終わりまで）
+    this.discarded = [new Set(), new Set(), new Set(), new Set()];
+    this.tempFuriten = [false, false, false, false];
+    this.riichiFuriten = [false, false, false, false];
+    this.ronBlocked = [null, null, null, null]; // 直近にフリテンでロンできなかった牌（画面の説明用）
 
     for (let r = 0; r < rules.config.handSize; r++) {
       for (let k = 0; k < SEAT_COUNT; k++) this.hands[next(dealer, k)].push(this.wall.pop());
@@ -92,6 +107,7 @@ export class Game {
   _draw(seat) {
     if (!this.wall.length || (this.newRules && this.rules.config.mode==='math2' && this.normalDraws[seat]>=24)) return this._endDraw();
     const id = this.wall.pop();
+    this.tempFuriten[seat] = false; // 同巡のフリテンは自分の次の通常ツモで解除（嶺上ツモ・鳴きでは解除しない）
     if(this.normalDraws)this.normalDraws[seat]++;
     this.hands[seat].push(id);
     this.current = seat;
@@ -121,6 +137,31 @@ export class Game {
   _claimOptions(c) {
     const ponTaken = !!(this.claim && this.claim.ponChoice);
     return { ron: c.ron, chi: ponTaken ? [] : c.chi, pon: ponTaken ? null : c.pon };
+  }
+
+  // ---- フリテン（ruleset 2）----
+  // 和了の形になる牌の種類（役の有無は問わない：鳴いた手で役のない牌も待ちに数える。一般的な麻雀と同じ）。
+  // 自分の打牌番（手牌が1枚多い）では求めない（null）。
+  shapeWaits(seat) {
+    if (this.phase === 'turn' && this.current === seat) return null;
+    return this.waitsOf(this.countsOf(this.hands[seat]), this.exposedMelds(seat), true);
+  }
+  // フリテンの状態：furiten（ロンできない）と理由。discard：待ちの牌を自分で捨てている（鳴かれた牌も含む）、
+  // temporary：同巡の見逃し（次の自分の通常ツモまで）、riichi：リーチ後の見逃し（局の終わりまで）。
+  // waits：待ちの種類（求めない局面では null）、inRiver：捨てている待ちの種類。ruleset 2 以外は常にフリテンなし。
+  furitenOf(seat) {
+    if (!this.furitenRule) return { furiten: false, reasons: [], waits: null, inRiver: [] };
+    const waits = this.riichiWaits[seat] || this.shapeWaits(seat);
+    const inRiver = waits ? waits.filter((t) => this.discarded[seat].has(t)) : [];
+    const reasons = [];
+    if (inRiver.length) reasons.push('discard');
+    if (this.tempFuriten[seat]) reasons.push('temporary');
+    if (this.riichiFuriten[seat]) reasons.push('riichi');
+    return { furiten: reasons.length > 0, reasons, waits, inRiver };
+  }
+  _missRon(seat) {
+    this.tempFuriten[seat] = true;
+    if (this.riichi[seat]) this.riichiFuriten[seat] = true;
   }
 
   tsumoAnalysis(seat) {
@@ -205,6 +246,7 @@ export class Game {
   ponOption(seat, tileId) {
     if (!this.rules.config.rules.pon || this.riichi[seat] || this.melds[seat].length >= this.maxCalls) return null; // リーチ後はポン不可
     const t = this.tileType[tileId];
+    if (this.funcPonBan && this.rules.types[t].kind === 'func') return null; // ruleset 2：関数牌はポンできない（暗カンは可）
     const k = this.rules.koutsuOf(t);
     if (!k) return null;
     const use = this.hands[seat].filter((id) => this.tileType[id] === t).slice(0, 2);
@@ -224,12 +266,15 @@ export class Game {
     }
     if (riichi) {
       const t = this.tileType[tileId];
-      if (!this.riichiOptions(seat).some((o) => o.type === t)) throw new Error('riichi not possible');
+      const opt = this.riichiOptions(seat).find((o) => o.type === t);
+      if (!opt) throw new Error('riichi not possible');
       this.riichi[seat] = { tile: tileId, turn: this.turnCount };
+      if (this.furitenRule) this.riichiWaits[seat] = opt.waits.slice(); // リーチ確定時の待ち（以後、手は変わらない）
       this.log({ type: 'riichi', seat, tile: tileId });
     }
     this.hands[seat].splice(i, 1);
     this.rivers[seat].push({ id: tileId, tsumogiri: tileId === this.drawn, ...(riichi ? { riichi: true } : {}) });
+    if (this.furitenRule) this.discarded[seat].add(this.tileType[tileId]);
     this.log({ type: 'discard', seat, tile: tileId });
     this.drawn = null;
     this.justDrew = false;
@@ -251,13 +296,21 @@ export class Game {
   // ・最も近い席のポンが、チーより優先される。後続の席にはポン・チーを聞かない（ロンだけ聞く）。
   _openClaims(from, tileId) {
     const queue = [];
+    const blocked = [];
     for (let k = 1; k < SEAT_COUNT; k++) {
       const s = next(from, k);
-      const ron = !!this.ronAnalysis(s, tileId);
+      let ron = !!this.ronAnalysis(s, tileId);
+      // ruleset 2：フリテンならロンできない（ツモ和了はできる）。和了できる牌が出たのにロンしなかったことになるので、同巡のフリテンにもなる
+      if (ron && this.furitenRule) {
+        const f = this.furitenOf(s);
+        // 画面の説明用（その席だけの情報。記録 events には残さない＝他家に知らせない）
+        if (f.furiten) { ron = false; blocked.push(s); this.ronBlocked[s] = { tile: tileId, from, reasons: f.reasons.slice(), inRiver: f.inRiver.slice(), at: this.events.length }; }
+      }
       const chi = k === 1 ? this.chiOptions(s, tileId) : [];
       const pon = this.ponOption(s, tileId);
       if (ron || chi.length || pon) queue.push({ seat: s, ron, chi, pon });
     }
+    for (const s of blocked) this._missRon(s, tileId);
     if (!queue.length) return this._advance(from);
     this.phase = 'claim';
     this.claim = { from, tile: tileId, queue, pos: 0, chiChoice: null, ponChoice: null };
@@ -273,6 +326,8 @@ export class Game {
       const a = this.ronAnalysis(seat, this.claim.tile);
       return this._endWin(seat, 'ron', this.claim.tile, this.claim.from, a);
     }
+    // ruleset 2：ロンできたのに見送った（ポン・チーを選んだ場合も）→ 同巡のフリテン（リーチ中なら局の終わりまで）
+    if (o.ron && this.furitenRule) this._missRon(seat, this.claim.tile);
     if (decision.type === 'pon') {
       if (!o.pon) throw new Error('pon not possible');
       // 後続のロン判断が終わるまで保留。最初に選ばれたポン（＝最も近い席）だけが有効。

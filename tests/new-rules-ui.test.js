@@ -10,13 +10,17 @@ import { rulesFor, k } from './helpers.js';
 
 const P = (q) => new URLSearchParams(q);
 
-test('再現URL：newrules=1 だけが新ルール。付いていなければ従来ルール、ほかの値はエラー', () => {
+// docs/62：ルールの版を追加（newrules=2＝現行の新ルール）。以前は 1 だけが有効で 2 はエラーだった（仕様の変更）
+test('再現URL：newrules=1（新ルール初版）・2（現行）。付いていなければ従来ルール、ほかの値はエラー', () => {
   const base = 'seed=5&round=1&dealer=0&hand=0&renchan=0&len=4&mode=math2';
   assert.equal(validateReplay(P(base)).values.newRules, false);
+  assert.equal(validateReplay(P(base)).values.ruleset, 0);
   assert.equal(validateReplay(P('seed=5&round=3')).values.newRules, false, '従来形式');
   const on = validateReplay(P(base + '&newrules=1'));
-  assert.ok(on.ok); assert.equal(on.values.newRules, true);
-  for (const bad of ['0', 'true', '', '2', 'yes']) {
+  assert.ok(on.ok); assert.equal(on.values.newRules, true); assert.equal(on.values.ruleset, 1);
+  const v2 = validateReplay(P(base + '&newrules=2'));
+  assert.ok(v2.ok); assert.equal(v2.values.ruleset, 2); assert.equal(v2.values.newRules, true);
+  for (const bad of ['0', 'true', '', '3', 'yes', '1.0']) {
     const r = validateReplay(P(`${base}&newrules=${bad}`));
     assert.equal(r.ok, false, bad); assert.deepEqual(r.errors.map((e) => e.key), ['newrules']);
   }
@@ -31,6 +35,10 @@ test('再現URLの出力：従来ルールは従来と同じ文字列、新ル�
   assert.equal(q, replayQuery(v) + '&newrules=1');
   const r = validateReplay(P(q.slice(1)));
   assert.ok(r.ok); assert.equal(r.values.newRules, true); assert.equal(replayQuery(r.values), q);
+  // 現行の版（2）：出力は newrules=2、読み直すと同じ URL
+  const q2 = replayQuery({ ...v, ruleset: 2 });
+  assert.equal(q2, replayQuery(v) + '&newrules=2');
+  assert.equal(replayQuery(validateReplay(P(q2.slice(1))).values), q2);
 });
 
 // 自分の view（公開情報）を手で作る。melds0：自分の面子 [{ key, call }]

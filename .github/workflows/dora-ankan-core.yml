@@ -6,6 +6,9 @@ on:
       - 'tests/dora-ankan.test.js'
       - 'tests/new-rules-engine.test.js'
       - 'tests/new-rules-ui.test.js'
+      - 'tests/ruleset2-furiten.test.js'
+      - 'tools/simulate-ruleset.mjs'
+      - 'index.html'
       - 'src/ui/**'
       - 'tests/e2e/play.mjs'
       - 'tools/legacy-equivalence.mjs'
@@ -28,7 +31,7 @@ jobs:
           node-version: '22'
       - run: node --check src/engine/dead-wall.js && node --check src/engine/game.js && node --check src/engine/rules.js && node --check src/engine/ai.js && node --check tools/legacy-equivalence.mjs
       - name: Focused new-rules tests
-        run: node --test tests/dora-ankan.test.js tests/new-rules-engine.test.js tests/new-rules-ui.test.js tests/yakuhint.test.js tests/replay.test.js
+        run: node --test tests/dora-ankan.test.js tests/new-rules-engine.test.js tests/new-rules-ui.test.js tests/ruleset2-furiten.test.js tests/yakuhint.test.js tests/replay.test.js
       - name: Legacy rules identical to main (AI actions, events, results, views)
         run: |
           a=$(node tools/legacy-equivalence.mjs main-ref)
@@ -36,6 +39,17 @@ jobs:
           echo "main:   $a"
           echo "branch: $b"
           test "$a" = "$b"
+      - name: New rules first edition (ruleset 1, replay URLs newrules=1) identical to main
+        run: |
+          a=$(node tools/legacy-equivalence.mjs main-ref --newrules)
+          b=$(node tools/legacy-equivalence.mjs . --newrules)
+          echo "main:   $a"
+          echo "branch: $b"
+          test "$a" = "$b"
+      - name: Current rules (ruleset 2) AI matches, 12 characters, math I and II
+        run: |
+          node tools/simulate-ruleset.mjs --matches 40 --mode math1 --ruleset 2
+          node tools/simulate-ruleset.mjs --matches 40 --mode math2 --ruleset 2
       - run: npm test
   ui:
     # 新ルール⑤の卓UI（ドラ表示・暗カン・嶺上・24回・ルール選択・8画面）と新ルールの通しプレイ。デプロイしない
@@ -51,10 +65,10 @@ jobs:
         run: |
           npm install --no-save playwright@1.56.1
           npx playwright install --with-deps chromium
-      - name: New-rule table UI, rule selection, layouts (8 viewports), new-rule play (math I/II, 3 AI levels)
+      - name: New-rule table UI, rules unification, opponent select, tile faces, furiten and riichi waits, function-tile pon, layouts (8 viewports), new-rule play
         run: |
           mkdir -p /tmp/new-rules-ui
-          node tests/e2e/play.mjs --only v08NewRulesTable,v08NewRulesSelect,v08NewRulesLayout,newRulesPlay --shots /tmp/new-rules-ui
+          node tests/e2e/play.mjs --only v08NewRulesTable,v08NewRulesLayout,newRulesPlay,v09RulesUnified,v09SelectTop,v09TileFaces,v09FuritenWaits,v09FuncPon,v09Layout --shots /tmp/new-rules-ui
       - name: Ver.0.7 table regression (legacy rules)
         run: node tests/e2e/play.mjs --only v07MahjongTable,v07TableHintDock
       - uses: actions/upload-artifact@v4

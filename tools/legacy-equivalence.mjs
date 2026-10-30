@@ -1,10 +1,13 @@
 // 旧ルール（newRules なし）の同値性の確認：指定したチェックアウトのエンジンで、同じ seed・同じ AI（3難易度×3性格・12人）を
 // 数学Ⅰ・Ⅱで最後まで打ち、AI の全行動・全イベント・結果・公開ビューのハッシュを出す。main と比べて一致すれば旧ルールは不変。
-// 使い方：node tools/legacy-equivalence.mjs <チェックアウトのパス>（既定：このリポジトリ）
+// 使い方：node tools/legacy-equivalence.mjs <チェックアウトのパス>（既定：このリポジトリ） [--newrules]
+//   --newrules：新ルール初版（newRules: true ＝ ruleset 1、再現 URL の newrules=1）で同じ比較をする（PR #44 の局の再現性）
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-const ROOT = pathToFileURL(resolve(process.argv[2] || new URL('..', import.meta.url).pathname)).href;
+const args = process.argv.slice(2);
+const NEW_RULES = args.includes('--newrules');
+const ROOT = pathToFileURL(resolve(args.find((a) => !a.startsWith('--')) || new URL('..', import.meta.url).pathname)).href;
 const { makeConfig } = await import(ROOT + '/src/engine/config.js');
 const { createRules } = await import(ROOT + '/src/engine/rules.js');
 const { Game } = await import(ROOT + '/src/engine/game.js');
@@ -18,7 +21,7 @@ for (const mode of ['math1', 'math2']) {
   const rules = createRules(makeConfig({ mode }));
   for (let seed = 1; seed <= 150; seed++) {
     const players = [0, 1, 2, 3].map((s) => ({ name: 'P' + s, kind: 'ai', personality: 'speed' }));
-    const g = new Game({ rules, seed, dealer: seed % 4, players });
+    const g = new Game({ rules, seed, dealer: seed % 4, players, ...(NEW_RULES ? { newRules: true } : {}) });
     const rng = createRng(seed * 31 + 7);
     const seats = [0, 1, 2, 3].map((s) => (seed % 3 === 0 ? ids[(seed + s * 5) % 12] : `L:${['beginner', 'intermediate', 'advanced'][(seed + s) % 3]}:${['speed', 'value', 'closed'][(seed + 2 * s) % 3]}`));
     const info = { scores: [100, 100, 100, 100], hand: 0, length: 4, dealer: seed % 4, renchan: 0, publicHistory: newPublicHistory() };
