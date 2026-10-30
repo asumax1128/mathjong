@@ -7566,6 +7566,221 @@ async function v08NewRulesLayout(browser) {
   console.log('✓ 新ルールの画面：8画面（320・375・390縦、667・844横、iPad縦、タブレット横、PC）×暗カン0/4回で、ドラ表示は卓の中・操作バー/ヒント/手牌/中央/名札/河/面子と重ならない・横スクロールなし');
 }
 
+// ===== リーチ後のオートツモ切り（src/ui/auto-tsumogiri.js） =====
+// 状態：自分の判断番・設定・自動で捨てた回数・自分の打牌の数
+const atState = (page) => page.evaluate(() => {
+  const m = window.__mathjong, g = m.S.game;
+  const p = g && g.pending();
+  const btn = document.querySelector('button[data-action="toggle-auto-tsumogiri"]');
+  return {
+    pending: p && { seat: p.seat, type: p.type, ron: !!p.ron, canTsumo: !!p.canTsumo }, on: m.S.autoTsumo.on, count: m.S.autoTsumo.count, stopped: m.S.autoTsumo.stopped,
+    myDiscards: g ? g.events.filter((e) => e.type === 'discard' && e.seat === 0).length : 0, riichi: g ? !!g.riichi[0] : false, ended: g ? !g.pending() : null,
+    toggle: btn ? btn.getAttribute('aria-pressed') : null, chiToggle: document.querySelectorAll('[data-action="toggle-chi-autopass"]').length,
+    status: (document.querySelector('.bar .status') || {}).textContent || '', failed: m.S.input.failed, furiten: g ? g.furitenOf(0).reasons : [],
+  };
+});
+// 自分の判断番（手番か宣言）か局の終わりまで待つ
+const atWaitMine = (page, timeout = 20000) => page.waitForFunction(() => { const g = window.__mathjong.S.game; const p = g && g.pending(); return !p || p.seat === 0; }, null, { timeout });
+// テスト用の操作（ページ内）：他家の手番をエンジンで進める（宣言はすべて見送り）。stopAt1：下家の手番で止める
+const atDrive = (page, { rig0 = null, stopAt1 = false } = {}) => page.evaluate(({ rig0, stopAt1 }) => {
+  const m = window.__mathjong, g = m.S.game;
+  clearTimeout(m.S.timer); m.S.timer = null;
+  for (let i = 0; i < 80 && g.pending(); i++) {
+    const p = g.pending();
+    if (stopAt1 && p.seat === 1 && p.type === 'turn') break;
+    if (p.seat === 0) {
+      if (p.type === 'claim' && !p.ron) { g.respond(0, { type: 'pass' }); continue; }
+      break;
+    }
+    if (p.type === 'claim') g.respond(p.seat, { type: 'pass' }); else g.discard(p.seat, g.drawn);
+  }
+  const p = g.pending();
+  if (rig0 && p && p.seat === 0 && p.type === 'turn') window.__r2.rigDraw(rig0); // 自分のツモ牌を和了の牌にする（山と交換）
+  g.checkInvariants();
+  return p && { seat: p.seat, type: p.type };
+}, { rig0, stopAt1 });
+async function v10AutoTsumogiri(browser) {
+  for (const [width, height, mode] of [[390, 844, 'math1'], [667, 375, 'math2']]) {
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    // 遅い速さ（自動の間 1.2秒）で、局面を決めて確かめる。30°（π/6）・150°（5π/6）待ち（角度牌の key は度数なので数学Ⅱでも同じ手）
+    await page.goto(LOCAL + `?mode=${mode}&seed=7&speed=slow&newrules=2`);
+    await page.locator('.hand .tile').first().waitFor();
+    await r2Scene(page, TENPAI2);
+    let st = await atState(page);
+    assert.deepEqual([st.toggle, st.chiToggle], [null, 1], 'リーチ前は切替を出さない');
+    await page.locator('button[data-action="riichi"]').tap();
+    await page.locator('.hand .tile.drawn').tap();
+    await page.locator('button[data-action="riichi-discard"]').tap();
+    // (1) OFF（既定）：自分のツモ番で止まり、手動のツモ切りを待つ（従来どおり）
+    await atDrive(page);
+    await page.evaluate(() => window.__mathjong.step());
+    st = await atState(page);
+    assert.deepEqual([st.pending.seat, st.pending.type, st.pending.canTsumo, st.toggle, st.chiToggle, st.on], [0, 'turn', false, 'false', 1, false], 'リーチ中は操作バーに切替を出す（既定 OFF）。手牌の下の道具は従来のまま');
+    let n = st.myDiscards;
+    await page.waitForTimeout(1600);
+    st = await atState(page);
+    assert.equal(st.myDiscards, n, 'OFF では自動で捨てない');
+    assert.match(st.status, /リーチ中：ツモ切り/);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v10-off-${width}.png` });
+    // (2) ON：その手番から自動でツモ切り（1回だけ）
+    await page.locator('button[data-action="toggle-auto-tsumogiri"]').tap();
+    await page.waitForFunction(() => window.__mathjong.S.autoTsumo.count >= 1, null, { timeout: 5000 });
+    st = await atState(page);
+    assert.deepEqual([st.toggle, st.on, st.count, st.myDiscards], ['true', true, 1, n + 1], 'ON：1回だけ自動でツモ切り');
+    // (3) ロンできる局面：下家の打牌を和了の牌に → 自動で進まず、ロンか見送りを選ぶ
+    await atDrive(page, { stopAt1: true });
+    await page.evaluate(() => {
+      const m = window.__mathjong, g = m.S.game;
+      window.__r2.rigDraw('150');
+      g.discard(1, g.drawn); g.checkInvariants(); m.step(true);
+    });
+    // 宣言は打牌者に近い席から順に聞く（対面・上家の AI の判断の後、自分のロン）
+    await page.waitForFunction(() => { const p = window.__mathjong.S.game.pending(); return !p || (p.seat === 0); }, null, { timeout: 10000 });
+    st = await atState(page);
+    assert.deepEqual([st.pending.seat, st.pending.type, st.pending.ron], [0, 'claim', true], 'ロンの宣言');
+    await page.waitForTimeout(1600);
+    st = await atState(page);
+    assert.deepEqual([st.pending.seat, st.pending.type, st.count], [0, 'claim', 1], 'ロンできるときは自動で進まない');
+    assert.equal(await page.locator('button[data-action="ron"]').count(), 1);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v10-ron-stop-${width}.png` });
+    await page.locator('button[data-action="pass"]').tap();
+    st = await atState(page);
+    assert.ok(st.furiten.includes('riichi'), 'リーチ後の見送り：この局の終わりまでフリテン');
+    assert.equal(st.on, true, '見送った後も ON');
+    // (4) ツモ和了できる局面（リーチ後フリテン中でもツモ和了はできる）：自動で捨てず、和了か見送りを選ぶ
+    await atDrive(page, { rig0: '30' });
+    await page.evaluate(() => window.__mathjong.step());
+    await page.waitForTimeout(1600);
+    st = await atState(page);
+    assert.deepEqual([st.pending.seat, st.pending.type, st.pending.canTsumo, st.count], [0, 'turn', true, 1], 'ツモ和了できるときは自動で捨てない');
+    assert.match(st.status, /和了できます！（自動ツモ切りは停止中）/);
+    assert.equal(await page.locator('button[data-action="tsumo"]').count(), 1);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v10-tsumo-stop-${width}.png` });
+    await page.locator('button[data-action="tsumogiri"]').tap(); // 見送る（本人のツモ切り）
+    st = await atState(page);
+    // ツモの見送り＝和了の牌（30°）を自分で捨てる → 捨て牌のフリテン（以後この待ちではロンできない）
+    assert.deepEqual([st.on, st.count], [true, 1], '見送り後も ON');
+    assert.ok(st.furiten.includes('discard') && st.furiten.includes('riichi'), '和了の牌を捨てたので捨て牌のフリテン（リーチ後の見逃しも続く）');
+    // (5) 見送り後も自動で進む（フリテン中もツモ切りは自動）
+    await atDrive(page);
+    await page.evaluate(() => window.__mathjong.step());
+    await page.waitForFunction(() => window.__mathjong.S.autoTsumo.count >= 2, null, { timeout: 5000 });
+    // (6) OFF：予約した自動操作を取り消して手動へ
+    await atDrive(page);
+    st = await atState(page);
+    assert.deepEqual([st.pending.seat, st.pending.type], [0, 'turn']);
+    await page.evaluate(() => window.__mathjong.step()); // ここで自動ツモ切りを予約（1.2秒後）
+    await page.locator('button[data-action="toggle-auto-tsumogiri"]').tap(); // 予約の前に OFF
+    n = (await atState(page)).myDiscards;
+    await page.waitForTimeout(1600);
+    st = await atState(page);
+    assert.deepEqual([st.on, st.toggle, st.myDiscards, st.count], [false, 'false', n, 2], 'OFF にしたら予約した自動操作を実行しない');
+    // (7) ON に戻し、速さを上げて局の終わりまで（AI の実際の判断。和了・ロンの機会では本人が見送る）。二重操作・無限ループなし
+    await page.evaluate(() => { window.__mathjong.S.speed = 'fast'; });
+    await page.locator('button[data-action="toggle-auto-tsumogiri"]').tap();
+    for (let i = 0; i < 400; i++) {
+      st = await atState(page);
+      if (st.ended) break;
+      if (st.pending.seat === 0 && st.pending.type === 'claim') { await page.locator('button[data-action="pass"]').tap(); continue; }
+      if (st.pending.seat === 0 && st.pending.canTsumo) { await page.locator('button[data-action="tsumogiri"]').tap(); continue; }
+      await page.waitForTimeout(100);
+    }
+    await page.locator('.overlay .result').waitFor({ timeout: 30000 });
+    st = await atState(page);
+    const mine = await page.evaluate(() => window.__mathjong.S.game.events.filter((e) => e.type === 'discard' && e.seat === 0).length);
+    assert.ok(st.count >= 3, `自動ツモ切り ${st.count}回`);
+    assert.equal(st.failed, 0, 'エンジンに拒否された操作なし（二重の打牌なし）');
+    assert.ok(mine >= st.count);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.scores.reduce((a, b) => a + b, 0)), 400);
+    if (mode === 'math2') assert.ok(await page.evaluate(() => window.__mathjong.S.game.normalDraws.every((x) => x <= 24)), '24回の上限');
+    // (8) 次の局・再戦・タイトルでは OFF に戻る
+    await page.locator('button[data-action="next"]').tap();
+    await page.locator('.hand .tile').first().waitFor();
+    assert.equal((await atState(page)).on, false, '次の局は OFF');
+    await page.evaluate(() => { const m = window.__mathjong; m.S.autoTsumo.on = true; m.S.match.over = true; m.S.modal = 'final'; m.render(); });
+    await page.locator('button[data-action="again"]').tap();
+    await page.locator('.hand .tile').first().waitFor();
+    assert.equal((await atState(page)).on, false, '再戦は OFF');
+    await page.evaluate(() => { window.__mathjong.S.autoTsumo.on = true; });
+    await page.locator('button[data-action="settings"]').tap();
+    await page.locator('button[data-action="ask-title"]').tap();
+    await page.locator('button[data-action="to-title"]').tap();
+    assert.equal(await page.evaluate(() => window.__mathjong.S.autoTsumo.on), false, 'タイトルへ戻ると OFF');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (9) 流局：数学Ⅱの通常ツモ24回の上限まで自動で進み、流局の結果になる
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?mode=math2&seed=7&speed=slow&newrules=2'); // 他家はテストがエンジンで進める（AI の予約は毎回取り消す）
+    await page.locator('.hand .tile').first().waitFor();
+    await r2Scene(page, TENPAI2);
+    // 他家はエンジンでツモ切り・宣言は見送り（和了しない）、自分はリーチしてオートツモ切り。和了の牌は自分のツモでは見送る
+    await page.evaluate(() => { const g = window.__mathjong.S.game; g.discard(0, g.drawn, { riichi: true }); });
+    await page.evaluate(() => { window.__mathjong.S.autoTsumo.on = true; });
+    for (let i = 0; i < 200; i++) {
+      const p = await atDrive(page);
+      if (!p) break;
+      await page.evaluate(() => window.__mathjong.step());
+      const s2 = await atState(page);
+      if (s2.ended) break;
+      if (s2.pending.seat === 0 && s2.pending.type === 'claim') await page.locator('button[data-action="pass"]').tap();
+      else if (s2.pending.seat === 0 && s2.pending.canTsumo) await page.locator('button[data-action="tsumogiri"]').tap();
+      else await page.waitForFunction((c) => { const m = window.__mathjong; const q = m.S.game.pending(); return m.S.autoTsumo.count > c || !q || q.seat !== 0; }, s2.count, { timeout: 5000 });
+    }
+    await page.evaluate(() => window.__mathjong.step());
+    await page.locator('.overlay .result').waitFor({ timeout: 10000 });
+    const r = await page.evaluate(() => { const g = window.__mathjong.S.game; return { type: g.result.type, draws: g.normalDraws, wall: g.wall.length, count: window.__mathjong.S.autoTsumo.count }; });
+    assert.equal(r.type, 'draw'); assert.ok(Math.max(...r.draws) === 24 && r.wall > 0, `24回で流局 ${JSON.stringify(r)}`);
+    assert.ok(r.count >= 10, `自動ツモ切り ${r.count}回`);
+    assert.match(await page.locator('.overlay .result').innerText(), /通常ツモの上限/);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ オートツモ切り（数学Ⅰ・Ⅱ）：既定 OFF（従来どおり手動）・ON で自動・ツモ和了とロンで必ず停止・見送り後も ON とリーチ後フリテン・OFF で予約を取り消し・AI と終局まで二重操作なし・数学Ⅱ24回で流局・次の局／再戦／タイトルで OFF');
+}
+
+// リーチ中の切替（操作バー）：8画面で操作バーの中に収まり、ほかのボタン・状態欄・手牌・ヒントと重ならない（自分の番・他家の番）
+async function v10AutoTsumoLayout(browser) {
+  for (const [width, height] of V09_SIZES) {
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?mode=math1&seed=7&speed=slow&newrules=2');
+    await page.locator('.hand .tile').first().waitFor();
+    await r2Scene(page, TENPAI2);
+    await page.evaluate(() => { const m = window.__mathjong, g = m.S.game; g.discard(0, g.drawn, { riichi: true }); window.__r2.until0({}); m.S.autoTsumo.on = true; m.render(); clearTimeout(m.S.timer); m.S.timer = null; });
+    for (const phase of ['mine', 'waiting']) {
+      if (phase === 'waiting') await page.evaluate(() => { const m = window.__mathjong, g = m.S.game; g.discard(0, g.drawn); m.render(); clearTimeout(m.S.timer); m.S.timer = null; });
+      const d = await page.evaluate(() => {
+        const b = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height }; };
+        const q = (s) => document.querySelector(s);
+        const t = q('[data-action="toggle-auto-tsumogiri"]');
+        return { toggle: b(t), bar: b(q('footer.bar')), main: b(q('main.table')), status: b(q('.bar .status')),
+          others: [...document.querySelectorAll('.bar button:not([data-action="toggle-auto-tsumogiri"])')].map(b),
+          tools: [...document.querySelectorAll('.hand-help button')].length, chi: document.querySelectorAll('.hand-help [data-action="toggle-chi-autopass"]').length,
+          overflow: document.documentElement.scrollWidth - innerWidth, text: t.innerText.replace(/\s+/g, ' ') };
+      });
+      const label = `${width}x${height} ${phase}`;
+      const ov = (a, c) => Math.min(a.r, c.r) - Math.max(a.l, c.l) > 0.75 && Math.min(a.b, c.b) - Math.max(a.t, c.t) > 0.75;
+      assert.match(d.text, /オートツモ切り ON/);
+      assert.ok(d.toggle.t >= d.bar.t - 0.5 && d.toggle.b <= d.bar.b + 0.5 && d.toggle.l >= -0.5 && d.toggle.r <= width + 0.5, '操作バーの中 ' + label);
+      assert.ok(d.toggle.h >= 44 && d.toggle.w >= 44, '押しやすい大きさ ' + label);
+      for (const [name, o] of [...d.others.map((x) => ['ボタン', x]), ['状態欄', d.status]]) assert.ok(!ov(d.toggle, o), `${name}と重ならない ${label} ${JSON.stringify([d.toggle, o])}`);
+      // 卓・手牌・ヒントはスクロールする領域（main）の中に表示される。切替はその下の操作バーにあり、見えている範囲と重ならない
+      assert.ok(d.toggle.t >= d.main.b - 0.5, `卓・手牌・ヒントの領域と重ならない ${label} ${JSON.stringify([d.toggle, d.main])}`);
+      assert.equal(d.chi, 1, '手牌の下の道具は従来のまま');
+      assert.ok(d.bar.b <= height + 0.5, '操作バーは画面内 ' + label);
+      assert.ok(d.overflow <= 1, '横にはみ出さない ' + label);
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/v10-layout-${width}x${height}-${phase}.png` });
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ オートツモ切りの切替：8画面×自分の番・他家の番で操作バーに収まり、ボタン・状態欄、卓・手牌・ヒントの領域と重ならない');
+}
+
 // 公開モードではサーバーも転送先も作らない。接続失敗をローカル成功で隠さない。
 const server = EXTERNAL ? null : await startServer(0, { base: BASE, host: '127.0.0.1' });
 if (server) {
@@ -7583,7 +7798,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -7644,6 +7859,8 @@ try {
   await v09FuritenWaits(browser);
   await v09FuncPon(browser);
   await v09Layout(browser);
+  await v10AutoTsumogiri(browser);
+  await v10AutoTsumoLayout(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。

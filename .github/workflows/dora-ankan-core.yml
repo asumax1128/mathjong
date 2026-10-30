@@ -7,6 +7,7 @@ on:
       - 'tests/new-rules-engine.test.js'
       - 'tests/new-rules-ui.test.js'
       - 'tests/ruleset2-furiten.test.js'
+      - 'tests/auto-tsumogiri.test.js'
       - 'tools/simulate-ruleset.mjs'
       - 'index.html'
       - 'src/ui/**'
@@ -31,7 +32,7 @@ jobs:
           node-version: '22'
       - run: node --check src/engine/dead-wall.js && node --check src/engine/game.js && node --check src/engine/rules.js && node --check src/engine/ai.js && node --check tools/legacy-equivalence.mjs
       - name: Focused new-rules tests
-        run: node --test tests/dora-ankan.test.js tests/new-rules-engine.test.js tests/new-rules-ui.test.js tests/ruleset2-furiten.test.js tests/yakuhint.test.js tests/replay.test.js
+        run: node --test tests/dora-ankan.test.js tests/new-rules-engine.test.js tests/new-rules-ui.test.js tests/ruleset2-furiten.test.js tests/auto-tsumogiri.test.js tests/yakuhint.test.js tests/replay.test.js
       - name: Legacy rules identical to main (AI actions, events, results, views)
         run: |
           a=$(node tools/legacy-equivalence.mjs main-ref)
@@ -68,7 +69,7 @@ jobs:
       - name: New-rule table UI, rules unification, opponent select, tile faces, furiten and riichi waits, function-tile pon, layouts (8 viewports), new-rule play
         run: |
           mkdir -p /tmp/new-rules-ui
-          node tests/e2e/play.mjs --only v08NewRulesTable,v08NewRulesLayout,newRulesPlay,v09RulesUnified,v09SelectTop,v09TileFaces,v09FuritenWaits,v09FuncPon,v09Layout --shots /tmp/new-rules-ui
+          node tests/e2e/play.mjs --only v08NewRulesTable,v08NewRulesLayout,newRulesPlay,v09RulesUnified,v09SelectTop,v09TileFaces,v09FuritenWaits,v09FuncPon,v09Layout,v10AutoTsumogiri,v10AutoTsumoLayout --shots /tmp/new-rules-ui
       - name: Ver.0.7 table regression (legacy rules)
         run: node tests/e2e/play.mjs --only v07MahjongTable,v07TableHintDock
       - uses: actions/upload-artifact@v4
