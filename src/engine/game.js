@@ -40,7 +40,6 @@ export class Game {
     this.phase = 'turn';
     this.claim = null;
     this.normalDraws = [0, 0, 0, 0];
-    this.normalDraws[dealer]=1;
     this._draw(dealer);
     this.deadWall = this.newRules ? createDeadWall(this.wall, this.tileType, this.rules.types) : null;
   }
