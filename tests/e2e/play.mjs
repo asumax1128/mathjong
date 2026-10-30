@@ -8216,6 +8216,10 @@ try {
   await v09Layout(browser);
   await v10AutoTsumogiri(browser);
   await v10AutoTsumoLayout(browser);
+  await v11OneRoundTitle(browser);
+  await v11OneRoundEnd(browser);
+  await v11FourRiichi(browser);
+  await v11Layout(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
