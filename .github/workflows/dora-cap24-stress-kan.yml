@@ -1,0 +1,29 @@
+name: Research long-game cap24 plus ankan (no deploy)
+on:
+  pull_request:
+    paths:
+      - 'tools/dora-cap24-stress-kan.mjs'
+      - '.github/workflows/dora-cap24-stress-kan.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check tools/dora-cap24-stress-kan.mjs
+      - name: Matched seed baseline and long-game stress with optional ankan
+        run: |
+          mkdir -p /tmp/kanstress
+          LONG_GAMES=60 node tools/dora-cap24-stress-kan.mjs | tee /tmp/kanstress/results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cap24-kan-long-stress
+          path: /tmp/kanstress/results.json
+          if-no-files-found: error
