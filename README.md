@@ -74,7 +74,7 @@ node tools/simulate.mjs --games 200 --check   # AI 自動対戦
 | [初心者の部屋 第1〜3段階](docs/34-beginner-room-part1.md) | 数学Ⅰで3枚の数式・3面子・ツモと打牌を練習（PR #20・mainマージ・iPhone 7/7合格） |
 | [初心者の部屋 第4〜6段階](docs/36-beginner-room-lessons4to6.md) | チー・ポン・リーチ・ロン・ツモ・卒業試験と進捗保存（PR #21 main反映・Pages成功。PR #22修正ブランチの公開入口smokeは3件成功。全段階の公開検査と実機受入は別途確認） |
 | [iPhone 実機テスト手順](docs/12-iphone-test-guide.md) | テストURL、Pages 設定、固定seed、報告方法 |
-| [Ver.0.7 麻雀卓UIの再設計](docs/58-v07-mahjong-table-redesign.md) | 4人が卓を囲む配置・河の6枚折り返しと席の向き・面子の位置・下部のガイド/設定・実況なし（Draft・未マージ・未公開） |
+| [Ver.0.7 麻雀卓UIの再設計](docs/58-v07-mahjong-table-redesign.md) | 4人が卓を囲む配置・河の6枚折り返しと席の向き・面子の位置・下部のガイド/設定・実況なし（Draft PR #38・未マージ・未公開） |
 | [旧シミュレーションコード](scripts/README.md) | Python検証プログラムの保存版と実行法 |
 | [過去の集計結果](results/2026-10-24-function-12-vs-16.txt) | 2,500局×2条件の出力 |
 
