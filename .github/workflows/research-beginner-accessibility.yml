@@ -20,10 +20,11 @@ jobs:
       - name: Simulate paired novice proxy vs baseline/gentle/easy AI
         run: |
           mkdir -p /tmp/beginner
-          BEGINNER_MATCHES=72 node tools/research-beginner-accessibility.mjs | tee /tmp/beginner/result.json
+          BEGINNER_MATCHES=24 NOVICE_SMART=0 node tools/research-beginner-accessibility.mjs | tee /tmp/beginner/basic.json
+          BEGINNER_MATCHES=24 NOVICE_SMART=1 node tools/research-beginner-accessibility.mjs | tee /tmp/beginner/smart.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: beginner-accessibility-results
-          path: /tmp/beginner/result.json
+          path: /tmp/beginner/*.json
           if-no-files-found: error
