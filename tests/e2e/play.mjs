@@ -7130,7 +7130,10 @@ async function newRulesPlay(browser, stats = { rounds: 0, wins: [0, 0, 0, 0], dr
 async function v08NewRulesSelect(browser) {
   const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const page = await ctx.newPage(), errors = watchErrors(page);
+  // タイトルのロゴ画像を読み終えてから画面を移る（読み込み中に離れると要求が中断され、エラーとして記録されるため）
+  const logoLoaded = () => page.waitForFunction(() => { const i = document.querySelector('.title-logo-img'); return !!i && i.complete; });
   await page.goto(LOCAL + '?speed=test');
+  await logoLoaded();
   // 既定：従来ルール（保存値なし）
   assert.equal(await page.locator('input[data-action="title-ruleset"][value="legacy"]').isChecked(), true, '既定は従来ルール');
   const startWith = async (ids) => {
@@ -7169,12 +7172,15 @@ async function v08NewRulesSelect(browser) {
   await page.locator('button[data-action="settings"]').tap();
   await page.locator('button[data-action="ask-title"]').tap();
   await page.locator('button[data-action="to-title"]').tap();
+  await logoLoaded();
   await page.reload();
+  await logoLoaded();
   assert.equal(await page.locator('input[data-action="title-ruleset"][value="new"]').isChecked(), true, '選択を保存');
   await page.locator('button[data-action="choose-opponents"]').tap();
   const sel = await page.evaluate(() => window.__mathjong.S.opp.selected.length);
   if (sel) for (const id of await page.evaluate(() => window.__mathjong.S.opp.selected.slice())) await page.locator(`.opp-card[data-id="${id}"] .opp-check`).tap();
   await page.locator('button[data-action="to-title"]').tap();
+  await logoLoaded();
   await startWith(all.slice(-3));
   assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), true);
   // 1局を最後まで：自分はツモ切り・ツモ和了・ロン、暗カンがあれば実行
