@@ -106,7 +106,10 @@ export class Game {
   pending() {
     if (this.phase === 'ended') return null;
     if (this.phase === 'turn') {
-      return { seat: this.current, type: 'turn', canTsumo: !!this.tsumoAnalysis(this.current), ankan: this.ankanOptions(this.current) };
+      const p = { seat: this.current, type: 'turn', canTsumo: !!this.tsumoAnalysis(this.current) };
+      // 新ルールだけ：暗カンの選択肢。旧ルールの pending() は従来と同じ形（キーを増やさない）
+      if (this.newRules) p.ankan = this.ankanOptions(this.current);
+      return p;
     }
     const c = this.claim.queue[this.claim.pos];
     const o = this._claimOptions(c);
@@ -370,10 +373,13 @@ export class Game {
       rivers: this.rivers.map((r) => r.map((x) => this.tileType[x.id])),
       handCounts: this.hands.map((h) => h.length),
       wallCount: this.wall.length,
-      doraIndicators: this.doraIndicators.map(d=>({type:this.typeOf(d.id),doraType:d.type})),
-      normalDraws: this.newRules ? this.normalDraws.slice() : undefined,
       dealer: this.dealer,
       riichi: this.riichi.map((r) => !!r), // リーチ宣言（公開情報）
+      // 新ルールだけ：公開されたドラ表示牌（王牌の他の牌・嶺上牌は渡さない）と各席の通常ツモ回数。旧ルールの view は従来と同じ形
+      ...(this.newRules ? {
+        doraIndicators: this.doraIndicators.map((d) => ({ type: this.typeOf(d.id), doraType: d.type })),
+        normalDraws: this.normalDraws.slice(),
+      } : {}),
     };
   }
 
