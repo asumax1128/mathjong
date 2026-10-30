@@ -8,5 +8,7 @@ export function hintKey(view, claim) {
     rivers: view.rivers,
     melds: view.melds.map((ms) => ms.map((m) => [m.meld, m.from])),
     claim: claim ? [claim.type, claim.from, claim.ron, claim.chiMelds] : null,
+    // 新ルールだけ：公開されたドラ表示牌（増えると未知の牌の枚数が変わる）。旧ルールのキーは従来と同じ
+    ...('doraIndicators' in view ? { dora: view.doraIndicators.map((d) => d.type) } : {}),
   });
 }

@@ -28,13 +28,13 @@ function combosFor(rules, k) {
 // 公開面子ごとの評価結果（成立役と点数）。必要になった組合せだけを評価してキャッシュする。
 // ron: ロン和了としての評価（三暗刻の暫定規則 sanankouRonCounts が効く）。キャッシュはロンかどうかで分ける。
 const evalCache = new WeakMap();
-function evaluatorFor(rules, exposed, ron = false) {
+// closed：門前か（新ルールの暗カンだけの手は面子があっても門前。旧ルールは従来どおり面子なし＝門前）
+function evaluatorFor(rules, exposed, ron = false, closed = exposed.length === 0) {
   let cache = evalCache.get(rules);
   if (!cache) evalCache.set(rules, (cache = new Map()));
-  const key = (ron ? 'ron:' : '') + exposed.slice().sort((a, b) => a - b).join(',');
+  const key = (ron ? 'ron:' : '') + (closed && exposed.length ? 'kan:' : '') + exposed.slice().sort((a, b) => a - b).join(',');
   let ev = cache.get(key);
   if (ev) return ev;
-  const closed = exposed.length === 0;
   const combos = combosFor(rules, 3 - exposed.length);
   const memo = new Array(combos.length);
   ev = (i) => memo[i] || (memo[i] = rules.evaluateMelds([...exposed, ...combos[i].melds], closed, { ron }));
@@ -48,6 +48,8 @@ export function unseenFromView(rules, view) {
   for (const h of view.hand) u[h.type]--;
   for (const r of view.rivers) for (const t of r) u[t]--;
   for (const ms of view.melds) for (const m of ms) for (const t of m.tiles) u[t]--;
+  // 新ルール：公開されたドラ表示牌も見えている牌（旧ルールの view にはこのキーがない）
+  if ('doraIndicators' in view) for (const d of view.doraIndicators) u[d.type]--;
   return u;
 }
 
@@ -104,9 +106,10 @@ export function yakuCandidates(rules, view, { limit = 3, claim = null } = {}) {
   const routes = baseCandidates(rules, view, limit).map((c) => ({ ...c, via: null }));
   if (claim) {
     const rivers = riversWithout(view.rivers, claim.from, claim.type);
+    const dora = 'doraIndicators' in view ? { doraIndicators: view.doraIndicators } : {}; // 新ルールだけ
     if (claim.ron) {
       // ロン：手牌＋対象牌でいま完成している形（あと0枚）だけが、この宣言で実現できる
-      const v = { seat: view.seat, melds: view.melds, rivers, hand: [...view.hand, { id: -1, type: claim.type }] };
+      const v = { seat: view.seat, melds: view.melds, rivers, hand: [...view.hand, { id: -1, type: claim.type }], ...dora };
       // ロン和了として評価する（成立役・代表得点ともエンジンのロン判定と同じ。三暗刻の設定も反映）
       for (const c of baseCandidates(rules, v, limit, { ron: true })) if (c.missing === 0) routes.push({ ...c, via: 'ron' });
     }
@@ -124,7 +127,7 @@ export function yakuCandidates(rules, view, { limit = 3, claim = null } = {}) {
       }
       const melds = view.melds.map((ms) => ms.slice());
       melds[view.seat].push({ meld: mi, tiles: rules.melds[mi].tiles.slice(), from: claim.from });
-      for (const c of baseCandidates(rules, { seat: view.seat, hand, melds, rivers }, limit)) routes.push({ ...c, via });
+      for (const c of baseCandidates(rules, { seat: view.seat, hand, melds, rivers, ...dora }, limit)) routes.push({ ...c, via });
     }
   }
   // 役ごとに最良（順位が上 → 点数が高い）を採用。各経路の上位 limit 件の統合で全体の上位 limit 件は正確に求まる。
@@ -141,17 +144,20 @@ export function yakuCandidates(rules, view, { limit = 3, claim = null } = {}) {
 function baseCandidates(rules, view, limit, { ron = false } = {}) {
   const counts = rules.countsOf(view.hand.map((h) => h.type));
   const exposed = view.melds[view.seat].map((m) => m.meld);
-  const closed = exposed.length === 0;
+  // 門前：チー・ポンがない（新ルールの暗カンは門前のまま）。旧ルールの view（doraIndicators なし）には暗カンがないので
+  // 従来どおり面子の数だけで判定し、読む項目も変えない
+  const closed = exposed.length === 0 || ('doraIndicators' in view && view.melds[view.seat].every((m) => m.call === 'ankan'));
+  const hasKan = exposed.length > 0 && closed; // 暗カンがある手は手牌が9枚に満たないので特殊和了（九角無双）はない
   const unseen = unseenFromView(rules, view);
   const combos = combosFor(rules, 3 - exposed.length);
-  const evaluate = evaluatorFor(rules, exposed, ron);
+  const evaluate = evaluatorFor(rules, exposed, ron, closed);
   const order = orderOf(rules);
   const best = new Map();
 
   // 特殊和了（門前限定は鳴いた手では候補にしない）は別判定
   const specials = [];
   for (const sp of rules.config.specialHands) {
-    if (!sp.enabled || (sp.closedOnly && !closed)) continue;
+    if (!sp.enabled || (sp.closedOnly && !closed) || hasKan) continue;
     const idxs = sp.angles.map((d) => rules.typeByKey.get(`a:${d}`));
     if (!idxs.every(Boolean)) continue; // 必要な角度牌が無効
     let missing = 0;

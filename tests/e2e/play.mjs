@@ -87,13 +87,16 @@ async function invariants(page) {
   });
 }
 
-async function playDevice(browser, dev, seed, rounds, stats, { autopass = false, mode = 'legacy' } = {}) {
+async function playDevice(browser, dev, seed, rounds, stats, { autopass = false, mode = 'legacy', newRules = false, ai = null } = {}) {
   const ctx = await newContext(browser, { viewport: dev.viewport, isMobile: dev.isMobile, hasTouch: dev.hasTouch, deviceScaleFactor: 2 });
   // Ver.0.2-B：チーのオートパス ON で通しプレイ（チーのみの宣言は画面に出ない）
   if (autopass) await ctx.addInitScript(() => { try { localStorage.setItem('mj-chi-autopass', '1'); } catch { /* */ } });
   const page = await ctx.newPage();
   const errors = watchErrors(page);
-  await page.goto(`${LOCAL}?${mode === 'legacy' ? 'rules=legacy' : `mode=${mode}`}&seed=${seed}&speed=test&len=8`); // 8局戦（最大6局を続けて遊ぶため）
+  await page.goto(`${LOCAL}?${mode === 'legacy' ? 'rules=legacy' : `mode=${mode}`}&seed=${seed}&speed=test&len=8${newRules ? '&newrules=1' : ''}${ai ? `&ai=${ai}` : ''}`); // 8局戦（最大6局を続けて遊ぶため）
+  // 新ルール（docs/61）：URL の newrules=1 のときだけ。付いていない URL は従来ルール（ドラ表示・暗カンなし）
+  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), newRules, `${dev.name}: ルール`);
+  assert.equal(await page.locator('.dora-box').count(), newRules ? 1 : 0, `${dev.name}: ドラ表示は新ルールだけ`);
   const tap = (loc) => (dev.hasTouch ? loc.tap() : loc.click());
 
   // 操作バーが画面内（下端のホームインジケーター領域を除く）に収まっている
@@ -126,6 +129,19 @@ async function playDevice(browser, dev, seed, rounds, stats, { autopass = false,
       await invariants(page);
       if (await page.locator('.overlay .result').count()) break;
       if (++actions > 400) throw new Error('round did not finish');
+      if (newRules) {
+        // ドラ表示は公開された表示牌と同じ枚数（1〜5）。暗カンの選択肢があれば画面から実行する（確認の段階を経る）
+        const nr = await page.evaluate(() => { const g = window.__mathjong.S.game; return { shown: document.querySelectorAll('.dora-box .dr-ind .tile').length, n: g.doraIndicators.length, kans: g.melds.flat().filter((x) => x.call === 'ankan').length }; });
+        assert.equal(nr.shown, nr.n, 'ドラ表示の枚数');
+        assert.ok(nr.n === 1 + nr.kans && nr.n <= 5, 'ドラ表示＝1＋暗カンの数');
+        const kanBtn = page.locator('button[data-action="ankan"]');
+        if (await kanBtn.count()) {
+          await tap(kanBtn);
+          await tap(page.locator('button[data-action="ankan-type"]').first());
+          stats.ankan = (stats.ankan || 0) + 1;
+          continue;
+        }
+      }
 
       const tsumo = page.locator('button[data-action="tsumo"]');
       const ron = page.locator('button[data-action="ron"]');
@@ -221,9 +237,11 @@ async function playDevice(browser, dev, seed, rounds, stats, { autopass = false,
         assert.equal(await page.locator('.overlay .formulas li').count(), 3, '3面子の数式を表示');
       }
       for (const y of res.result.analysis.yaku) { stats.yaku[y.name] = (stats.yaku[y.name] || 0) + 1; assert.ok(text.includes(y.name)); }
+      if (newRules) assert.match(text, /ドラ/, 'ドラの行');
     } else {
       stats.draws++;
       assert.match(text, /流局/);
+      if (newRules) assert.match(text, /上限|山の牌がなくなりました/, '流局の理由');
     }
     if (SHOTS && r < 2) await page.screenshot({ path: `${SHOTS}/result-${dev.viewport.width}-${r}.png` });
     stats.rounds++;
@@ -6859,6 +6877,406 @@ async function v07MahjongTable(browser) {
   console.log('✓ Ver.0.7 麻雀卓：9画面×実Gameの局面（開始・6/12/19枚・自分2鳴き・全員2鳴き・リーチ）、4人の配置・6枚折り返し・席の向き・密着・非重複・宣言牌・面子の位置・下部のガイド/設定・実況なし');
 }
 
+// ---- 新ルール⑤（docs/61）：卓UI。局面は Game の合法な状態を作り（牌IDの交換だけ）、画面を操作して確かめる ----
+// spec：{ hand: 自分の9枚（短縮表記、最後がツモ牌）, rinshan: 嶺上で引かれる順, upto: 'start' }。親＝自分の最初の手番で作る。
+async function nrScene(page, spec) {
+  return page.evaluate((spec) => {
+    const m = window.__mathjong;
+    clearTimeout(m.S.timer); m.S.timer = null; m.fx.clear();
+    const old = m.S.game;
+    const g = new old.constructor({ rules: m.rules, seed: spec.seed || 7, dealer: 0, players: old.players, newRules: true });
+    const key = (x) => (x.startsWith('=') ? `v:${x.slice(1)}` : /^\d+$/.test(x) ? `a:${x}` : `f:${x}`);
+    const T = (x) => m.rules.typeByKey.get(key(x)).idx;
+    const shown = new Set(g.deadWall.indicators.map((d) => d.id));
+    const conts = () => [...g.hands, g.wall, g.deadWall.rinshan];
+    const where = (id) => { for (const c of conts()) { const i = c.indexOf(id); if (i >= 0) return [c, i]; } return null; };
+    const swap = (a, b) => { if (a === b) return; const [ca, ia] = where(a), [cb, ib] = where(b); ca[ia] = b; cb[ib] = a; };
+    const free = (t, used) => conts().flat().find((id) => g.typeOf(id) === t && !used.has(id) && !shown.has(id));
+    if (spec.hand) {
+      const hand = g.hands[0], used = new Set();
+      const ids = spec.hand.map((x) => { const id = hand.find((h) => g.typeOf(h) === T(x) && !used.has(h)) ?? free(T(x), used); used.add(id); return id; });
+      // 手牌の位置 i に ids[i] を入れる（手牌の中の入れ替えも交換）
+      ids.forEach((id, i) => swap(hand[i], id));
+      g.drawn = hand.at(-1);
+    }
+    (spec.rinshan || []).forEach((x, n) => {
+      const used = new Set([...g.hands[0], ...g.deadWall.rinshan.slice(g.deadWall.rinshan.length - n)]);
+      const id = g.wall.find((w) => g.typeOf(w) === T(x) && !used.has(w));
+      swap(g.deadWall.rinshan[g.deadWall.rinshan.length - 1 - n], id);
+    });
+    g._riichiMemo = null;
+    g.checkInvariants(); m.S.game = g; m.S.selected = null; m.S.ankanSelect = false; m.S.riichiSelect = false; m.S.scored = false; m.S.modal = null; m.render();
+    return { ankan: (g.pending().ankan || []).map((o) => o.type), riichi: g.riichiOptions(0).length, canTsumo: g.pending().canTsumo };
+  }, spec);
+}
+const nrState = (page) => page.evaluate(() => {
+  const m = window.__mathjong, g = m.S.game;
+  const q = (s) => [...document.querySelectorAll(s)];
+  return {
+    newRules: g.newRules, melds: g.melds.map((x) => x.map((y) => ({ call: y.call, n: y.tiles.length }))), hand: g.hands[0].length, draws: g.normalDraws.slice(),
+    dora: g.doraIndicators.map((d) => ({ ind: g.typeOf(d.id), dora: d.type })), events: g.events.map((e) => e.type), closed: g.isClosed(0), pending: g.pending() && { ...g.pending() },
+    shownInd: q('.dora-box .dr-ind .tile').map((t) => t.getAttribute('aria-label')), shownDora: q('.dora-box .dr-dora .tile').map((t) => t.getAttribute('aria-label')),
+    wantInd: g.doraIndicators.map((d) => m.rules.types[g.typeOf(d.id)]).map((t) => (t.kind === 'func' ? t.fn : null)),
+    kanBtn: q('button[data-action="ankan"]').length, kanType: q('button[data-action="ankan-type"]').length, kanOk: q('.hand .tile.kan-ok').length, tap: q('.hand .tile.tap').length,
+    myMelds: q('.self .melds.mine .meld').map((e) => ({ cls: e.className, n: e.querySelectorAll('.tile').length })), status: (document.querySelector('.bar .status') || {}).textContent || '',
+    rinshan: q('.hand .tile.rinshan').length, center: document.querySelector('.board-center').innerText, tag0: document.querySelector('.me-board .seat-tag').innerText,
+    input: { ...m.S.input },
+  };
+});
+async function v08NewRulesTable(browser) {
+  for (const [width, height] of [[390, 844], [320, 568]]) {
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?mode=math1&seed=7&speed=slow&newrules=1');
+    await page.locator('.hand .tile').first().waitFor();
+    // 1) 開始：新ルールの印・ドラ表示1枚（表示牌とドラは別の段）。暗カンの選択肢がなければボタンなし
+    let st = await nrState(page);
+    assert.ok(st.newRules && /新ルール/.test(st.center), '新ルールの印');
+    assert.equal(st.shownInd.length, 1); assert.equal(st.shownDora.length, 1);
+    const types = await page.evaluate(() => { const m = window.__mathjong, g = m.S.game; return g.doraIndicators.map((d) => [m.rules.types[g.typeOf(d.id)].key, m.rules.types[d.type].key]); });
+    const labels = await page.evaluate(() => [...document.querySelectorAll('.dora-box .tile')].map((t) => t.getAttribute('aria-label')));
+    assert.equal(labels.length, 2, '表示牌1枚＋ドラ1枚だけ（王牌の他の牌は出さない）');
+    assert.notDeepEqual(types[0][0], types[0][1], '表示牌とドラは別の種類');
+    // 2) 暗カン：ツモ直後に4枚 → ボタン → 確認（4枚を強調・打牌不可）→ やめる → もう一度 → 実行
+    let sc = await nrScene(page, { hand: ['180', '180', '180', 'sin', '30', '=1/2', 'cos', '60', '180'], rinshan: ['=1/2'] });
+    assert.deepEqual(sc.ankan.length, 1, '暗カンの選択肢');
+    st = await nrState(page);
+    assert.equal(st.kanBtn, 1, '暗カンのボタン');
+    await page.locator('button[data-action="ankan"]').tap();
+    st = await nrState(page);
+    assert.equal(st.kanOk, 4, '槓子にする4枚を強調'); assert.equal(st.tap, 0, '確認中は打牌できない'); assert.equal(st.kanType, 1);
+    assert.match(st.status, /暗カン/); assert.equal(st.melds[0].length, 0, 'まだ実行しない');
+    await page.locator('.hand .tile').first().tap(); await page.locator('.hand .tile').first().tap();
+    assert.equal((await nrState(page)).events.filter((e) => e === 'discard').length, 0, '確認中の牌のタップでは打牌しない');
+    await page.locator('button[data-action="ankan-cancel"]').tap();
+    st = await nrState(page);
+    assert.equal(st.kanBtn, 1); assert.ok(st.tap > 0, 'やめると打牌に戻る');
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/nr-kanbtn-${width}.png` });
+    await page.locator('button[data-action="ankan"]').tap();
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/nr-kansel-${width}.png` });
+    const before = st;
+    await page.locator('button[data-action="ankan-type"]').tap();
+    st = await nrState(page);
+    // 記録の順：暗カン → 嶺上ツモ → カンドラ。槓子4枚・門前のまま・嶺上牌の印・ドラ表示2枚・通常ツモ回数は不変
+    assert.deepEqual(st.events.slice(-3), ['ankan', 'rinshan', 'dora']);
+    assert.deepEqual(st.melds[0], [{ call: 'ankan', n: 4 }]);
+    assert.equal(st.hand, 6, '手牌 9→5→嶺上で6枚');
+    assert.ok(st.closed && /門前/.test(await page.locator('.me-board .seat-tag').innerHTML()), '門前のまま');
+    assert.deepEqual(st.myMelds.map((x) => [/ankan/.test(x.cls), x.n]), [[true, 4]], '槓子を4枚で表示');
+    assert.equal(st.rinshan, 1, '嶺上牌の印'); assert.match(st.status, /嶺上ツモ/);
+    assert.equal(st.shownInd.length, 2); assert.equal(st.shownDora.length, 2); assert.equal(await page.locator('.dora-box .tile.dora-new').count(), 2, '増えた1枚（表示牌とドラ）を示す');
+    assert.deepEqual(st.draws, before.draws, '嶺上ツモは通常ツモに数えない');
+    // 3) 嶺上ツモで和了（槓子＋数式2組、門前）→ 結果にドラの枚数・加点・合計
+    assert.ok(st.pending.canTsumo, '嶺上ツモ和了');
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/nr-rinshan-${width}.png` });
+    await page.locator('button[data-action="tsumo"]').tap();
+    await page.locator('.overlay .result').waitFor();
+    const res = await page.evaluate(() => { const r = window.__mathjong.S.game.result; return { points: r.points, dora: r.analysis.doraBonus, base: r.analysis.points - r.analysis.doraBonus }; });
+    const text = await page.locator('.overlay .result').innerText();
+    assert.match(text, new RegExp(`ドラ ${res.dora}枚（役ではありません）\\s*\\+${res.dora}`), 'ドラの枚数と加点');
+    assert.match(text, new RegExp(`合計\\s*${res.points}点`)); assert.match(text, /暗カン/, '槓子の印');
+    assert.equal(await page.locator('.overlay .formulas li').count(), 3);
+    assert.equal(await page.locator('.overlay .formulas .tag-kan').count(), 1);
+    assert.equal(await page.locator('.overlay .formulas li').first().locator('.tile').count() + 0 >= 3, true);
+    assert.match(text, /ドラ表示牌[\s\S]*ドラ/);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/nr-result-${width}.png` });
+    assert.equal((await page.evaluate(() => window.__mathjong.S.scores.reduce((a, b) => a + b, 0))), 400, '合計400点');
+    // 4) 暗カン後のリーチ：嶺上牌で聴牌になる打牌がある → リーチ → 宣言牌 → 成立
+    await nrScene(page, { hand: ['180', '180', '180', 'sin', '30', '=1/2', 'cos', '60', '180'], rinshan: ['=-1'] });
+    await page.locator('button[data-action="ankan"]').tap();
+    await page.locator('button[data-action="ankan-type"]').tap();
+    await page.locator('button[data-action="riichi"]').tap();
+    await page.locator('.hand .tile.riichi-ok').first().tap();
+    await page.locator('button[data-action="riichi-discard"]').tap();
+    st = await nrState(page);
+    assert.ok(await page.evaluate(() => !!window.__mathjong.S.game.riichi[0]), '暗カン後のリーチ');
+    // 5) 制限：リーチ中は暗カンなし（4枚そろってもボタンなし・エンジンも拒否）
+    const rr = await page.evaluate(() => {
+      const m = window.__mathjong, g = m.S.game;
+      for (let i = 0; i < 200 && g.pending() && !(g.pending().seat === 0 && g.pending().type === 'turn'); i++) {
+        const p = g.pending();
+        if (p.type === 'claim') g.respond(p.seat, { type: 'pass' }); else g.discard(p.seat, g.drawn);
+      }
+      if (!g.pending()) return null;
+      // リーチ中のツモ牌と同じ種類を手牌に4枚そろえる（山との交換だけ）
+      const t = g.typeOf(g.drawn), hand = g.hands[0], pool = g.wall.filter((id) => g.typeOf(id) === t);
+      const others = hand.filter((id) => g.typeOf(id) !== t);
+      for (let k = hand.filter((id) => g.typeOf(id) === t).length, j = 0; k < 4 && pool[j] !== undefined; k++, j++) { const a = others[j], b = pool[j]; hand[hand.indexOf(a)] = b; g.wall[g.wall.indexOf(b)] = a; }
+      g._riichiMemo = null; g.checkInvariants();
+      m.render();
+      return { opts: g.ankanOptions(0).length, btn: document.querySelectorAll('button[data-action="ankan"]').length, four: hand.filter((id) => g.typeOf(id) === t).length >= 4 || pool.length < 3 };
+    });
+    assert.ok(rr, 'リーチ後の自分の手番'); assert.deepEqual(rr, { opts: 0, btn: 0, four: true }, 'リーチ中は4枚そろっても暗カンなし');
+    // 6) 不正な暗カン（手牌にない種類）を画面から送ってもエンジンが拒否し、局面は変わらない
+    await nrScene(page, { hand: ['180', '180', '180', 'sin', '30', '=1/2', 'cos', '60', '180'] });
+    await page.locator('button[data-action="ankan"]').tap();
+    const bad = await page.evaluate(() => {
+      const m = window.__mathjong, g = m.S.game, ev = g.events.length, f = m.S.input.failed;
+      const b = document.querySelector('button[data-action="ankan-type"]');
+      b.dataset.type = String(m.rules.typeByKey.get('f:tan').idx);
+      b.click();
+      return { failed: m.S.input.failed - f, events: g.events.length - ev, melds: g.melds[0].length, select: m.S.ankanSelect };
+    });
+    assert.deepEqual(bad, { failed: 1, events: 0, melds: 0, select: false }, '不正な暗カンは拒否');
+    // 拒否はエンジンの例外を画面が記録したもの（console.error）。この1件だけを期待どおりとして除く
+    const rejected = errors.filter((e) => /ankan not possible/.test(e));
+    assert.equal(rejected.length, 1);
+    errors.splice(0, errors.length, ...errors.filter((e) => !/ankan not possible/.test(e)));
+    // 7) チー直後は暗カンなし（4枚あっても）
+    const chi = await page.evaluate(() => {
+      const m = window.__mathjong, g = m.S.game;
+      // 自分の手番を一巡させ、上家の打牌でチーできる局面を探す
+      for (let i = 0; i < 400 && g.pending(); i++) {
+        const p = g.pending();
+        if (p.type === 'claim') { if (p.seat === 0 && p.chi.length) { g.respond(0, { type: 'chi', option: 0 }); break; } g.respond(p.seat, { type: 'pass' }); }
+        else g.discard(p.seat, g.drawn ?? g.hands[p.seat].at(-1));
+      }
+      const p = g.pending();
+      if (!p || p.seat !== 0 || p.type !== 'turn' || g.justDrew) return null;
+      m.render();
+      return { opts: p.ankan.length, btn: document.querySelectorAll('button[data-action="ankan"]').length, status: document.querySelector('.bar .status').textContent };
+    });
+    assert.ok(chi, 'チー直後の局面'); { assert.equal(chi.opts, 0); assert.equal(chi.btn, 0, 'チー直後は暗カンなし'); assert.match(chi.status, /チー後/); }
+    // 8) AI の暗カン：他家の槓子4枚・ドラ表示2枚・案内。その後 AI が打牌して自分の番へ（公開情報だけで進む）
+    await nrScene(page, {});
+    const ai = await page.evaluate(() => {
+      const m = window.__mathjong, g = m.S.game;
+      g.discard(0, g.drawn);
+      while (g.pending() && g.pending().type === 'claim') g.respond(g.pending().seat, { type: 'pass' });
+      // 下家（席1）の手牌に4枚そろえる（山との交換だけ）
+      const hand = g.hands[1], t = g.typeOf(hand[0]);
+      const pool = g.wall.filter((id) => g.typeOf(id) === t);
+      const others = hand.filter((id) => g.typeOf(id) !== t && id !== g.drawn);
+      for (let k = hand.filter((id) => g.typeOf(id) === t).length, j = 0; k < 4; k++, j++) { const a = others[j], b = pool[j]; hand[hand.indexOf(a)] = b; g.wall[g.wall.indexOf(b)] = a; }
+      g._riichiMemo = null;
+      g.ankan(1, t); g.checkInvariants(); m.render();
+      const block = document.querySelector('.panel.seat-1 .rb-melds-block').getBoundingClientRect();
+      const tiles = [...document.querySelectorAll('.panel.seat-1 .meld.ankan .tile')].map((e) => e.getBoundingClientRect());
+      return { n: tiles.length, inside: tiles.every((b) => b.top >= block.top - 1 && b.bottom <= block.bottom + 1), status: document.querySelector('.bar .status').textContent, ind: document.querySelectorAll('.dora-box .dr-ind .tile').length };
+    });
+    assert.equal(ai.n, 4); assert.ok(ai.inside, '他家の槓子は面子の枠の中'); assert.match(ai.status, /暗カン → 嶺上ツモ/); assert.equal(ai.ind, 2);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/nr-aikan-${width}.png` });
+    await page.evaluate(() => window.__mathjong.step(true));
+    await page.waitForFunction(() => { const p = window.__mathjong.S.game.pending(); return !p || p.seat === 0; }, null, { timeout: 15000 });
+    await invariants(page);
+    // 9) ヒント：槓子を公開面子（刻子・うち暗カン）として数え、ドラは役ではない行で示す
+    await nrScene(page, { hand: ['180', '180', '180', 'sin', '30', '=1/2', 'cos', '60', '180'], rinshan: ['=-1'] });
+    await page.locator('button[data-action="ankan"]').tap();
+    await page.locator('button[data-action="ankan-type"]').tap();
+    await page.locator('button[data-action="hint"]').tap();
+    const hint = await page.locator('.study-dock-content').innerText();
+    assert.match(hint, /刻子 1組（うち暗カン1組・門前のまま）/); assert.match(hint, /ドラ：手牌・槓子に \d+枚（役ではありません/);
+    assert.doesNotMatch(await page.locator('.yaku-cands').innerText().catch(() => ''), /ドラ/, 'ドラは役候補に出さない');
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/nr-hint-${width}.png` });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // 10) 数学Ⅱ：残りツモ回数（親の最初のツモを含む）・24回で流局（山が残る）・鳴きで24枚を超える河
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  await page.goto(LOCAL + '?mode=math2&seed=7&speed=slow&newrules=1');
+  await page.locator('.hand .tile').first().waitFor();
+  assert.match(await page.locator('.board-center').innerText(), /ツモ残 23回/, '親の最初のツモを数える');
+  const cap = await page.evaluate(() => {
+    const m = window.__mathjong;
+    clearTimeout(m.S.timer); m.S.timer = null;
+    const old = m.S.game;
+    const g = new old.constructor({ rules: m.rules, seed: 7, dealer: 0, players: old.players, newRules: true });
+    const out = {};
+    for (let i = 0; i < 4000 && g.pending(); i++) {
+      const p = g.pending();
+      if (p.type === 'turn' && p.seat === 1 && (g.normalDraws[1] === 8 || g.normalDraws[1] === 14) && g.melds[0].length < 2) {
+        // 下家の打牌を自分がポンできるよう、自分の手牌に同じ種類を2枚（山との交換）
+        const t = g.typeOf(g.drawn), pool = g.wall.filter((id) => g.typeOf(id) === t);
+        const others = g.hands[0].filter((id) => g.typeOf(id) !== t);
+        for (let k = g.hands[0].filter((id) => g.typeOf(id) === t).length, j = 0; k < 2 && pool.length; k++, j++) { const a = others[j], b = pool.pop(); g.hands[0][g.hands[0].indexOf(a)] = b; g.wall[g.wall.indexOf(b)] = a; }
+        g._riichiMemo = null;
+      }
+      if (p.type === 'claim') { g.respond(p.seat, p.seat === 0 && p.pon && p.from === 1 && g.melds[0].length < 2 ? { type: 'pon' } : { type: 'pass' }); continue; }
+      if (p.seat === 0 && g.normalDraws[0] === 23 && !out.at23) { m.S.game = g; m.render(); out.at23 = document.querySelector('.board-center').innerText; }
+      g.discard(p.seat, g.drawn ?? g.hands[p.seat].at(-1));
+    }
+    g.checkInvariants();
+    m.S.game = g; m.S.scored = false; m.step();
+    out.draws = g.normalDraws.slice(); out.wall = g.wall.length; out.result = g.result.type; out.rivers = g.rivers.map((r) => r.length); out.melds = g.melds[0].length;
+    return out;
+  });
+  assert.match(cap.at23, /ツモ残 1回/);
+  assert.equal(cap.result, 'draw'); assert.ok(cap.wall > 0, '山が残っていても流局'); assert.ok(Math.max(...cap.draws) === 24);
+  assert.ok(cap.rivers[0] > 24 && cap.melds === 2, `鳴きで24枚を超える河 ${cap.rivers}`);
+  const text = await page.locator('.overlay .result').innerText();
+  assert.match(text, /通常ツモの上限（各24回）に達したため流局/);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/nr-capdraw.png` });
+  await page.locator('button[data-action="close-result"]').tap();
+  // 24枚を超える河も全物理IDを順に表示（6枚ごとの折り返し）
+  const rv = await page.evaluate(() => { const g = window.__mathjong.S.game; return { shown: [...document.querySelectorAll('.me-board .river .tile')].map((t) => Number(t.dataset.id)), want: g.rivers[0].map((r) => r.id), rows: [...document.querySelectorAll('.me-board .rv-row')].map((r) => r.children.length) }; });
+  assert.deepEqual(rv.shown, rv.want); assert.deepEqual(rv.rows.slice(0, 4), [6, 6, 6, 6]); assert.equal(rv.rows.length, 5);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/nr-river25.png` });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  console.log('✓ 新ルール⑤：ドラ表示（1→2・表示牌とドラ）・暗カン（確認・やめる・実行・不正は拒否・リーチ中/チー直後は不可）・槓子4枚・門前・嶺上ツモ和了・ドラ加点・暗カン後リーチ・AIの暗カン・ヒント・数学Ⅱ24回流局・25枚の河');
+}
+
+// 新ルールの通しプレイ：数学Ⅰ・Ⅱ、AI 難易度3つ（従来の ?ai=）。暗カンが出れば画面から実行する
+async function newRulesPlay(browser, stats = { rounds: 0, wins: [0, 0, 0, 0], draws: 0, tsumo: 0, ron: 0, ronDeclined: 0, chi: 0, chiPassed: 0, chiOverriddenByRon: 0, discards: 0, yaku: {} }) {
+  const runs = [[DEVICES[0], 'math1', 'beginner', 6101], [DEVICES[1], 'math2', 'intermediate', 6202], [DEVICES[3], 'math2', 'advanced', 6303], [DEVICES[2], 'math1', 'advanced', 6404]];
+  for (const [dev, mode, ai, seed] of runs) {
+    await playDevice(browser, dev, seed, 2, stats, { mode, newRules: true, ai });
+    console.log(`✓ ${dev.name}: 新ルール ${mode === 'math1' ? '数学Ⅰ' : '数学Ⅱ'}・${ai} 2局 完走（暗カン ${stats.ankan || 0}回）`);
+  }
+}
+
+// 新旧ルールの選択：既定は従来ルール。タイトル・設定で選び、新しい対局から反映。保存・再戦・再現URL・12人の選択
+async function v08NewRulesSelect(browser) {
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  await page.goto(LOCAL + '?speed=test');
+  // 既定：従来ルール（保存値なし）
+  assert.equal(await page.locator('input[data-action="title-ruleset"][value="legacy"]').isChecked(), true, '既定は従来ルール');
+  const startWith = async (ids) => {
+    await page.locator('button[data-action="choose-opponents"]').tap();
+    assert.equal(await page.locator('.opp-card').count(), 12, '12人から選べる');
+    for (const id of ids) await page.locator(`.opp-card[data-id="${id}"] .opp-check`).tap();
+    await page.locator('button[data-action="start-match"]').tap();
+    await page.locator('.hand .tile').first().waitFor();
+  };
+  const ids = await page.evaluate(() => [...document.querySelectorAll('[data-action="title-ruleset"]')].length);
+  assert.equal(ids, 2);
+  const all = await page.evaluate(async () => (await import('./src/ui/opponents.js')).OPPONENTS.map((o) => o.id));
+  await startWith(all.slice(0, 3));
+  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), false, '従来ルールで開始');
+  assert.equal(await page.locator('.dora-box').count(), 0); assert.equal(await page.locator('.bc-new').count(), 0);
+  // 設定で新ルールを選んでも、いまの局は変わらない。「新しい対局」から新ルール
+  await page.locator('button[data-action="settings"]').tap();
+  await page.locator('input[data-action="ruleset"][value="new"]').check();
+  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), false, 'いまの局は変わらない');
+  assert.match(await page.locator('.rule-note').innerText(), /新しい対局」で切り替わります/);
+  await page.locator('button[data-action="reset"]').tap();
+  await page.locator('.dora-box').waitFor();
+  assert.equal(await page.evaluate(() => window.__mathjong.S.matchSettings.newRules), true);
+  assert.match(await page.locator('.board-center').innerText(), /新ルール/);
+  // 再現情報：新ルールだけ newrules=1
+  await page.locator('button[data-action="settings"]').tap();
+  assert.match(await page.locator('.report-info').innerText(), /新ルール[\s\S]*newrules=1/);
+  await page.locator('button[data-action="close"]').tap();
+  // 試合終了 → 同じ3人と再戦：同じルール
+  await page.evaluate(() => { const m = window.__mathjong; m.S.match.over = true; m.S.modal = 'final'; m.render(); });
+  assert.match(await page.locator('.final').innerText(), /ルール：新ルール/);
+  await page.locator('button[data-action="again"]').tap();
+  await page.locator('.dora-box').waitFor();
+  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), true, '再戦は同じルール');
+  // タイトルへ：保存された選択（新ルール）が選ばれている。追加3人（12人の選択）で新ルールの対局を1局進める
+  await page.locator('button[data-action="settings"]').tap();
+  await page.locator('button[data-action="ask-title"]').tap();
+  await page.locator('button[data-action="to-title"]').tap();
+  await page.reload();
+  assert.equal(await page.locator('input[data-action="title-ruleset"][value="new"]').isChecked(), true, '選択を保存');
+  await page.locator('button[data-action="choose-opponents"]').tap();
+  const sel = await page.evaluate(() => window.__mathjong.S.opp.selected.length);
+  if (sel) for (const id of await page.evaluate(() => window.__mathjong.S.opp.selected.slice())) await page.locator(`.opp-card[data-id="${id}"] .opp-check`).tap();
+  await page.locator('button[data-action="to-title"]').tap();
+  await startWith(all.slice(-3));
+  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), true);
+  // 1局を最後まで：自分はツモ切り・ツモ和了・ロン、暗カンがあれば実行
+  for (let i = 0; i < 300; i++) {
+    await page.waitForSelector('.overlay .result, .actions:not(.waiting) button:not([disabled]), .hand .tile.tap', { timeout: 15000 });
+    await invariants(page);
+    if (await page.locator('.overlay .result').count()) break;
+    for (const a of ['tsumo', 'ron', 'ankan', 'ankan-type', 'pass']) { const b = page.locator(`button[data-action="${a}"]`); if (await b.count()) { await b.first().tap(); break; } }
+    const drawn = page.locator('.hand .tile.tap.drawn');
+    if (await drawn.count()) { await drawn.tap(); await drawn.tap(); }
+  }
+  await page.locator('.overlay .result').waitFor();
+  assert.equal(await page.evaluate(() => window.__mathjong.S.scores.reduce((a, b) => a + b, 0)), 400);
+  // 従来ルールに戻す（タイトル）→ 従来ルール
+  await page.locator('button[data-action="next"]').tap();
+  await page.locator('button[data-action="settings"]').tap();
+  await page.locator('input[data-action="ruleset"][value="legacy"]').check();
+  await page.locator('button[data-action="reset"]').tap();
+  await page.waitForFunction(() => window.__mathjong.S.game && !window.__mathjong.S.game.newRules);
+  assert.equal(await page.locator('.dora-box').count(), 0);
+  // 再現URL：newrules=1 は新ルール、ないURLは保存値が新ルールでも従来、不正値はエラー画面
+  await page.goto(LOCAL + '?seed=11&round=1&dealer=0&hand=0&renchan=0&len=4&mode=math2&newrules=1&speed=slow');
+  await page.locator('.dora-box').waitFor();
+  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), true);
+  await page.evaluate(() => localStorage.setItem('mj-rule-set', 'new'));
+  await page.goto(LOCAL + '?seed=11&round=1&dealer=0&hand=0&renchan=0&len=4&mode=math2&speed=slow');
+  await page.locator('.hand .tile').first().waitFor();
+  assert.equal(await page.evaluate(() => window.__mathjong.S.game.newRules), false, 'newrules のない再現URLは従来ルール');
+  await page.goto(LOCAL + '?seed=11&newrules=yes');
+  assert.match(await page.locator('.replay-error').innerText(), /newrules/);
+  // 数学Ⅰも新ルールで開始できる
+  await page.goto(LOCAL + '?seed=12&mode=math1&newrules=1&speed=slow');
+  await page.locator('.dora-box').waitFor();
+  assert.equal(await page.locator('.bc-draws').count(), 0, '数学Ⅰは回数の上限なし（表示なし）');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  console.log('✓ 新旧ルールの選択：既定は従来・設定は次の対局から・保存・再戦は同じルール・再現URL（newrules=1 だけ新ルール、不正値はエラー）・12人から選択・新ルールで1局完走');
+}
+
+// 新ルールの画面：スマホ縦・横・320px・タブレット・PC で、ドラ表示と操作バー・ヒント・河・中央・名札が重ならない
+async function v08NewRulesLayout(browser) {
+  const sizes = [[320, 568], [375, 667], [390, 844], [667, 375], [844, 390], [768, 1024], [1180, 820], [1440, 900]];
+  for (const [width, height] of sizes) {
+    const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?mode=math2&seed=7&speed=slow&newrules=1');
+    await page.locator('.hand .tile').first().waitFor();
+    for (const kans of [0, 4]) {
+      const st = await page.evaluate((kans) => {
+        const m = window.__mathjong;
+        clearTimeout(m.S.timer); m.S.timer = null; m.fx.clear();
+        const old = m.S.game;
+        const g = new old.constructor({ rules: m.rules, seed: 7, dealer: 0, players: old.players, newRules: true });
+        const made = () => g.melds.flat().filter((x) => x.call === 'ankan').length;
+        for (let i = 0; i < 2000 && g.pending(); i++) {
+          const p = g.pending();
+          if (made() >= kans && p.seat === 0 && p.type === 'turn' && g.rivers[0].length >= 5) break;
+          if (p.type === 'claim') { g.respond(p.seat, { type: 'pass' }); continue; }
+          if (made() < kans && !g.melds[p.seat].length && g.normalDraws[p.seat] >= 2) {
+            const hand = g.hands[p.seat];
+            for (const t of hand.map((id) => g.typeOf(id))) {
+              const have = hand.filter((id) => g.typeOf(id) === t), pool = g.wall.filter((id) => g.typeOf(id) === t);
+              if (have.length + pool.length < 4) continue;
+              const others = hand.filter((id) => g.typeOf(id) !== t && id !== g.drawn);
+              for (let j = 0; j < 4 - have.length; j++) { const a = others[j], b = pool[j]; hand[hand.indexOf(a)] = b; g.wall[g.wall.indexOf(b)] = a; }
+              g._riichiMemo = null;
+              if (g.ankanOptions(p.seat).some((o) => o.type === t)) { g.ankan(p.seat, t); break; }
+            }
+            if (g.pending() && g.pending().seat === p.seat && g.justDrew && g.events.at(-1).type === 'dora') continue;
+          }
+          g.discard(p.seat, g.drawn ?? g.hands[p.seat].at(-1));
+        }
+        g.checkInvariants(); m.S.game = g; m.render();
+        return { kans: made(), dora: g.doraIndicators.length };
+      }, kans);
+      assert.equal(st.kans, kans); assert.equal(st.dora, 1 + kans);
+      const d = await page.evaluate(() => {
+        const box = (e) => { const b = e.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom }; };
+        const q = (s) => [...document.querySelectorAll(s)].map(box);
+        return { dora: box(document.querySelector('.dora-box')), table: box(document.querySelector('.mj-table')), bar: box(document.querySelector('footer.bar')), dock: box(document.querySelector('.study-dock')),
+          hand: box(document.querySelector('.self')), center: box(document.querySelector('.board-center')), tags: q('.seat-tag'), river: q('.river .tile'), melds: q('.mj-melds .meld .tile'),
+          overflow: document.documentElement.scrollWidth - innerWidth, inds: document.querySelectorAll('.dora-box .dr-ind .tile').length };
+      });
+      const label = `${width}x${height} 暗カン${kans}`;
+      assert.equal(d.inds, 1 + kans, label);
+      assert.ok(d.overflow <= 1, '横スクロールなし ' + label);
+      assert.ok(d.dora.left >= d.table.left - 1 && d.dora.right <= d.table.right + 1 && d.dora.top >= d.table.top - 1 && d.dora.bottom <= d.table.bottom + 1, 'ドラ表示は卓の中 ' + label);
+      for (const [name, b] of [['操作バー', d.bar], ['ヒント', d.dock], ['手牌', d.hand], ['中央', d.center], ...d.tags.map((t) => ['名札', t]), ...d.river.map((t) => ['河', t]), ...d.melds.map((t) => ['面子', t])]) {
+        assert.ok(!mjOverlap(d.dora, b), `ドラ表示と${name}が重ならない ` + label);
+      }
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/nr-layout-${width}x${height}-kan${kans}.png` });
+    }
+    // 暗カンの確認の段階でも操作バーは画面内
+    await page.evaluate(() => window.__mathjong.render());
+    const bar = await page.locator('.bar').boundingBox();
+    assert.ok(bar.y + bar.height <= height + 0.5, `操作バーが画面内 ${width}x${height}`);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 新ルールの画面：8画面（320・375・390縦、667・844横、iPad縦、タブレット横、PC）×暗カン0/4回で、ドラ表示は卓の中・操作バー/ヒント/手牌/中央/名札/河/面子と重ならない・横スクロールなし');
+}
+
 // 公開モードではサーバーも転送先も作らない。接続失敗をローカル成功で隠さない。
 const server = EXTERNAL ? null : await startServer(0, { base: BASE, host: '127.0.0.1' });
 if (server) {
@@ -6876,7 +7294,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesSelect, v08NewRulesLayout, newRulesPlay };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -6930,6 +7348,10 @@ try {
   await v07BeginnerRoom2(browser);
   await v07TableHintDock(browser);
   await v07MahjongTable(browser);
+  await v08NewRulesTable(browser);
+  await v08NewRulesSelect(browser);
+  await v08NewRulesLayout(browser);
+  await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
   for (const [i, dev] of DEVICES.entries()) {
     const rounds = i === 0 ? ROUNDS : Math.max(2, Math.ceil(ROUNDS / 2));

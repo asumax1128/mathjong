@@ -58,6 +58,11 @@ function rulesForMode(mode) {
   return rulesCache[key] || (rulesCache[key] = createRules(LEGACY ? makeConfig({ legacy: true }) : makeConfig({ mode })));
 }
 const modeLabel = (r) => (MODES[r.config.mode] ? MODES[r.config.mode].label : '旧規則');
+// 新ルール⑤（docs/61）：王牌・ドラ・暗カン・数学Ⅱ通常ツモ24回。既定は従来ルール。保存キー mj-rule-set（'new' のときだけ新ルール）。
+// 試合の開始時に S.matchSettings.newRules として確定し、試合の途中では変えない。旧規則（?rules=legacy）では使わない。
+const RULESET_KEY = 'mj-rule-set';
+const parseRuleSet = (v) => v === 'new';
+const RULESET_LABEL = (on) => (on ? '新ルール' : '従来ルール');
 const HUMAN = 0;
 const POS = ['自分', '下家', '対面', '上家'];
 let PLAYERS = [
@@ -112,6 +117,8 @@ const voice = createVoicePlayer({ sound, isOn: () => S.voice.on });
 // 対局中のモード（S.mode）と、次の新しい対局で使うモード（S.nextMode）
 S.mode = parseMode(params.get('mode')) || parseMode(store.get(MODE_KEY, null)) || DEFAULT_MODE;
 S.nextMode = S.mode;
+// 次の新しい対局のルール（再現 URL では URL の指定。newrules がない URL は従来ルール）
+S.nextNewRules = REPLAY.kind !== 'none' && REPLAY.ok ? RV.newRules : parseRuleSet(store.get(RULESET_KEY, null));
 let rules = rulesForMode(S.mode);
 // 対局設定（タイトル画面で選び、「対局開始」で確定）。保存キー mj-mode・mj-length・mj-ai
 S.length = REPLAY.kind !== 'none' && REPLAY.ok && RV.lenGiven ? RV.len : savedLen;
@@ -151,7 +158,8 @@ function startRound() {
   const seed = S.seedBase + S.round * 7919;
   const presetWall = IS_LOCAL ? S.nextPresetWall || null : null; // テスト用：山の並びを指定（ローカルのみ）
   S.nextPresetWall = null;
-  S.game = new Game({ rules, seed, dealer: S.dealer, players: PLAYERS, round: S.round, presetWall });
+  const newRules = !!(S.matchSettings && S.matchSettings.newRules); // 試合の開始時に確定したルール
+  S.game = new Game({ rules, seed, dealer: S.dealer, players: PLAYERS, round: S.round, presetWall, newRules });
   S.aiRng = createRng(seed ^ 0x5bd1e995);
   warmUp(rules); // 役候補ヒント用の評価を少しずつ事前計算（判定・進行には影響しない）
   S.selected = null;
@@ -165,6 +173,7 @@ function startRound() {
   S.scored = false;
   S.claimPolicy = null; // 宣言ごとの表示方針（局ごとに初期化）
   S.riichiSelect = false; // リーチの宣言牌を選んでいる途中か（局ごとに初期化）
+  S.ankanSelect = false; // 暗カンの確認の段階か（新ルール。局ごとに初期化）
   fxClear(); // 前の局の演出を残さない
   sound.silence(); // 前の局の効果音の残りも止める
   S.autoPass.noticePending = false;
@@ -300,6 +309,7 @@ function humanAct(action) {
   S.input.accepted++;
   S.selected = null;
   S.riichiSelect = false;
+  S.ankanSelect = false;
   render();
   step();
 }
@@ -516,11 +526,14 @@ function fxApply() {
 
 // ---------- 描画 ----------
 
+const CALL_NAME = { chi: 'チー', pon: 'ポン', ankan: '暗カン' };
 function meldsHTML(seat, size) {
   const g = S.game;
   return g.melds[seat].map((m) => {
     const tiles = m.tiles.map((id) => tileHTML(T(g.typeOf(id)), { size, cls: id === m.claimed ? 'claimed' : '' })).join('');
-    return `<span class="meld ${m.call === 'pon' ? 'pon' : 'chi'}" data-claimed="${m.claimed}" title="${m.call === 'pon' ? 'ポン' : 'チー'}">${tiles}</span>`;
+    // 暗カン（新ルール）：同じ牌4枚の槓子。鳴きではない（門前のまま）
+    const call = m.call === 'ankan' ? 'ankan' : m.call === 'pon' ? 'pon' : 'chi';
+    return `<span class="meld ${call}" data-claimed="${m.claimed}" title="${CALL_NAME[call]}">${tiles}</span>`;
   }).join('');
 }
 
@@ -546,7 +559,8 @@ function seatTagHTML(seat) {
   const name = me ? 'あなた' : PLAYERS[seat].name;
   // 鳴き：鳴いた手は役が必要（自分は門前も示す）。リーチは点棒の形で示す（文字は読み上げ用）。
   const state = !g.isClosed(seat) ? '<span class="naki" title="鳴き（役が必要）">鳴</span>' : me ? '<span class="menzen">門前</span>' : '';
-  return `<div class="seat-tag tag-${SEAT_AREA[seat]} seat-${seat}" title="${POS[seat]} ${name} ${S.scores[seat]}点">
+  const left = drawsLeft(seat);
+  return `<div class="seat-tag tag-${SEAT_AREA[seat]} seat-${seat}" title="${POS[seat]} ${name} ${S.scores[seat]}点${left === null ? '' : ` 残りツモ${left}回`}"${left === null ? '' : ` data-draws-left="${left}"`}>
     <span class="pos">${me ? '自分' : POS[seat]}</span><span class="name">${name}</span><span class="score">${S.scores[seat]}<small>点</small></span>${g.dealer === seat ? '<span class="oya">親</span>' : ''}${g.riichi[seat] ? '<span class="riichi-badge" title="リーチ"><span class="sr">リーチ</span></span>' : ''}${state}
   </div>`;
 }
@@ -560,12 +574,13 @@ function opponentHTML(seat, sh) {
   const rows = riverRows(seat).length;
   const m = g.melds[seat].length;
   const melds = m ? `<span class="melds">${meldsHTML(seat, 'xs')}</span>` : '';
+  const kan = g.melds[seat].some((x) => x.call === 'ankan'); // 槓子は4枚（まとまりの幅を4枚分に）
   const len = seat === 1 ? sh.lenRight : seat === 3 ? sh.lenLeft : 6;
   // 席の要素（display: contents）の子を卓のグリッドへ配置する
   return `<section class="panel seat-${seat} pos-${a}${active ? ' active' : ''}" data-seat="${seat}" aria-label="${POS[seat]} ${PLAYERS[seat].name}">
     ${seatTagHTML(seat)}
     <div class="mj-cell mj-hand hand-${a}">${rotHTML(seat, 'backs-block', backHTML(g.hands[seat].length))}</div>
-    <div class="mj-cell mj-melds melds-${a}">${melds ? rotHTML(seat, 'melds-block', melds, `--m:${m}`) : ''}</div>
+    <div class="mj-cell mj-melds melds-${a}">${melds ? rotHTML(seat, 'melds-block', melds, `--m:${m}${kan ? ';--mt:4' : ''}`) : ''}</div>
     <div class="mj-cell mj-river river-${a}">${rotHTML(seat, 'river-block', `<div class="river" data-rows="${rows}">${riverHTML(seat, 'xs')}</div>`, `--len:${len}`)}</div>
   </section>`;
 }
@@ -576,17 +591,49 @@ function boardHTML() {
   return `<div class="board-wrap"><div class="mj-table" style="--tv-rows:${sh.top};--bv-rows:${sh.bottom};--lv:${sh.side}" aria-label="対局卓">
     <div class="mj-center" aria-hidden="true"></div>
     <div class="board-center" aria-label="現在の局情報">
-      <span class="bc-mode">${modeLabel(rules)}</span>
+      <span class="bc-mode">${modeLabel(rules)}${g.newRules ? '<span class="bc-new">新ルール</span>' : ''}</span>
       <b class="bc-round hand-label">${cur.label}</b>
       <span class="bc-state">${cur.renchan ? `連荘${cur.renchan}` : ''}</span>
       <span class="bc-wall">残り <strong>${g.wall.length}</strong>枚</span>
+      ${drawsLeft(HUMAN) === null ? '' : `<span class="bc-draws${drawsLeft(HUMAN) <= 3 ? ' low' : ''}" title="数学Ⅱ（新ルール）：自分の通常ツモはあと${drawsLeft(HUMAN)}回（各24回まで。鳴き・嶺上ツモは数えない）">ツモ残 <strong>${drawsLeft(HUMAN)}</strong>回</span>`}
     </div>
+    ${doraHTML()}
     ${[2, 3, 1].map((seat) => opponentHTML(seat, sh)).join('')}
     <section class="me-board seat-0 pos-me${g.pending() && g.pending().seat === HUMAN && g.pending().type === 'turn' ? ' active' : ''}" data-seat="0" aria-label="自分の河">
       ${seatTagHTML(HUMAN)}
       <div class="mj-cell mj-river river-me">${rotHTML(HUMAN, 'river-block', `<div class="river mine" data-rows="${riverRows(HUMAN).length}">${riverHTML(HUMAN, 'xs')}</div>`)}</div>
     </section>
   </div></div>`;
+}
+
+// 新ルール⑤：数学Ⅱの残り通常ツモ回数（24回まで。親の最初のツモを含み、鳴き・嶺上ツモでは減らない）。対象外なら null
+const DRAW_CAP = 24;
+function drawsLeft(seat) {
+  const g = S.game;
+  if (!g || !g.newRules || rules.config.mode !== 'math2') return null;
+  return Math.max(0, DRAW_CAP - g.normalDraws[seat]);
+}
+// 直前の暗カンの記録（暗カン → 嶺上ツモ → カンドラ）。その後に通常のツモがあれば null（次の人の手番に移った）
+function recentKan() {
+  const g = S.game;
+  for (let i = g.events.length - 1; i >= 0; i--) {
+    const t = g.events[i].type;
+    if (t === 'draw') return null;
+    if (t === 'ankan') return { seat: g.events[i].seat, index: i };
+  }
+  return null;
+}
+// 新ルール⑤：ドラ表示（卓の右下の角）。公開されたドラ表示牌と、それによるドラの種類だけ（王牌の他の牌は出さない）。
+function doraHTML() {
+  const g = S.game;
+  if (!g.newRules) return '';
+  const view = g.viewFor(HUMAN).doraIndicators; // 公開情報だけ（表示牌の種類とドラの種類）
+  const fresh = recentKan() ? view.length - 1 : -1; // 直前の暗カンで増えた1枚
+  const row = (cls, label, list) => `<div class="dr-row ${cls}"><span class="dr-l">${label}</span><span class="dr-tiles">${list.join('')}</span></div>`;
+  return `<div class="dora-box" aria-label="ドラ表示牌${view.length}枚（最大5枚）" data-count="${view.length}">
+    ${row('dr-ind', '表示牌', view.map((d, i) => tileHTML(T(d.type), { size: 'xs', cls: i === fresh ? 'dora-new' : '', attrs: `data-ind="${i}"` })))}
+    ${row('dr-dora', 'ドラ', view.map((d, i) => tileHTML(T(d.doraType), { size: 'xs', cls: i === fresh ? 'dora-new' : '', attrs: `data-dora="${i}"` })))}
+  </div>`;
 }
 
 // 手牌の表示順（画面だけの状態）をエンジンの手牌と突き合わせて返す。エンジンには反映しない。
@@ -618,13 +665,17 @@ function handHTML() {
   };
   // リーチ中はツモ牌だけ、リーチの宣言牌を選んでいる間は聴牌になる牌だけを選べる（エンジンも同じ条件で拒否する）
   const allowed = humanDiscardFilter();
+  // 暗カンの確認の段階：槓子にできる4枚を強調（打牌はできない）。嶺上ツモの牌は区別する
+  const kanIds = S.ankanSelect && myTurn ? new Set((p.ankan || []).flatMap((o) => o.ids)) : null;
+  const rinshan = myTurn && drawn !== null && (recentKan() || {}).seat === HUMAN;
   const tile = (id) => {
     const ok = myTurn && allowed(id);
+    const kan = kanIds && kanIds.has(id);
     return tileHTML(T(g.typeOf(id)), {
       size: 'l', id,
-      cls: [ok ? 'tap' : '', myTurn && !ok ? 'locked' : '', S.selected === id ? 'selected' : '', frame(id),
-        S.riichiSelect && ok ? 'riichi-ok' : '',
-        id === drawn ? (drawnAtEnd ? 'drawn' : 'drawn drawn-mark') : ''].join(' '),
+      cls: [ok ? 'tap' : '', myTurn && !ok && !kan ? 'locked' : '', S.selected === id ? 'selected' : '', frame(id),
+        S.riichiSelect && ok ? 'riichi-ok' : '', kan ? 'kan-ok' : '',
+        id === drawn ? `${drawnAtEnd ? 'drawn' : 'drawn drawn-mark'}${rinshan ? ' rinshan' : ''}` : ''].join(' '),
       attrs: ok ? `data-action="tile" tabindex="0"` : '',
     });
   };
@@ -646,6 +697,7 @@ function autoPassToggleHTML(kind) {
 // 自分の打牌番で、いま捨てられる牌の条件（リーチ中はツモ牌だけ、宣言牌の選択中は聴牌になる種類だけ）
 function humanDiscardFilter() {
   const g = S.game;
+  if (S.ankanSelect) return () => false; // 暗カンの確認中は打牌しない（「やめる」で戻る）
   if (g.riichi[HUMAN]) return (id) => id === g.drawn;
   if (S.riichiSelect) {
     const types = new Set(g.riichiOptions(HUMAN).map((o) => o.type));
@@ -669,7 +721,10 @@ function actionsHTML() {
   const p = g.pending();
   if (!p) return `<div class="actions"><button data-action="show-result" class="primary">結果を見る</button></div>`;
   if (p.seat !== HUMAN) {
-    const what = p.type === 'turn' ? `${nameOf(p.seat)} の手番…` : `${nameOf(p.seat)} が考え中…`;
+    const kan = p.type === 'turn' ? recentKan() : null;
+    // AI の暗カン：記録の順（暗カン → 嶺上ツモ → カンドラ）で、その AI の打牌までの間だけ示す
+    const what = kan && kan.seat === p.seat ? `${nameOf(p.seat)} 暗カン → 嶺上ツモ（カンドラ追加）…`
+      : p.type === 'turn' ? `${nameOf(p.seat)} の手番…` : `${nameOf(p.seat)} が考え中…`;
     return `<div class="actions waiting"><span class="status">${what}</span></div>`;
   }
   if (p.type === 'turn' && g.riichi[HUMAN]) {
@@ -692,17 +747,31 @@ function actionsHTML() {
       <button data-action="riichi-discard" class="primary riichi" ${ok ? '' : 'disabled'}>リーチして捨てる</button>
     </div>`;
   }
+  if (p.type === 'turn' && S.ankanSelect && p.ankan && p.ankan.length) {
+    // 暗カンの確認：槓子にする種類を牌で示し、そのボタンで実行する（誤操作を防ぐため1段階はさむ）
+    const kinds = p.ankan.map((o) => `<button data-action="ankan-type" data-type="${o.type}" class="kan kan-type" aria-label="${T(o.type).kind === 'func' ? T(o.type).fn : ''}の暗カンを実行">暗カン ${tileHTML(T(o.type), { size: 's' })}<small>×4</small></button>`).join('');
+    return `<div class="actions">
+      <span class="status kan-status">暗カン：槓子にする牌を確認${p.ankan.length > 1 ? '（種類を選択）' : ''}</span>
+      <button data-action="ankan-cancel">やめる</button>
+      ${kinds}
+    </div>`;
+  }
   if (p.type === 'turn') {
     const tsumo = p.canTsumo ? '<button data-action="tsumo" class="win">ツモ</button>' : '';
     const riichiBtn = g.riichiOptions(HUMAN).length ? '<button data-action="riichi" class="riichi">リーチ</button>' : '';
+    // 暗カン（新ルール）：エンジンが選択肢を出したときだけ（ツモ直後・リーチ前・嶺上牌と山の残り・槓子の上限）
+    const kanBtn = p.ankan && p.ankan.length ? '<button data-action="ankan" class="kan">暗カン</button>' : '';
+    const kan = recentKan();
+    const afterKan = kan && kan.seat === HUMAN && g.justDrew;
     const sel = S.selected !== null;
     // チー・ポンを自動で見送った後の最初の手番だけ、通常の案内の代わりに通知を出す（状態欄の大きさは変えない）
     const notice = S.autoPass.noticeKey === stateKey() ? autoPassNotice(S.autoPass.shownKind) : null;
-    const text = p.canTsumo ? (notice ? `${notice}・和了できます！` : '和了できます！')
+    const text = afterKan ? (p.canTsumo ? '暗カン → 嶺上ツモ：和了できます！' : '暗カン → 嶺上ツモ：捨てる牌を選択')
+      : p.canTsumo ? (notice ? `${notice}・和了できます！` : '和了できます！')
       : notice || (g.justDrew ? 'あなたの番：捨てる牌を選択' : `${lastCallName(g)}後：捨てる牌を選択`);
     return `<div class="actions">
-      <span class="status${notice ? ' autopass-notice' : ''}">${text}</span>
-      ${tsumo}${riichiBtn}
+      <span class="status${notice && !afterKan ? ' autopass-notice' : ''}${afterKan ? ' kan-status' : ''}">${text}</span>
+      ${tsumo}${riichiBtn}${kanBtn}
       <button data-action="discard" class="primary" ${sel ? '' : 'disabled'}>捨てる</button>
     </div>`;
   }
@@ -825,8 +894,10 @@ function resultHTML() {
       const calls = g.melds[r.winner];
       detail = `<ol class="formulas">${a.melds.map((mi, i) => {
         const m = rules.melds[mi];
-        const tiles = m.tiles.map((t) => tileHTML(T(t), { size: 's' })).join('');
-        const tag = i < a.exposedMelds.length ? `<span class="tag">${calls[i] && calls[i].call === 'pon' ? 'ポン' : 'チー'}</span>` : '';
+        const call = i < a.exposedMelds.length && calls[i] ? calls[i].call : null;
+        // 暗カン（新ルール）は槓子の4枚をそのまま表示する
+        const tiles = (call === 'ankan' ? calls[i].tiles.map((id) => g.typeOf(id)) : m.tiles).map((t) => tileHTML(T(t), { size: 's' })).join('');
+        const tag = call ? `<span class="tag${call === 'ankan' ? ' tag-kan' : ''}">${CALL_NAME[call === 'ankan' || call === 'pon' ? call : 'chi']}</span>` : '';
         return `<li class="${m.kind}"><span class="tiles">${tiles}</span>${formulaHTML(rules, mi)}${tag}</li>`;
       }).join('')}</ol>`;
     }
@@ -834,13 +905,21 @@ function resultHTML() {
     const yaku = a.yaku.map((y) => `<li class="${y.yakuman ? 'yakuman' : ''}"><span>${y.name}${y.yakuman ? '（役満）' : ''}</span><b>${a.yakuman ? '' : '+'}${y.points}</b></li>`).join('');
     // リーチの加点は yaku に含まれる（エンジンが追加）。役満では加点しないことを明示する
     const riichiNote = a.riichi && !a.riichiBonus ? '<li class="riichi-li"><span>リーチ（役満のため加点なし）</span><b>+0</b></li>' : '';
-    detail += `<ul class="yaku">${base}${yaku || (a.yakuman ? '' : '<li class="none"><span>役なし（門前のため和了可）</span><b></b></li>')}${riichiNote}
-      <li class="total"><span>合計</span><b>${r.points}点</b></li></ul>
+    // ドラ（新ルール）：役ではない。通常和了だけ1枚につき +1点。役満には加えない
+    const doraLi = !g.newRules ? '' : a.yakuman
+      ? '<li class="dora-li"><span>ドラ（役満のため加点なし）</span><b>+0</b></li>'
+      : `<li class="dora-li"><span>ドラ ${a.doraBonus || 0}枚（役ではありません）</span><b>+${a.doraBonus || 0}</b></li>`;
+    detail += `<ul class="yaku">${base}${yaku || (a.yakuman ? '' : '<li class="none"><span>役なし（門前のため和了可）</span><b></b></li>')}${riichiNote}${doraLi}
+      <li class="total"><span>合計</span><b>${r.points}点</b></li></ul>${doraResultHTML()}
       ${a.kind === 'normal' && a.melds.some((mi) => rules.melds[mi].kind === 'koutsu') && a.melds.some((mi) => rules.melds[mi].kind === 'formula') ? '<p class="note">数式面子と刻子の混合形：数式系の役は付きません（門前なら役なしで和了できます）。</p>' : ''}
       ${a.candidateCount > 1 ? `<p class="note">この手は${a.candidateCount}通りの和了形に分けられます。最高得点の形を採用しました。</p>` : ''}`;
   } else {
     head = '<h2>流局</h2>';
-    detail = '<p>山の牌がなくなりました。得点の移動はありません。</p>';
+    // 新ルールの数学Ⅱは、山が残っていても次の通常ツモが25回目になる時点で流局する
+    detail = g.newRules && rules.config.mode === 'math2' && g.wall.length > 0
+      ? `<p class="draw-reason">数学Ⅱの通常ツモの上限（各${DRAW_CAP}回）に達したため流局です（山の残り ${g.wall.length}枚）。得点の移動はありません。</p>`
+      : '<p class="draw-reason">山の牌がなくなりました。得点の移動はありません。</p>';
+    if (g.newRules) detail += doraResultHTML();
   }
   // 親子の精算（局前 → 増減 → 局後）と、次の局（連荘・親交代・試合終了）
   const prev = S.prevScores || S.scores;
@@ -868,6 +947,14 @@ function resultHTML() {
     <button data-action="close-result">盤面を見る</button></div></div>`;
 }
 
+// 結果画面のドラ表示（新ルール）：公開されたドラ表示牌とドラ
+function doraResultHTML() {
+  const g = S.game;
+  if (!g.newRules) return '';
+  const d = g.viewFor(HUMAN).doraIndicators;
+  return `<p class="note dora-result">ドラ表示牌 ${d.map((x) => tileHTML(T(x.type), { size: 's' })).join('')} → ドラ ${d.map((x) => tileHTML(T(x.doraType), { size: 's' })).join('')}（${d.length}枚）</p>`;
+}
+
 // 通し局数の上限で試合を終えた場合の説明（通常の試合終了では表示しない）
 const ROUND_LIMIT_NOTE = `通し局数の上限（${MAX_ROUND.toLocaleString('en-US')}局）に達したため、試合を終了しました。親の連荘もここで終了します。`;
 
@@ -888,6 +975,7 @@ function finalHTML() {
       <li>実施した局数：<b>${m.played}局</b>（${m.length === 4 ? '4局戦・東1〜東4局' : '8局戦・東1〜南4局'}）</li>
       <li>連荘回数：<b>${m.renchanTotal}回</b></li>
       <li>数学モード：${modeLabel(rules)}</li>
+      <li class="final-rules">ルール：${RULESET_LABEL(S.matchSettings.newRules)}</li>
       <li class="final-opps">対戦相手：${opponentsText()}</li>
       ${m.endReason === 'round-limit' ? `<li class="note round-limit-note">${ROUND_LIMIT_NOTE}</li>` : ''}
       <li class="note">開始時の持ち点は各${START_POINTS}点（合計${START_POINTS * 4}点）。同点は同順位。点数配分は試作段階の暫定値です。</li>
@@ -925,6 +1013,10 @@ function titleHTML() {
       <fieldset class="title-set"><legend>対局の長さ</legend>
         ${radio('length', '4', '4局戦', S.length === 4, '<small>東1〜東4局</small>')}
         ${radio('length', '8', '8局戦', S.length === 8, '<small>東1〜南4局</small>')}
+      </fieldset>
+      <fieldset class="title-set title-rules"><legend>ルール</legend>
+        ${radio('ruleset', 'legacy', '従来ルール', !S.nextNewRules, '<small>これまでの規則</small>')}
+        ${radio('ruleset', 'new', '新ルール', S.nextNewRules, '<small>ドラ・暗カンあり</small>')}
       </fieldset>
     </div>
     <button data-action="choose-opponents" class="primary start-btn">対戦相手を選ぶ</button>
@@ -965,7 +1057,7 @@ function selectHTML() {
       <button data-action="start-match" class="primary start-btn"${ready ? '' : ' disabled'}>対局開始</button>
       <button data-action="to-title" class="opp-back">タイトルへ戻る</button>
     </div>
-    <p class="note select-setting">${MODES[S.nextMode] ? MODES[S.nextMode].label : ''} ／ ${S.length}局戦</p>
+    <p class="note select-setting">${MODES[S.nextMode] ? MODES[S.nextMode].label : ''} ／ ${S.length}局戦 ／ ${RULESET_LABEL(S.nextNewRules)}</p>
     ${S.opp.detail ? oppDetailHTML(S.opp.detail) : ''}
   </main>`;
 }
@@ -1001,8 +1093,8 @@ function reportInfoHTML() {
   const m = S.match;
   const label = S.scored && S.lastRound ? S.lastRound : { label: handLabel(m), renchan: m.renchan };
   const hand = S.scored && S.lastRound ? m.log[m.log.length - 1].hand : m.hand;
-  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ ${label.label}・連荘${label.renchan}（通し第<b>${S.round}</b>局・親 ${POS[S.dealer]}）／ ${m.length}局戦 ／ ${modeLabel(rules)} ／ 対戦相手 ${opponentsText()}（ID ${S.matchSettings.seats.join(',')}）／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
-    この局から再現：URL の末尾に <code>${replayQuery({ seed: S.seedBase, round: S.round, dealer: S.dealer, hand, renchan: label.renchan, len: m.length, mode: LEGACY ? null : rules.config.mode, chars: S.matchSettings.seats }).replace(/&/g, '&amp;')}</code><br>
+  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ ${label.label}・連荘${label.renchan}（通し第<b>${S.round}</b>局・親 ${POS[S.dealer]}）／ ${m.length}局戦 ／ ${modeLabel(rules)}・${RULESET_LABEL(S.matchSettings.newRules)} ／ 対戦相手 ${opponentsText()}（ID ${S.matchSettings.seats.join(',')}）／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
+    この局から再現：URL の末尾に <code>${replayQuery({ seed: S.seedBase, round: S.round, dealer: S.dealer, hand, renchan: label.renchan, len: m.length, mode: LEGACY ? null : rules.config.mode, chars: S.matchSettings.seats, newRules: S.matchSettings.newRules }).replace(/&/g, '&amp;')}</code><br>
     <span class="report-caveat">このURLでは山・配牌・親・局状態を再現します。持ち点や過去の対局履歴は復元されず、全員100点から開始します。</span></p>`;
 }
 
@@ -1079,8 +1171,13 @@ function rulesHTML() {
     <li><b>チー</b>：上家の捨て牌で面子が完成するときのみ。面子は公開され、手牌から2枚減ります。チー後は役がないと和了できません。チーは最大2回。</li>
     <li><b>ロン</b>：他の3人の捨て牌で和了。ロンはチーより優先、複数ならアタマハネ（打牌者に近い人）。</li>
     <li><b>門前</b>（チーなし）なら役なしでも和了できます。</li>${common}`;
+  // 新ルール（docs/59〜61）の対局だけ説明を足す。従来ルールの説明は変えない
+  const nr = S.game && S.game.newRules ? `
+    <li class="nr-rule"><b>新ルール</b>（この対局）：山の最後の14枚を王牌に分けます。<b>ドラ表示牌</b>は最初1枚（卓の右下）。表示牌の<b>次の牌</b>がドラで、ドラは役ではありませんが、通常和了で手牌・槓子のドラ1枚につき <b>+1点</b>（役満には加算しません）。</li>
+    <li class="nr-rule"><b>暗カン</b>：ツモした直後に同じ牌が4枚あれば「暗カン」→ 牌を確認して実行。槓子は1面子で、門前のままです（リーチ中・チー／ポン直後は不可）。嶺上牌を1枚ツモし、ドラ表示牌が1枚増えます（最大5枚・暗カンは局で最大4回）。</li>
+    ${rules.config.mode === 'math2' ? `<li class="nr-rule"><b>数学Ⅱの通常ツモ</b>：各自${DRAW_CAP}回まで（親の最初のツモを含み、鳴き・嶺上ツモは数えません）。次の通常ツモが${DRAW_CAP + 1}回目になる時点で流局します。残り回数は卓の中央に表示します。</li>` : ''}` : '';
   return `<h2>ルール（暫定）</h2>
-  <ul class="rules-list">${body}
+  <ul class="rules-list">${body}${nr}
   </ul>
   <h3>役と仮得点</h3><ul class="yaku"><li><span>通常和了</span><b>${c.scoring.base}</b></li>${yaku}${sp}</ul>
   <p class="note">役満成立時は通常和了点・通常役を加算せず、役満の点のみ（複数役満は加算）。点数は試作段階の暫定値です。<br>エンジン ${ENGINE_VERSION} / 牌 ${rules.deckSize}枚 / 数式面子 ${rules.formulaCount}種類${c.rules.koutsu ? `・刻子 ${rules.melds.length - rules.formulaCount}種類` : ''}</p>`;
@@ -1107,6 +1204,11 @@ function settingsHTML() {
       ${Object.values(MODES).map(modeOpt).join('')}
       <p class="note mode-note">いまの対局：${modeLabel(rules)}。${S.nextMode !== rules.config.mode && !LEGACY ? '下の「新しい対局」で切り替わります（いまの局は変わりません）。' : 'モードの変更は「新しい対局」から反映されます。'}</p>
     </fieldset>
+    ${LEGACY ? '' : `<fieldset class="mode-select rule-select"><legend>ルール（新しい対局から）</legend>
+      <label class="setting radio"><input type="radio" name="ruleset" value="legacy" data-action="ruleset" ${S.nextNewRules ? '' : 'checked'}><span>従来ルール</span></label>
+      <label class="setting radio"><input type="radio" name="ruleset" value="new" data-action="ruleset" ${S.nextNewRules ? 'checked' : ''}><span>新ルール（ドラ・暗カン・ツモ回数の上限）</span></label>
+      <p class="note rule-note">いまの対局：${RULESET_LABEL(S.matchSettings.newRules)}。${S.nextNewRules !== S.matchSettings.newRules ? '下の「新しい対局」で切り替わります（いまの局は変わりません）。' : 'ルールの変更は「新しい対局」から反映されます。'}</p>
+    </fieldset>`}
     <label class="setting">AIの速さ <select data-action="speed">${publicSpeedNames().map(opt).join('')}</select></label>
     <label class="setting">視覚演出 <select data-action="fx-mode"><option value="full" ${S.fx.mode === 'full' ? 'selected' : ''}>通常</option><option value="lite" ${S.fx.mode === 'lite' ? 'selected' : ''}>簡易（文字だけ）</option></select></label>
     <label class="setting">効果音 <select data-action="sound"><option value="1" ${S.sound.on ? 'selected' : ''}>オン</option><option value="0" ${S.sound.on ? '' : 'selected'}>オフ</option></select></label>
@@ -1204,11 +1306,20 @@ function buildHintText() {
   const fa = S.hintFormulas;
   const n = fa.formulas.length;
   const ex = exposedSummary(rules, g.melds[HUMAN]);
+  const kans = g.melds[HUMAN].filter((m) => m.call === 'ankan').length; // 暗カン（新ルール）は刻子として数え、内数を示す
   const exLine = ex.formula || ex.koutsu
-    ? `<div class="hb-row">公開済み：数式面子 <b>${ex.formula}組</b>・刻子 <b>${ex.koutsu}組</b></div>` : '';
+    ? `<div class="hb-row">公開済み：数式面子 <b>${ex.formula}組</b>・刻子 <b>${ex.koutsu}組</b>${kans ? `（うち暗カン${kans}組・門前のまま）` : ''}</div>` : '';
+  // ドラ（新ルール）：役ではない。自分の手牌・槓子にある公開済みのドラの枚数だけを示す（和了すると1枚 +1点、役満は除く）
+  let doraLine = '';
+  if (g.newRules) {
+    const doraTypes = g.viewFor(HUMAN).doraIndicators.map((d) => d.doraType);
+    const mine = [...g.hands[HUMAN], ...g.melds[HUMAN].flatMap((m) => m.tiles)].map((id) => g.typeOf(id));
+    const n = doraTypes.reduce((k, t) => k + mine.filter((x) => x === t).length, 0);
+    doraLine = `<div class="hb-row hb-dora">ドラ：手牌・槓子に <b>${n}枚</b>（役ではありません。和了すると +${n}点・役満は加点なし）</div>`;
+  }
   let basic = `<div class="hint-basic">
       <div class="hb-row">${g.melds[HUMAN].length ? '手牌内の' : ''}完成している数式：<b>${n}通り</b></div>
-      <div class="hb-row">あと1枚で完成する組み合わせ：<b>${S.hintPartial}通り</b></div>${exLine}
+      <div class="hb-row">あと1枚で完成する組み合わせ：<b>${S.hintPartial}通り</b></div>${exLine}${doraLine}
       ${n > 0 && S.hintStage === 1 ? '<button data-action="fh-confirm" class="small fh-confirm">数式を確認する</button>' : ''}
     </div>`;
   S.hintColors = null;
@@ -1280,6 +1391,27 @@ app.addEventListener('click', (ev) => {
       break;
     }
     case 'riichi-cancel': S.riichiSelect = false; render(); break;
+    case 'ankan': {
+      // 暗カンの確認の段階へ（実行はしない）。エンジンが選択肢を出しているときだけ
+      const p = S.game.pending();
+      if (!p || p.seat !== HUMAN || p.type !== 'turn' || !p.ankan || !p.ankan.length) break;
+      S.ankanSelect = true;
+      S.riichiSelect = false;
+      S.selected = null;
+      render();
+      break;
+    }
+    case 'ankan-cancel': S.ankanSelect = false; render(); break;
+    case 'ankan-type': {
+      // 確認した種類で暗カンを実行。不正ならエンジンが拒否し（S.input.failed）、何も変わらない
+      if (!S.ankanSelect) break;
+      const t = Number(el.dataset.type);
+      S.ankanSelect = false;
+      const accepted = S.input.accepted;
+      humanAct({ type: 'ankan', tileType: t });
+      if (S.input.accepted === accepted) render(); // 拒否されたときも確認の段階を閉じる（局面は変わらない）
+      break;
+    }
     case 'riichi-discard':
       if (S.selected !== null && S.riichiSelect && humanDiscardFilter()(S.selected)) humanAct({ type: 'discard', tile: S.selected, riichi: true });
       break;
@@ -1368,13 +1500,13 @@ app.addEventListener('click', (ev) => {
       break;
     case 'reset':
       // 設定画面の「新しい対局」：予約したモード（S.nextMode）・タイトルで選んだ局数と、この試合の3人（座席は選び直す）
-      startMatch({ settings: { mode: S.nextMode, length: S.length, chars: S.matchSettings.chars } });
+      startMatch({ settings: { mode: S.nextMode, length: S.length, chars: S.matchSettings.chars, newRules: S.nextNewRules } });
       break;
     case 'again':
       // 同じ3人と再戦：終了した試合と同じ設定（モード・局数・3人）で、新しい山・全員100点から。座席は選び直す。
       // 予約中の次回用モード（S.nextMode）やタイトルの選択（S.length）は使わない。
       S.seedBase = Math.floor(Math.random() * 1e9);
-      startMatch({ settings: { mode: S.matchSettings.mode, length: S.matchSettings.length, chars: S.matchSettings.chars } });
+      startMatch({ settings: { mode: S.matchSettings.mode, length: S.matchSettings.length, chars: S.matchSettings.chars, newRules: S.matchSettings.newRules } });
       break;
     case 'change-opponents':
       // 相手を変更：直前の3人を選んだ状態で選択画面へ（1人だけ入れ替えることもできる）
@@ -1483,7 +1615,7 @@ app.addEventListener('click', (ev) => {
       S.seedBase = Math.floor(Math.random() * 1e9);
       S.opp.detail = null;
       S.opp.notice = null;
-      startMatch({ settings: { mode: S.nextMode, length: S.length, chars: S.opp.selected } });
+      startMatch({ settings: { mode: S.nextMode, length: S.length, chars: S.opp.selected, newRules: S.nextNewRules } });
       break;
     default:
   }
@@ -1515,6 +1647,12 @@ app.addEventListener('change', (ev) => {
   if (ev.target.dataset.action === 'title-mode') {
     const m = parseMode(ev.target.value);
     if (m) { S.nextMode = m; store.set(MODE_KEY, m); }
+  }
+  if (ev.target.dataset.action === 'title-ruleset' || ev.target.dataset.action === 'ruleset') {
+    // 次の新しい対局のルールを選ぶだけ（いまの局・試合のルールは変えない）
+    S.nextNewRules = parseRuleSet(ev.target.value);
+    store.set(RULESET_KEY, S.nextNewRules ? 'new' : 'legacy');
+    if (ev.target.dataset.action === 'ruleset') render();
   }
   if (ev.target.dataset.action === 'title-length') {
     const l = parseLen(ev.target.value);
@@ -1588,12 +1726,13 @@ function leaveGame(screen) {
 //   ai（従来の再現 URL・テスト用）：その難易度の既定の3人を、従来どおりの席の順で使う。
 // 座席は試合の開始時に確定し、試合の途中では変えない。人間は席0。
 function startMatch({ fromUrl = false, settings = null } = {}) {
-  const cfg = settings || { mode: S.nextMode, length: S.length, ai: S.ai };
+  const cfg = settings || { mode: S.nextMode, length: S.length, ai: S.ai, newRules: S.nextNewRules };
   let chars = cfg.chars, seats = cfg.seats;
   if (!chars) { chars = rosterForLevel(cfg.ai || 'intermediate').map((c) => c.id); seats = chars.slice(); }
   if (!seats) seats = assignSeats(chars, Math.random);
   // この試合の設定（「同じ3人と再戦」「相手を変更」「最終結果」「再現情報」で使う）
-  S.matchSettings = { mode: cfg.mode, length: cfg.length, chars: chars.slice(), seats: seats.slice() };
+  // newRules：新ルール（docs/61）。明示的に true のときだけ。旧規則（?rules=legacy）では使わない
+  S.matchSettings = { mode: cfg.mode, length: cfg.length, chars: chars.slice(), seats: seats.slice(), newRules: cfg.newRules === true && !LEGACY };
   PLAYERS = playersFor(seats); // 試合開始時にキャラクター3人と座席を確定
   S.aiDecisionsBySeat = [{}, {}, {}, {}];
   S.publicAiHistory = newPublicHistory();
@@ -1619,5 +1758,5 @@ function startMatch({ fromUrl = false, settings = null } = {}) {
   startRound();
 }
 
-if (REPLAY.kind !== 'none' && REPLAY.ok) startMatch({ fromUrl: true, settings: RV.chars ? { mode: S.nextMode, length: S.length, chars: RV.chars, seats: RV.chars } : { mode: S.nextMode, length: S.length, ai: S.ai } });
+if (REPLAY.kind !== 'none' && REPLAY.ok) startMatch({ fromUrl: true, settings: RV.chars ? { mode: S.nextMode, length: S.length, chars: RV.chars, seats: RV.chars, newRules: RV.newRules } : { mode: S.nextMode, length: S.length, ai: S.ai, newRules: RV.newRules } });
 else render(); // タイトル画面、または再現 URL のエラー画面
