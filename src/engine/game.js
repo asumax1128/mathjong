@@ -68,7 +68,7 @@ export class Game {
   isClosed(seat) { return this.melds[seat].every(m=>m.call==='ankan'); }
   get doraIndicators() { return this.deadWall ? this.deadWall.indicators.map(x=>({...x})) : []; }
   ankanOptions(seat) {
-    if (!this.newRules || this.phase!=='turn' || this.current!==seat || this.riichi[seat] || !this.deadWall.rinshan.length || !this.wall.length || this.deadWall.indicators.length>=5 || this.melds[seat].length>=3) return [];
+    if (!this.newRules || this.phase!=='turn' || this.current!==seat || !this.justDrew || this.riichi[seat] || !this.deadWall.rinshan.length || !this.wall.length || this.deadWall.indicators.length>=5 || this.melds[seat].length>=3) return [];
     const count=new Map();
     for(const id of this.hands[seat]) { const t=this.typeOf(id); count.set(t,[...(count.get(t)||[]),id]); }
     return [...count.entries()].filter(([t,ids])=>ids.length>=4 && this.rules.koutsuOf(t)).map(([type,ids])=>({type,ids:ids.slice(0,4)}));
