@@ -137,12 +137,12 @@ export class Game {
   // 手の内 counts（和了牌を除く8枚など）が聴牌か：和了できる牌の種類（待ち）の一覧。
   // 和了の判定は既存の analyzeWin（数式面子・刻子・特殊和了）をそのまま使う。
   // その種類の牌が手の内ですでに全部使われている待ち（物理的にあり得ない牌）は数えない。
-  waitsOf(counts, exposed = []) {
+  waitsOf(counts, exposed = [], closed = exposed.length === 0) {
     const out = [];
     for (let t = 0; t < counts.length; t++) {
       if (counts[t] >= this.rules.types[t].copies) continue;
       counts[t]++;
-      const ok = !!this.rules.analyzeWin(counts, exposed);
+      const ok = !!this.rules.analyzeWin(counts, exposed, {closed});
       counts[t]--;
       if (ok) out.push(t);
     }
@@ -164,7 +164,7 @@ export class Game {
       if (seen.has(t)) continue;
       seen.add(t);
       counts[t]--;
-      const waits = this.waitsOf(counts);
+      const waits = this.waitsOf(counts, this.exposedMelds(seat), this.isClosed(seat));
       counts[t]++;
       if (waits.length) opts.push({ type: t, ids: this.hands[seat].filter((x) => this.tileType[x] === t), waits });
     }
