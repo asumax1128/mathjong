@@ -922,7 +922,8 @@ table.values td.undef { color: #999; font-size: 12px; }
 .melds-left .rb-melds-block, .melds-right .rb-melds-block { width: var(--mh); height: var(--mw); }
 .melds-top .rb-melds-block { right: 2px; bottom: 2px; }
 .melds-right .rb-melds-block { left: 2px; bottom: 2px; }
-.melds-left .rb-melds-block { right: 2px; top: 2px; }
+/* 上家（左席）の鳴き面子は外側＝手牌寄りから配置。自分の河との距離を確保する。 */
+.melds-left .rb-melds-block { left: 2px; right: auto; top: 2px; }
 .mj-table .melds-block .tile.sz-xs { width: calc(var(--rw) * .9); height: calc(var(--rh) * .9); font-size: calc(var(--rw) * .41); }
 .mj-table .melds-block .tile.sz-xs.t-angle { font-size: calc(var(--rw) * .39); }
 .mj-table .melds-block .tile.sz-xs.t-value { font-size: calc(var(--rw) * .37); }
