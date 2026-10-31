@@ -76,8 +76,13 @@ function newSeatRound() {
     riichiOpp: 0, riichiDeclined: 0, riichiDeclared: false, riichiTurn: null, riichiOppRound: false,
     keepTenpaiOpp: 0, keepTenpaiChosen: 0, // 聴牌を保つ（作る）打牌がある判断で、それを選んだ回数（鳴いた手を含む）
     tenpai: false, firstTenpaiTurn: null, firstWaits: null, riichiWaits: null, yakulessTenpai: false,
-    chiOpp: 0, chiTaken: 0, ponOpp: 0, ponTaken: 0, ronOpp: 0, ronTaken: 0, tsumoOpp: 0, tsumoTaken: 0,
+    // 鳴き（PR #65 監査 P2-3）：chosen＝pending の選択肢からチー・ポンを選んだ回数、made＝公開面子として実際に成立した回数
+    // （局の記録 events の chi/pon）。後続の席のロン（ロン優先）・より近い席のポンで取り消された鳴きは made に含めない
+    chiOpp: 0, chiChosen: 0, chiMade: 0, ponOpp: 0, ponChosen: 0, ponMade: 0, ronOpp: 0, ronTaken: 0, tsumoOpp: 0, tsumoTaken: 0,
     calls: 0, furitenBlocked: 0,
+    // 鳴きの成立後の聴牌：その席に成立した鳴き（チー・ポン）があり、その後の自分の打牌の直後に聴牌（形）だった局。
+    // yakulessAfterCall：その観測のどれかで、どの待ちでも役がなく和了できなかった
+    tenpaiAfterCall: false, yakulessAfterCall: false,
     won: false, how: null, points: 0, dora: 0, yaku: [], dealtIn: false, dealtInWhileRiichi: false,
     tenpaiAtEnd: false, endLive: 0, endWinnable: false,
   };
@@ -114,9 +119,10 @@ function tenpaiDiscards(g, s) {
   return out;
 }
 
-export function playRound({ rules, seed, dealer, agents, decideFor, info }) {
+// presetWall：テスト用の固定の山（既定は seed の山）
+export function playRound({ rules, seed, dealer, agents, decideFor, info, presetWall = null }) {
   const players = agents.map((a) => ({ name: a, kind: 'ai', personality: 'speed' }));
-  const g = new Game({ rules, seed, dealer, players, ruleset: 2 });
+  const g = new Game({ rules, seed, dealer, players, ruleset: 2, presetWall });
   const rngs = [0, 1, 2, 3].map((s) => createRng(((seed * 4 + s) ^ 0x5bd1e995) >>> 0)); // 席ごとの乱数列
   const R = [0, 1, 2, 3].map(newSeatRound);
   for (let step = 0; g.pending(); step++) {
@@ -140,8 +146,8 @@ export function playRound({ rules, seed, dealer, agents, decideFor, info }) {
       }
     } else {
       if (p.ron) { r.ronOpp++; if (a.type === 'ron') r.ronTaken++; }
-      if (p.chi && p.chi.length) { r.chiOpp++; if (a.type === 'chi') { r.chiTaken++; r.calls++; } }
-      if (p.pon) { r.ponOpp++; if (a.type === 'pon') { r.ponTaken++; r.calls++; } }
+      if (p.chi && p.chi.length) { r.chiOpp++; if (a.type === 'chi') r.chiChosen++; }
+      if (p.pon) { r.ponOpp++; if (a.type === 'pon') r.ponChosen++; }
     }
     applyAction(g, s, a);
     g.checkInvariants();
@@ -152,12 +158,18 @@ export function playRound({ rules, seed, dealer, agents, decideFor, info }) {
       if (w) {
         if (!r.tenpai) { r.tenpai = true; r.firstTenpaiTurn = r.turns; r.firstWaits = w; }
         if (!w.winnable) r.yakulessTenpai = true;
+        if (g.melds[s].some((m) => m.call === 'chi' || m.call === 'pon')) { r.tenpaiAfterCall = true; if (!w.winnable) r.yakulessAfterCall = true; }
         if (a.riichi && !r.riichiWaits) r.riichiWaits = w;
       }
       if (a.riichi) { r.riichiDeclared = true; r.riichiTurn = r.turns; }
     }
   }
   const res = g.result;
+  for (const e of g.events) {
+    if (e.type === 'chi') R[e.seat].chiMade++;
+    if (e.type === 'pon') R[e.seat].ponMade++;
+  }
+  for (const r of R) r.calls = r.chiMade + r.ponMade;
   for (let s = 0; s < 4; s++) {
     const w = g.phase === 'ended' && (res.type !== 'win' || res.winner !== s) ? waitsInfo(g, s) : null;
     R[s].tenpaiAtEnd = !!w; R[s].endLive = w ? w.live : 0; R[s].endWinnable = !!(w && w.winnable);
@@ -184,7 +196,9 @@ export function playMatch({ mode, length, agents, seed, startDealer, policies = 
   const rules = createRules(makeConfig({ mode }));
   let m = createMatch({ length, startDealer, riichiDeposit: RIICHI_DEPOSIT, agariYame: true });
   let history = newPublicHistory();
-  const aiIds = agents.filter((a) => AI4.includes(a));
+  // 席ID（PR #65 監査 P2-2）：本番（app.js）と同じく4席の配列で席順を保つ。AI 以外（初心者代理）の席は 'human'
+  // （本番の人の席と同じ識別子）。かなたは seatIds.indexOf('aoto') で、実際のあおとの席の公開河を読む
+  const aiIds = agents.map((a) => (AI4.includes(a) ? a : 'human'));
   const decideFor = (g, p, s, rng, info) => {
     const id = agents[s];
     if (policies && policies[id]) return policies[id](g, p, s, rng, info, aiIds);
@@ -268,11 +282,15 @@ export function summarize(matches) {
         riichiLive: meanCI(riichiR.filter((r) => r.riichiWaits).map((r) => r.riichiWaits.live)),
       },
       calls: {
-        chi: wilson(sum((r) => r.chiTaken), sum((r) => r.chiOpp)), pon: wilson(sum((r) => r.ponTaken), sum((r) => r.ponOpp)),
+        chi: wilson(sum((r) => r.chiChosen), sum((r) => r.chiOpp)), pon: wilson(sum((r) => r.ponChosen), sum((r) => r.ponOpp)),
+        chiMade: wilson(sum((r) => r.chiMade), sum((r) => r.chiOpp)), ponMade: wilson(sum((r) => r.ponMade), sum((r) => r.ponOpp)),
+        chosen: sum((r) => r.chiChosen + r.ponChosen), made: sum((r) => r.chiMade + r.ponMade),
+        cancelled: sum((r) => r.chiChosen + r.ponChosen) - sum((r) => r.chiMade + r.ponMade), // ロン優先・ポン優先で取り消された鳴き
         roundsWithCalls: wilson(calledR.length, a.rounds),
         winRateCalled: wilson(calledR.filter((r) => r.won).length, calledR.length), winRateClosed: wilson(closedR.filter((r) => r.won).length, closedR.length),
         tenpaiRateCalled: wilson(calledR.filter((r) => r.tenpai).length, calledR.length), tenpaiRateClosed: wilson(closedR.filter((r) => r.tenpai).length, closedR.length),
-        yakulessTenpaiCalled: wilson(calledR.filter((r) => r.yakulessTenpai).length, calledR.filter((r) => r.tenpai).length),
+        // 分母：鳴きが成立した局のうち、成立後の自分の打牌の直後に聴牌（形）になった局。分子：そのうち役のない聴牌を観測した局
+        yakulessTenpaiCalled: wilson(calledR.filter((r) => r.yakulessAfterCall).length, calledR.filter((r) => r.tenpaiAfterCall).length),
       },
       claims: { ron: wilson(sum((r) => r.ronTaken), sum((r) => r.ronOpp)), tsumo: wilson(sum((r) => r.tsumoTaken), sum((r) => r.tsumoOpp)), furitenBlocked: sum((r) => r.furitenBlocked) },
       draws: { tenpaiAtDraw: sum((r) => (r.tenpaiAtEnd ? 1 : 0)) },
@@ -349,7 +367,7 @@ if (isMain) {
   const t0 = Date.now();
   const result = { definition: { tool: 'tools/research-beginner-loss-diagnostics.mjs', ruleset: 2, riichiDeposit: RIICHI_DEPOSIT, agariYame: true, seed0, scale,
     novice: 'basic：75%基本の残し方・25%無作為の打牌、リーチなし・鳴きなし。smart：利用できるリーチを85%で宣言、面子未公開時にチー22%。和了はいつでもする。実際の人間ではない。',
-    denominators: '割合の分母は合法な選択機会（pending の ron/tsumo/chi/pon、riichiOptions のリーチ、聴牌を保つ打牌の有無）。区間は95% Wilson（平均は±1.96SE）。',
+    denominators: '割合の分母は合法な選択機会（pending の ron/tsumo/chi/pon、riichiOptions のリーチ、聴牌を保つ打牌の有無）。区間は95% Wilson（平均は±1.96SE）。鳴きは選択（chosen）と成立（made：公開面子になった）を分ける。鳴いた局＝成立した鳴きのある局。鳴いた手の役なし聴牌＝成立後の自分の打牌の直後に聴牌（形）を観測した局のうち、役のない聴牌を観測した局の割合。',
     plan: plan(scale, modes) }, cells: {} };
   for (const cell of plan(scale, modes)) {
     const key = `${cell.exp}:${cell.scenario}:${cell.mode}:${cell.length}`;

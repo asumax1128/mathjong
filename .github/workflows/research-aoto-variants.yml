@@ -1,9 +1,10 @@
-name: Research aoto variants A-D (no deploy)
+name: Research aoto variants A/B1-3/C/D1-3 (no deploy)
 # 研究専用（docs/70）：あおとの改善案4条件の比較ツールの再現性テストと小規模の実行。本番のAI・エンジン・UIは変更しない。公開・デプロイはしない
 on:
   pull_request:
     paths:
       - 'tools/research-aoto-variants.mjs'
+      - 'tools/research-aoto-variants-report.mjs'
       - 'tools/research-beginner-loss-diagnostics.mjs'
       - 'tests/research-aoto-variants.test.js'
       - '.github/workflows/research-aoto-variants.yml'
@@ -29,11 +30,12 @@ jobs:
         run: |
           mkdir -p /tmp/aoto
           S="${{ github.event.inputs.scale || '0.1' }}"
-          node tools/research-aoto-variants.mjs --scale "$S" --out /tmp/aoto/a.json
+          node tools/research-aoto-variants.mjs --scale "$S" --out /tmp/aoto/a.json --csv /tmp/aoto/a.csv
           node tools/research-aoto-variants.mjs --scale "$S" --out /tmp/aoto/b.json
           strip() { node -e "const d=require('$1');delete d.seconds;console.log(require('crypto').createHash('sha256').update(JSON.stringify(d)).digest('hex'))"; }
           a=$(strip /tmp/aoto/a.json); b=$(strip /tmp/aoto/b.json)
           echo "a=$a"; echo "b=$b"; test "$a" = "$b"
+          node tools/research-aoto-variants-report.mjs /tmp/aoto/a.json --out /tmp/aoto/tables.md
       - name: Production AI, engine and UI unchanged versus main
         run: |
           git fetch --depth=1 origin main
