@@ -9,7 +9,7 @@ import { BEGINNER_PARAMS } from '../src/engine/character-ai-prototype.js';
 import { createRng } from '../src/engine/rng.js';
 import { rulesFor, k } from './helpers.js';
 import { playMatch, playRound, summarize, AI4, NOVICE_VARIANTS } from '../tools/research-beginner-loss-diagnostics.mjs';
-import { aotoPolicy, callKeepsYaku, callKeepsYakuLegacy, callYakuDistance, callYakuDistanceByHint, yakuDistanceAfterCall, yakuDistanceAfterCallClamped, keepTenpaiTile, tenpaiDiscardTypes, runCell, runAll, plan, VARIANTS, PLAN_VARIANTS, parseVariant, clusterPairedCI, matchRecords, recordsCSV, t975 } from '../tools/research-aoto-variants.mjs';
+import { aotoPolicy, callKeepsYaku, callKeepsYakuLegacy, callYakuDistance, callYakuDistanceByHint, yakuDistanceAfterCall, yakuDistanceAfterCallClamped, keepTenpaiTile, tenpaiDiscardTypes, runCell, runAll, plan, VARIANTS, PLAN_VARIANTS, parseVariant, clusterPairedCI, matchRecords, recordsCSV, t975, validateCellRecords, cellSeed } from '../tools/research-aoto-variants.mjs';
 
 const hash = (x) => createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const R1 = rulesFor('math1');
@@ -261,13 +261,14 @@ function bruteDistance(rules, st, maxN = 3) {
   return Infinity;
 }
 // 公開面子 a・手牌の面子 b, c（役あり）で、手牌の牌の種類が全て残り0枚の局面
-function exhaustedScene(rules, a, b, c) {
+function exhaustedScene(rules, a, b, c, extraZero = []) {
   const M = rules.melds;
   const counts = new Array(rules.types.length).fill(0);
   for (const t of [...M[b].tiles, ...M[c].tiles]) counts[t]++;
   const unseen = rules.types.map((ty) => ty.copies);
   for (const t of [...M[a].tiles, ...M[b].tiles, ...M[c].tiles]) unseen[t]--;
   for (let t = 0; t < counts.length; t++) if (counts[t] > 0) unseen[t] = 0;
+  for (const t of extraZero) unseen[t] = 0; // ほかに残り0枚の牌の種類
   return { counts, exposed: [a], unseen };
 }
 
@@ -286,6 +287,20 @@ test('監査2回目 P2 固定反例：鳴いた後の打牌で枯渇牌を引き
     const st2 = { ...st, unseen: rules.types.map((ty) => ty.copies) };
     assert.equal(yakuDistanceAfterCall(rules, st2).distance, 1);
     assert.equal(bruteDistance(rules, st2), 1);
+  }
+  // 「実際は距離3」の型：手牌の牌の種類に加え、ほかの多くの種類も残り0枚（旧方式は距離1）
+  for (const [mode, a, b, c, extra] of [
+    ['math1', 28, 31, 34, [4, 6, 7, 9, 10, 11, 13, 14, 15, 19, 20, 21, 22, 24]],
+    ['math2', 80, 72, 68, [3, 4, 6, 7, 9, 11, 14, 20, 21, 24, 25, 27, 29, 31]],
+  ]) {
+    const rules = rulesFor(mode);
+    assert.equal(rules.evaluateMelds([a, b, c], false).hasYaku, true);
+    const st = exhaustedScene(rules, a, b, c, extra);
+    assert.equal(yakuDistanceAfterCallClamped(rules, st), 1, `${mode} 旧は距離1`);
+    assert.equal(yakuDistanceAfterCall(rules, st).distance, 3, `${mode} 新は距離3`);
+    assert.equal(bruteDistance(rules, st), 3, `${mode} 独立の参照実装も3`);
+    // B1・B2 は見送り、B3 は許可
+    for (const [N, ok] of [[1, false], [2, false], [3, true]]) assert.equal(yakuDistanceAfterCall(rules, st).distance <= N, ok);
   }
 });
 
@@ -387,7 +402,31 @@ test('P3 seed クラスタのペア差：同じ seed の席替えを1クラス�
   bad([...V, V[1]]);                                                   // 重複
   bad(V.map((x, i) => (i === 1 ? { ...x, variant: 'D2' } : x)));      // V 側の条件の混在
   bad(V, A.map((x) => ({ ...x, variant: 'B1' })));                     // A 側が条件A でない
+  assert.throws(() => clusterPairedCI(A, V, 'aoto', 'ranks', { expected: 4 }), /expected 4/); // 件数不足
+  assert.equal(clusterPairedCI(A, V, 'aoto', 'ranks', { expected: 3 }).pairs, 3);
   assert.ok(Math.abs(t975(30) - 2.042) < 0.01 && t975(4) === 2.776);
   const rec = matchRecords('ai4:math1:1', 'C', [{ agents: AI4, ranks: [1, 2, 3, 4], scores: [130, 100, 90, 80], played: 1, endReason: 'normal', seed: 7, cluster: 0, startDealer: 2 }]);
   assert.deepEqual([rec[0].seed, rec[0].startDealer, rec[0].aotoSeat, rec[0].variant], [7, 2, 2, 'C']);
+});
+
+test('監査2回目 P3：セルの試合記録の検査（件数・連番・クラスタ・seed・親・席＝対戦相手）。実データ（runCell）で合格し、改変は例外', () => {
+  for (const exp of ['ai4', 'novice']) {
+    const cell = { exp, mode: 'math1', length: 1, seeds: 2, rotations: exp === 'ai4' ? 4 : 1 };
+    const key = `${exp}:math1:1`;
+    const out = runCell(cell, 123, { variants: ['A', 'C'] });
+    const recA = matchRecords(key, 'A', out.A.matches), recC = matchRecords(key, 'C', out.C.matches);
+    assert.equal(validateCellRecords(recA, cell, 123, key), true);
+    assert.equal(validateCellRecords(recC, cell, 123, key), true);
+    assert.equal(recA[5].seed, cellSeed(cell, 123, 1));
+    assert.equal(clusterPairedCI(recA, recC, 'aoto', 'ranks', { expected: 8 }).clusters, 2);
+    const bad = (f) => { const r = recC.map((x) => ({ ...x, seats: x.seats.slice() })); f(r); assert.throws(() => validateCellRecords(r, cell, 123, key), /records:/); };
+    bad((r) => r.pop());                                   // 件数不足
+    bad((r) => { r[3].index = 2; });                       // 連番・重複
+    bad((r) => { r[4].cluster = 0; });                     // クラスタ
+    bad((r) => { r[4].seed += 1; });                       // seed
+    bad((r) => { r[4].startDealer = 3; });                 // 親
+    bad((r) => { r[1].seats.reverse(); });                 // 席・対戦相手
+    bad((r) => { r[2].cell = 'ai4:math2:1'; });            // セル
+    bad((r) => { r[2].aotoSeat = (r[2].aotoSeat + 1) % 4; }); // あおとの席
+  }
 });

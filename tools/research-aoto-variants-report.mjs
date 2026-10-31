@@ -41,12 +41,18 @@ for (const f of files) {
     }
     P();
     if (exp === 'novice') {
-      P('| 条件 | ' + Object.values(NV).map((x) => `${x} 1位率／順位差 vs A`).join(' | ') + ' |');
-      P('|---|' + Object.keys(NV).map(() => '---|').join(''));
-      for (const v of variants) {
-        P(`| ${v} | ${Object.keys(NV).map((nv) => `${pct(c[v][nv].agents[nv].result.top)}／${v === 'A' ? '—' : ci(c.pairedVsA[v][nv].rank)}`).join(' | ')} |`);
+      for (const nv of Object.keys(NV)) {
+        P(`**初心者代理：${NV[nv]}**（同じ seed・親・相手・席。順位差は条件A とのペア差、seed クラスタの 95% CI）`);
+        P('| 条件 | 平均順位 | 1位率 | 4位率 | 流局率 | 1局の手番数 | 順位差 vs A | 点差 vs A |');
+        P('|---|---|---|---|---|---|---|---|');
+        for (const v of variants) {
+          const s2 = c[v][nv];
+          const r = s2.agents[nv].result;
+          const pv = c.pairedVsA[v]?.[nv];
+          P(`| ${v} | ${num(r.meanRank)} | ${pct(r.top)} | ${pct(r.last)} | ${pct(s2.table.drawRate)} | ${num(s2.table.turnsPerRound, 1)} | ${v === 'A' ? '—' : ci(pv.rank)} | ${v === 'A' ? '—' : ci(pv.score, 1)} |`);
+        }
+        P();
       }
-      P();
     }
   }
 }

@@ -256,6 +256,27 @@ export function matchRecords(cellKey, variant, matches) {
   }));
 }
 
+// 1つのセル・1つの条件の試合記録が計画どおりかを検査する（監査2回目 P3）。違反は例外。
+// 件数＝seed 数×4、index は 0..n−1 の連番・重複なし、クラスタ k は index 4k..4k+3 の4試合で、
+// seed＝cellSeed(cell, seed0, k)・親＝k%4、席（担当＝対戦相手を含む）は lineups(cell, k) の順と一致。
+export function validateCellRecords(recs, cell, seed0, cellKey) {
+  const per = 4;
+  if (recs.length !== cell.seeds * per) throw new Error(`records: count ${recs.length} != ${cell.seeds * per} (${cellKey})`);
+  const variant = recs.length ? recs[0].variant : null;
+  recs.forEach((r, i) => {
+    const k = Math.floor(i / per), j = i % per;
+    if (r.cell !== cellKey || r.variant !== variant) throw new Error(`records: cell/variant ${cellKey} #${i}`);
+    if (r.index !== i) throw new Error(`records: index ${r.index} != ${i} (${cellKey})`);
+    if (r.cluster !== k) throw new Error(`records: cluster ${r.cluster} != ${k} (${cellKey} #${i})`);
+    if (r.seed !== cellSeed(cell, seed0, k)) throw new Error(`records: seed (${cellKey} #${i})`);
+    if (r.startDealer !== k % 4) throw new Error(`records: dealer (${cellKey} #${i})`);
+    const want = lineups(cell, k);
+    if (want.length !== per || r.seats.join() !== want[j].join()) throw new Error(`records: seats (${cellKey} #${i})`);
+    if (r.aotoSeat !== r.seats.indexOf('aoto') || r.aotoSeat < 0) throw new Error(`records: aotoSeat (${cellKey} #${i})`);
+  });
+  return true;
+}
+
 // t 分布の 97.5% 点（Cornish–Fisher 近似。df ≥ 1）
 export function t975(df) {
   const z = 1.959964;
@@ -296,9 +317,11 @@ export function pairRecords(recA, recV) {
   }
   return pairs;
 }
-export function clusterPairedCI(recA, recV, subject, field) {
+export function clusterPairedCI(recA, recV, subject, field, { expected = null } = {}) {
   const by = new Map();
-  for (const [a, r] of pairRecords(recA, recV)) {
+  const paired = pairRecords(recA, recV);
+  if (expected != null && paired.length !== expected) throw new Error(`pair mismatch: ${paired.length} pairs, expected ${expected}`);
+  for (const [a, r] of paired) {
     const seat = subject === 'aoto' ? r.aotoSeat : r.seats.indexOf(subject);
     if (seat < 0) continue;
     const d = r[field][seat] - a[field][seat];
@@ -337,6 +360,7 @@ export function runAll({ scale = 1, seed0 = 700001, modes = ['math1', 'math2'], 
     const recs = {};
     for (const v of variants) {
       recs[v] = matchRecords(key, v, out[v].matches);
+      validateCellRecords(recs[v], cell, seed0, key);
       result.records.push(...recs[v]);
       if (cell.exp === 'ai4') entry[v] = { ...summarize(out[v].matches), stats: out[v].stats };
       else entry[v] = { ...Object.fromEntries(NOVICE_VARIANTS.map((nv) => [nv, summarize(out[v].matches.filter((m) => m.agents[0] === nv))])), all: summarize(out[v].matches), stats: out[v].stats };
@@ -346,7 +370,7 @@ export function runAll({ scale = 1, seed0 = 700001, modes = ['math1', 'math2'], 
     for (const v of variants) {
       if (v === 'A') continue;
       const subjects = cell.exp === 'ai4' ? ['aoto'] : ['aoto', ...NOVICE_VARIANTS];
-      entry.pairedVsA[v] = Object.fromEntries(subjects.map((sj) => [sj, { rank: clusterPairedCI(recs.A, recs[v], sj, 'ranks'), score: clusterPairedCI(recs.A, recs[v], sj, 'scores') }]));
+      entry.pairedVsA[v] = Object.fromEntries(subjects.map((sj) => [sj, { rank: clusterPairedCI(recs.A, recs[v], sj, 'ranks', { expected: cell.seeds * 4 }), score: clusterPairedCI(recs.A, recs[v], sj, 'scores', { expected: cell.seeds * 4 }) }]));
     }
     result.cells[key] = entry;
     log(key);
