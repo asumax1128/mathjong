@@ -15,14 +15,14 @@ const modeList=['math1','math2'],lengths=[1,4,8];
 const base={kanata:{...BEGINNER_PARAMS.kanata,pick:BEGINNER_PARAMS.kanata.pick.slice()},mitsuki:{...BEGINNER_PARAMS.mitsuki,pick:BEGINNER_PARAMS.mitsuki.pick.slice()},aoto:{...BEGINNER_PARAMS.aoto}};
 const scenarios={
  baseline:()=>Object.assign(BEGINNER_PARAMS,{kanata:{...base.kanata},mitsuki:{...base.mitsuki},aoto:{...base.aoto}}),
- balanced_light:()=>{
-  BEGINNER_PARAMS.kanata={...base.kanata,pick:[.58,.28,.14],readyBase:.85,readyPerLive:.065,readMax:.2};
-  BEGINNER_PARAMS.mitsuki={...base.mitsuki,pick:[.4,.36,.24]};
+ strategic_light:()=>{
+  BEGINNER_PARAMS.kanata={...base.kanata,readyBase:.7,readyPerLive:.04,readExact:.04,readKind:.01,readPerWait:.08,readMax:.12};
+  BEGINNER_PARAMS.mitsuki={...base.mitsuki,sinTile:4.5,sinPair:3.75,sinSingle:.6};
   BEGINNER_PARAMS.aoto={...base.aoto};
  },
- balanced_medium:()=>{
-  BEGINNER_PARAMS.kanata={...base.kanata,pick:[.48,.31,.21],readyBase:.65,readyPerLive:.045,readMax:.12};
-  BEGINNER_PARAMS.mitsuki={...base.mitsuki,pick:[.34,.36,.30]};
+ strategic_strong:()=>{
+  BEGINNER_PARAMS.kanata={...base.kanata,readyBase:.3,readyPerLive:.015,readExact:0,readKind:0,readPerWait:0,readMax:0};
+  BEGINNER_PARAMS.mitsuki={...base.mitsuki,sinTile:6,sinPair:5,sinSingle:1};
   BEGINNER_PARAMS.aoto={...base.aoto};
  },
 };
@@ -52,13 +52,6 @@ for(const mode of modeList)for(const length of lengths){
     for(let step=0;g.pending();step++){
       if(step>1000)throw Error('step cap');
       const p=g.pending();let action=p.seat===0?novice(g,p,rng):decideCharacter(g,p.seat,roster[p.seat],rng,info,roster.slice(1));
-      // Research-only bounded yujin error; do not modify winning choices or riichi locks.
-      if(p.seat!==0 && roster[p.seat]==='yujin' && p.type==='turn' && !p.canTsumo && !g.riichi[p.seat] && action.type==='discard' && label!=='baseline'){
-        if(rng.next()<(label==='balanced_light'?.10:.20)){
-          const view=g.viewFor(p.seat),candidates=view.hand.filter(x=>x.id!==action.tile);
-          if(candidates.length)action={type:'discard',tile:rng.pick(candidates).id};
-        }
-      }
       applyAction(g,p.seat,action);g.checkInvariants();
     }
     if(g.result.type==='draw')st.draws++;
