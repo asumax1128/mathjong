@@ -9,7 +9,7 @@ import { BEGINNER_PARAMS } from '../src/engine/character-ai-prototype.js';
 import { createRng } from '../src/engine/rng.js';
 import { rulesFor, k } from './helpers.js';
 import { playMatch, playRound, summarize, AI4, NOVICE_VARIANTS } from '../tools/research-beginner-loss-diagnostics.mjs';
-import { aotoPolicy, callKeepsYaku, callKeepsYakuLegacy, callYakuDistance, callYakuDistanceByHint, keepTenpaiTile, tenpaiDiscardTypes, runCell, runAll, plan, VARIANTS, PLAN_VARIANTS, parseVariant, clusterPairedCI, matchRecords, recordsCSV, t975 } from '../tools/research-aoto-variants.mjs';
+import { aotoPolicy, callKeepsYaku, callKeepsYakuLegacy, callYakuDistance, callYakuDistanceByHint, yakuDistanceAfterCall, yakuDistanceAfterCallClamped, keepTenpaiTile, tenpaiDiscardTypes, runCell, runAll, plan, VARIANTS, PLAN_VARIANTS, parseVariant, clusterPairedCI, matchRecords, recordsCSV, t975 } from '../tools/research-aoto-variants.mjs';
 
 const hash = (x) => createHash('sha256').update(JSON.stringify(x)).digest('hex');
 const R1 = rulesFor('math1');
@@ -222,6 +222,106 @@ test('P2-1 合法な鳴きの候補を全列挙：新判定の不足枚数は独
   assert.ok(legacyFN > 0, '旧判定の偽陰性を検出できる');
 });
 
+// ---- PR #65 監査2回目 P2：鳴いた後の必ず1枚捨てる打牌と、枯渇した牌（残り0枚） ----
+// 独立の参照実装：不足枚数を数えず、見えていない牌から n 枚（n＝1,2,3）を引く全ての多重集合と、全ての捨て牌について、
+// 「残りの手牌＋引いた牌」が役のある面子の組合せ（公開面子と合わせて3面子）を含むかを直接調べる。max(1, …) は使わない。
+function bruteDistance(rules, st, maxN = 3) {
+  const k = 3 - st.exposed.length;
+  const M = rules.melds;
+  const combos = [];
+  const pick = (start, chosen) => {
+    if (chosen.length === k) { if (rules.evaluateMelds([...st.exposed, ...chosen], false).hasYaku) combos.push(chosen.slice()); return; }
+    for (let i = start; i < M.length; i++) { chosen.push(i); pick(i, chosen); chosen.pop(); }
+  };
+  pick(0, []);
+  const need = combos.map((c) => { const r = new Array(rules.types.length).fill(0); for (const i of c) for (const t of M[i].tiles) r[t]++; return r; });
+  const contains = (h) => need.some((r) => r.every((n, t) => n <= h[t]));
+  const T = rules.types.length;
+  const draws = new Array(T).fill(0);
+  const discards = st.counts.map((n, t) => (n > 0 ? t : -1)).filter((t) => t >= 0);
+  for (let n = 1; n <= maxN; n++) {
+    let hit = false;
+    const rec = (start, left) => {
+      if (hit) return;
+      if (left === 0) {
+        for (const d of discards) {
+          const h = st.counts.map((c, t) => c - (t === d ? 1 : 0) + draws[t]);
+          if (contains(h)) { hit = true; return; }
+        }
+        return;
+      }
+      for (let t = start; t < T && !hit; t++) {
+        if (draws[t] >= Math.max(0, st.unseen[t])) continue;
+        draws[t]++; rec(t, left - 1); draws[t]--;
+      }
+    };
+    rec(0, n);
+    if (hit) return n;
+  }
+  return Infinity;
+}
+// 公開面子 a・手牌の面子 b, c（役あり）で、手牌の牌の種類が全て残り0枚の局面
+function exhaustedScene(rules, a, b, c) {
+  const M = rules.melds;
+  const counts = new Array(rules.types.length).fill(0);
+  for (const t of [...M[b].tiles, ...M[c].tiles]) counts[t]++;
+  const unseen = rules.types.map((ty) => ty.copies);
+  for (const t of [...M[a].tiles, ...M[b].tiles, ...M[c].tiles]) unseen[t]--;
+  for (let t = 0; t < counts.length; t++) if (counts[t] > 0) unseen[t] = 0;
+  return { counts, exposed: [a], unseen };
+}
+
+test('監査2回目 P2 固定反例：鳴いた後の打牌で枯渇牌を引き直す形は距離1ではない（数学Ⅰ・Ⅱ）', () => {
+  // 手牌の6枚がちょうど役のある2面子だが、手牌の牌の種類は全て残り0枚。鳴いた後に1枚捨てると、その牌は引き直せない。
+  for (const [mode, a, b, c] of [['math1', 0, 0, 25], ['math2', 0, 1, 12]]) {
+    const rules = rulesFor(mode);
+    assert.equal(rules.evaluateMelds([a, b, c], false).hasYaku, true);
+    const st = exhaustedScene(rules, a, b, c);
+    assert.equal(yakuDistanceAfterCallClamped(rules, st), 1, `${mode} 旧（max(1, 不足)）は距離1と誤る`);
+    const nw = yakuDistanceAfterCall(rules, st);
+    assert.equal(nw.distance, 2, `${mode} 捨て牌ごとに数え直すと2枚`);
+    assert.equal(bruteDistance(rules, st), 2, `${mode} 独立の参照実装も2枚`);
+    assert.ok(nw.distance > 1, '上限1（B1・D1）では見送る');
+    // 枯渇していなければ（捨てた牌が残っていれば）距離1
+    const st2 = { ...st, unseen: rules.types.map((ty) => ty.copies) };
+    assert.equal(yakuDistanceAfterCall(rules, st2).distance, 1);
+    assert.equal(bruteDistance(rules, st2), 1);
+  }
+});
+
+test('監査2回目 P2：ランダムな局面（一部の牌を枯渇）で、新判定の距離は独立の参照実装と一致する（数学Ⅰ・Ⅱ）', () => {
+  let checked = 0, finite = 0, clampDiff = 0;
+  for (const mode of ['math1', 'math2']) {
+    const rules = rulesFor(mode);
+    const M = rules.melds;
+    const rng = createRng(mode === 'math1' ? 4242 : 4343);
+    const ri = (n) => rng.int(n);
+    for (let trial = 0; trial < 40; trial++) {
+      const a = ri(M.length);
+      // 手牌6枚：役のある面子の牌を一部入れ替えた形
+      const b = ri(M.length), c = ri(M.length);
+      const counts = new Array(rules.types.length).fill(0);
+      const tiles = [...M[b].tiles, ...M[c].tiles];
+      for (let j = 0; j < ri(3); j++) tiles[ri(6)] = ri(rules.types.length);
+      for (const t of tiles) counts[t]++;
+      const unseen = rules.types.map((ty) => ty.copies);
+      for (const t of [...M[a].tiles, ...tiles]) unseen[t]--;
+      if (unseen.some((u) => u < 0)) continue;
+      for (let t = 0; t < unseen.length; t++) if (rng.next() < 0.35) unseen[t] = 0; // 枯渇
+      const st = { counts, exposed: [a], unseen };
+      const d = yakuDistanceAfterCall(rules, st).distance;
+      const bd = bruteDistance(rules, st, 3);
+      assert.equal(Math.min(d, 4), Math.min(bd, 4), `${mode} trial ${trial}`);
+      assert.ok(d >= 1);
+      if (yakuDistanceAfterCallClamped(rules, st) !== d) clampDiff++;
+      checked++;
+      if (d <= 3) finite++;
+    }
+  }
+  assert.ok(checked >= 60 && finite >= 30, `${checked}件・距離3以内 ${finite}件`);
+  assert.ok(clampDiff >= 1, '旧（max(1, 不足)）との違いを含む');
+});
+
 // ---- PR #65 監査 P2-2：E2 の席ID ----
 test('P2-2 E2 の席ID：4席の配列と席順を保ち、代理の席は human。かなたは実際のあおとの席を参照する', () => {
   const seen = [];
@@ -263,16 +363,30 @@ test('P2-3 鳴き：選択（chosen）と成立（made）を分ける。後続�
 
 // ---- PR #65 監査 P3：試合記録と seed クラスタの 95% CI ----
 test('P3 seed クラスタのペア差：同じ seed の席替えを1クラスタとして平均し、t 分布の 95% CI', () => {
-  const mk = (cluster, seed, ranks, scores) => ({ cluster, seed, seats: ['aoto', 'kanata', 'mitsuki', 'yujin'], aotoSeat: 0, ranks, scores });
-  const A = [mk(0, 1, [4, 1, 2, 3], [80, 120, 100, 100]), mk(0, 1, [3, 1, 2, 4], [90, 120, 100, 90]), mk(1, 2, [2, 1, 3, 4], [100, 110, 95, 95])];
-  const V = [mk(0, 1, [2, 1, 3, 4], [100, 120, 95, 85]), mk(0, 1, [3, 1, 2, 4], [90, 120, 100, 90]), mk(1, 2, [1, 2, 3, 4], [115, 100, 95, 90])];
+  const mk = (variant, index, cluster, seed, ranks, scores) => ({ cell: 'ai4:math1:1', variant, index, cluster, seed, startDealer: seed % 4, seats: ['aoto', 'kanata', 'mitsuki', 'yujin'], aotoSeat: 0, novice: null, ranks, scores });
+  const A = [mk('A', 0, 0, 1, [4, 1, 2, 3], [80, 120, 100, 100]), mk('A', 1, 0, 1, [3, 1, 2, 4], [90, 120, 100, 90]), mk('A', 2, 1, 2, [2, 1, 3, 4], [100, 110, 95, 95])];
+  const V = [mk('C', 0, 0, 1, [2, 1, 3, 4], [100, 120, 95, 85]), mk('C', 1, 0, 1, [3, 1, 2, 4], [90, 120, 100, 90]), mk('C', 2, 1, 2, [1, 2, 3, 4], [115, 100, 95, 90])];
   const ci = clusterPairedCI(A, V, 'aoto', 'ranks');
   // クラスタ0：(−2＋0)/2＝−1、クラスタ1：−1 → 平均 −1・sd 0
   assert.deepEqual([ci.clusters, ci.pairs, ci.mean, ci.lo, ci.hi], [2, 3, -1, -1, -1]);
   const sc = clusterPairedCI(A, V, 'aoto', 'scores');
   assert.equal(sc.mean, 12.5); // (10, 15)
   assert.ok(sc.lo < 12.5 && sc.hi > 12.5);
-  assert.throws(() => clusterPairedCI(A, [V[1], V[0], V[2]].map((x, i) => (i === 2 ? { ...x, seed: 9 } : x)), 'aoto', 'ranks'), /pair mismatch/);
+  // 監査2回目 P3：キー（cell・index）で厳密に対応させる。並び順が違っても同じ結果
+  assert.deepEqual(clusterPairedCI(A, [V[2], V[0], V[1]], 'aoto', 'ranks'), ci);
+  const bad = (vs, as = A) => assert.throws(() => clusterPairedCI(as, vs, 'aoto', 'ranks'), /pair mismatch/);
+  bad(V.map((x, i) => (i === 2 ? { ...x, seed: 9 } : x)));            // seed
+  bad(V.map((x, i) => (i === 2 ? { ...x, startDealer: 3 } : x)));     // 親
+  bad(V.map((x, i) => (i === 2 ? { ...x, cluster: 0 } : x)));         // クラスタ
+  bad(V.map((x, i) => (i === 2 ? { ...x, cell: 'ai4:math1:4' } : x))); // セル
+  bad(V.map((x, i) => (i === 2 ? { ...x, seats: ['aoto', 'mitsuki', 'kanata', 'yujin'] } : x))); // 席
+  bad(V.map((x, i) => (i === 2 ? { ...x, aotoSeat: 1 } : x)));        // あおとの席
+  bad(V.map((x, i) => (i === 2 ? { ...x, novice: 'novice-basic' } : x))); // 代理の版
+  bad(V.slice(0, 2));                                                  // V 側の欠行
+  bad(V, A.slice(0, 2));                                               // A 側の欠行
+  bad([...V, V[1]]);                                                   // 重複
+  bad(V.map((x, i) => (i === 1 ? { ...x, variant: 'D2' } : x)));      // V 側の条件の混在
+  bad(V, A.map((x) => ({ ...x, variant: 'B1' })));                     // A 側が条件A でない
   assert.ok(Math.abs(t975(30) - 2.042) < 0.01 && t975(4) === 2.776);
   const rec = matchRecords('ai4:math1:1', 'C', [{ agents: AI4, ranks: [1, 2, 3, 4], scores: [130, 100, 90, 80], played: 1, endReason: 'normal', seed: 7, cluster: 0, startDealer: 2 }]);
   assert.deepEqual([rec[0].seed, rec[0].startDealer, rec[0].aotoSeat, rec[0].variant], [7, 2, 2, 'C']);

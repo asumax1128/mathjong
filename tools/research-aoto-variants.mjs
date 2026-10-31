@@ -41,23 +41,35 @@ export function postCallState(g, seat, p, call) {
   };
 }
 // 鳴いて1枚捨てた後、役のある和了形まで「あと何枚」か（届かなければ Infinity）と、その形で成立する役。
-// 手牌は 3k 枚（k＝手牌で作る面子の数）。必要な牌がすべて手にある形でも1枚捨てるので、距離は max(1, 不足枚数)。
+// 鳴いた後は必ず1枚捨てる（このエンジンに喰い替えの制限はないので、手牌のどの牌も捨てられる）。
+// 捨てる牌の種類ごとに残りの手牌（3k−1 枚）で不足枚数を数え、全ての捨て牌・面子の組合せの最小値を距離とする。
+// 不足する牌は、自分から見えていない残り枚数を超えられない（捨てた牌は自分の牌なので見えていない枚数は変わらない）。
+// 旧版（監査2回目の指摘 P2）は捨てる前の手牌で数えて max(1, 不足) としており、必要な牌がすべて手にある形で
+// 「捨てた牌を引き直す」ことになる場合に、その牌が残り0枚でも距離1と誤っていた。
 export function yakuDistanceAfterCall(rules, st) {
   const k = 3 - st.exposed.length;
   const melds = rules.melds;
-  let best = Infinity, bestYaku = null;
+  const discards = [];
+  for (let t = 0; t < st.counts.length; t++) if (st.counts[t] > 0) discards.push(t);
+  let best = Infinity, bestYaku = null, bestDiscard = null;
   const req = new Array(rules.types.length).fill(0);
+  const cnt = st.counts.slice();
   const visit = (start, depth, chosen) => {
     if (depth === k) {
-      let need = 0;
-      for (let t = 0; t < req.length; t++) {
-        const n = req[t] - st.counts[t];
-        if (n > 0) { if (n > Math.max(0, st.unseen[t])) return; need += n; }
+      let pending = null; // 役の判定は、どれか1つの捨て牌で best を更新できるときだけ行う
+      for (const d of discards) {
+        cnt[d]--;
+        let need = 0, ok = true;
+        for (let t = 0; t < req.length && ok; t++) {
+          const n = req[t] - cnt[t];
+          if (n > 0) { if (n > Math.max(0, st.unseen[t])) ok = false; else need += n; }
+        }
+        cnt[d]++;
+        if (ok && need < best && (!pending || need < pending.need)) pending = { need, d };
       }
-      const dist = Math.max(1, need);
-      if (dist >= best) return;
+      if (!pending) return;
       const ev = rules.evaluateMelds([...st.exposed, ...chosen], false);
-      if (ev.hasYaku) { best = dist; bestYaku = ev.yaku.map((y) => y.id); }
+      if (ev.hasYaku) { best = pending.need; bestYaku = ev.yaku.map((y) => y.id); bestDiscard = pending.d; }
       return;
     }
     for (let i = start; i < melds.length; i++) {
@@ -67,7 +79,33 @@ export function yakuDistanceAfterCall(rules, st) {
     }
   };
   visit(0, 0, []);
-  return { distance: best, yaku: bestYaku };
+  return { distance: best, yaku: bestYaku, discard: bestDiscard };
+}
+// 監査2回目の指摘前の距離（捨てる前の手牌で max(1, 不足)）。回帰テストの比較用に残す（研究条件では使わない）
+export function yakuDistanceAfterCallClamped(rules, st) {
+  const k = 3 - st.exposed.length;
+  const melds = rules.melds;
+  let best = Infinity;
+  const req = new Array(rules.types.length).fill(0);
+  const visit = (start, depth, chosen) => {
+    if (depth === k) {
+      let need = 0;
+      for (let t = 0; t < req.length; t++) {
+        const n = req[t] - st.counts[t];
+        if (n > 0) { if (n > Math.max(0, st.unseen[t])) return; need += n; }
+      }
+      const dist = Math.max(1, need);
+      if (dist < best && rules.evaluateMelds([...st.exposed, ...chosen], false).hasYaku) best = dist;
+      return;
+    }
+    for (let i = start; i < melds.length; i++) {
+      for (const t of melds[i].tiles) req[t]++;
+      visit(i, depth + 1, [...chosen, i]);
+      for (const t of melds[i].tiles) req[t]--;
+    }
+  };
+  visit(0, 0, []);
+  return best;
 }
 export function callYakuDistance(g, seat, p, call) {
   return yakuDistanceAfterCall(g.rules, postCallState(g, seat, p, call)).distance;
@@ -85,18 +123,29 @@ export function callKeepsYakuLegacy(g, seat, p, call, maxMissing = DEFAULT_MAX_M
   const cands = yakuCandidates(g.rules, view, { limit: 99, claim });
   return cands.some((c) => c.via === call.type && !c.closedOnly && !c.special && c.missing <= maxMissing);
 }
-// 検算用：鳴いた後の局面を view として独立に作り、yakuCandidates（claim なし）で最短の不足枚数を求める
+// 検算用：鳴いて1枚捨てた後の局面を view として独立に作り、yakuCandidates（claim なし）で最短の不足枚数を求める。
+// 捨てる牌の種類ごとに局面を作り（捨てた牌は自分の河に置く）、その最小値を取る。max(1, …) の切り上げは使わない。
 export function callYakuDistanceByHint(g, seat, p, call) {
   const st = postCallState(g, seat, p, call);
   const view = g.viewFor(seat);
-  const rivers = view.rivers.map((r) => r.slice());
-  const ri = rivers[p.from].lastIndexOf(g.typeOf(p.tile));
-  if (ri >= 0) rivers[p.from].splice(ri, 1);
+  const rivers0 = view.rivers.map((r) => r.slice());
+  const ri = rivers0[p.from].lastIndexOf(g.typeOf(p.tile));
+  if (ri >= 0) rivers0[p.from].splice(ri, 1);
   const melds = view.melds.map((ms) => ms.slice());
   melds[seat].push({ meld: st.meld, kind: g.rules.melds[st.meld].kind, call: call.type, tiles: g.rules.melds[st.meld].tiles.slice(), from: p.from });
-  const v = { seat, hand: st.handIds.map((id) => ({ id, type: g.typeOf(id) })), melds, rivers, ...(view.doraIndicators ? { doraIndicators: view.doraIndicators } : {}) };
-  const c = yakuCandidates(g.rules, v, { limit: 999 }).filter((x) => !x.closedOnly && !x.special);
-  return c.length ? Math.max(1, Math.min(...c.map((x) => x.missing))) : Infinity;
+  let best = Infinity;
+  const seen = new Set();
+  for (const id of st.handIds) {
+    const t = g.typeOf(id);
+    if (seen.has(t)) continue;
+    seen.add(t);
+    const rivers = rivers0.map((r) => r.slice());
+    rivers[seat].push(t);
+    const hand = st.handIds.filter((x) => x !== id).map((x) => ({ id: x, type: g.typeOf(x) }));
+    const v = { seat, hand, melds, rivers, ...(view.doraIndicators ? { doraIndicators: view.doraIndicators } : {}) };
+    for (const c of yakuCandidates(g.rules, v, { limit: 999 })) if (!c.closedOnly && !c.special && c.missing < best) best = c.missing;
+  }
+  return best;
 }
 
 // ---- C：聴牌になる捨て牌（自分の手牌だけ）。門前は riichiOptions、鳴いた手は待ちを直接計算 ----
@@ -217,17 +266,46 @@ export function t975(df) {
 }
 // seed クラスタのペア差：同じ試合（seed・席・相手）の条件 V と A の差を、seed ごとに平均してから、クラスタ平均の平均と 95% CI（t, df=n−1）
 // subject：'aoto'（その試合のあおとの席）または初心者代理の版（席0）。field：'ranks' | 'scores'
+// 条件A と条件V の試合を、キー（cell・index）で厳密に対応させる（監査2回目 P3）。
+// 重複・欠損（どちらか一方にしかない試合）、cell・cluster・seed・親・席・あおとの席・代理の版の不一致は例外にする。
+export function pairRecords(recA, recV) {
+  const key = (r) => `${r.cell}|${r.index}`;
+  const index = (recs, label) => {
+    const m = new Map();
+    for (const r of recs) {
+      const k = key(r);
+      if (m.has(k)) throw new Error(`pair mismatch: duplicate ${label} ${k}`);
+      m.set(k, r);
+    }
+    return m;
+  };
+  const A = index(recA, 'A'), V = index(recV, 'V');
+  const vVariant = recV.length ? recV[0].variant : null;
+  for (const r of recA) if (r.variant !== 'A') throw new Error(`pair mismatch: A side has variant ${r.variant}`);
+  for (const r of recV) if (r.variant !== vVariant) throw new Error('pair mismatch: mixed variants on V side');
+  for (const k of A.keys()) if (!V.has(k)) throw new Error(`pair mismatch: missing V ${k}`);
+  for (const k of V.keys()) if (!A.has(k)) throw new Error(`pair mismatch: missing A ${k}`);
+  const pairs = [];
+  for (const [k, a] of A) {
+    const v = V.get(k);
+    for (const f of ['cell', 'index', 'cluster', 'seed', 'startDealer', 'aotoSeat', 'novice']) {
+      if (a[f] !== v[f]) throw new Error(`pair mismatch: ${f} ${k}`);
+    }
+    if (a.seats.length !== 4 || a.seats.join() !== v.seats.join()) throw new Error(`pair mismatch: seats ${k}`);
+    pairs.push([a, v]);
+  }
+  return pairs;
+}
 export function clusterPairedCI(recA, recV, subject, field) {
   const by = new Map();
-  recV.forEach((r, i) => {
-    const a = recA[i];
-    if (a.seed !== r.seed || a.seats.join() !== r.seats.join()) throw new Error('pair mismatch');
+  for (const [a, r] of pairRecords(recA, recV)) {
     const seat = subject === 'aoto' ? r.aotoSeat : r.seats.indexOf(subject);
-    if (seat < 0) return;
+    if (seat < 0) continue;
     const d = r[field][seat] - a[field][seat];
-    if (!by.has(r.cluster)) by.set(r.cluster, []);
-    by.get(r.cluster).push(d);
-  });
+    const ck = `${r.cell}|${r.cluster}`;
+    if (!by.has(ck)) by.set(ck, []);
+    by.get(ck).push(d);
+  }
   const means = [...by.values()].map((xs) => xs.reduce((x, y) => x + y, 0) / xs.length);
   const n = means.length;
   if (!n) return null;
@@ -243,10 +321,10 @@ export function runAll({ scale = 1, seed0 = 700001, modes = ['math1', 'math2'], 
     definition: {
       tool: 'tools/research-aoto-variants.mjs', ruleset: 2, riichiDeposit: RIICHI_DEPOSIT, agariYame: true, seed0, scale, variants,
       variantLabels: VARIANT_LABELS,
-      bRule: 'B・D：本番が選んだ鳴きを、その鳴きだけを適用した仮想局面で評価し、鳴いた手として役のある和了形まで（鳴いて1枚捨てた後に）あと N 枚以内なら鳴く（N は B1/B2/B3 の数字）。エンジンの rules.evaluateMelds で全組合せを列挙（PR #65 監査 P2-1 の修正）',
+      bRule: 'B・D：本番が選んだ鳴きを、その鳴きだけを適用した仮想局面で評価する。鳴いた後の合法な捨て牌ごとに、残りの手牌と見えていない残り枚数から、鳴いた手として役のある和了形まで「あと何枚」かを数え、その最小値が N 枚以内なら鳴く（N は B1/B2/B3 の数字。max(1, …) の切り上げは使わない）。エンジンの rules.evaluateMelds で全組合せを列挙（PR #65 監査 P2-1・監査2回目 P2 の修正）',
       seatIds: 'decideCharacter の seatIds は本番と同じ4席の配列（初心者代理の席は human）。PR #65 監査 P2-2 の修正',
       callMetrics: '鳴きは選択（chosen）と成立（made）を分ける。PR #65 監査 P2-3 の修正',
-      ci: '条件Aとのペア差は、同じ seed の席替え（E1 は4席、E2 は代理4版）を1クラスタとして平均し、クラスタ平均の 95% CI（t 分布）',
+      ci: '条件Aとのペア差は、試合を cell・index で厳密に対応させ（seed・親・クラスタ・席・代理の版の一致、重複・欠損なしを検査）、同じ seed の席替え（E1 は4席、E2 は代理4版）を1クラスタとして平均し、クラスタ平均の 95% CI（t 分布）',
       note: '研究専用。本番の判断を求めてから研究用の規則で差し替える。統計的な採用判断はしない（独立評価に委ねる）。初心者代理は研究モデルで実際の人間ではない。',
       plan: plan(scale, modes),
     },
