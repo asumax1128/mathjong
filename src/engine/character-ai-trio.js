@@ -3,11 +3,12 @@ import { decide, chooseCall, handValue, viewCounts, unseenCounts, riichiDecision
 import { advHandValue, dangerTable, WIN_COEF } from './ai-levels.js';
 import { dangerTableV06 } from './character-ai.js';
 
-export const TRIO_PARAMS = Object.freeze({
-  yujin: Object.freeze({ tripletWeight: 4, formulaWeight: 0.25 }),
+// Research branch only: permit controlled yujin parameter sweeps.
+export const TRIO_PARAMS = {
+  yujin: { tripletWeight: 4, formulaWeight: 0.25 },
   tara: Object.freeze({ minLive: 6, maxDelay: 2, minWall: 24 }),
   nocchi: Object.freeze({ defense: 1.5, ownBase: 2.5, opponentBase: 3 }),
-});
+};
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 const pickBest = (xs, score, rng) => {
   const values = xs.map(score), best = Math.max(...values);
