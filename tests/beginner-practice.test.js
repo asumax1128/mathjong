@@ -118,8 +118,9 @@ test('4-B：下家・対面の =1/2 ではチーの選択肢がない（エン�
   conserved(p);
 });
 
-test('4-C：対面の sin でポン（上家以外からも可）、刻子を公開して打牌', () => {
+test('4-C：現行ルールの対面45°でポン（関数牌禁止）、刻子を公開して打牌', () => {
   const p = createPractice(rules, L['4C']);
+  assert.equal(p.game.ruleset, 2, '通常対局と同じ関数牌ポン禁止ルール');
   const pd = pendingOf(p);
   assert.equal(pd.from, 2);
   assert.ok(pd.pon);
@@ -129,11 +130,19 @@ test('4-C：対面の sin でポン（上家以外からも可）、刻子を公
   const m = p.game.melds[HUMAN][0];
   assert.equal(m.call, 'pon');
   assert.equal(m.kind, 'koutsu');
-  assert.ok(m.tiles.every((id) => keyOf(p.game, id) === 'f:sin'));
+  assert.ok(m.tiles.every((id) => keyOf(p.game, id) === 'a:45'));
   assert.equal(p.game.drawn, null);
   discard(p, 'a:90');
   assert.equal(p.done, true);
   conserved(p);
+});
+
+test('4-C：教材で関数牌のポンを許可しない。説明も現行ルールに一致', () => {
+  const p = createPractice(rules, L['4C']);
+  assert.equal(p.game.ruleset, 2);
+  assert.match(L['4C'].lead, /関数牌はポンできない/);
+  assert.ok(!L['4C'].hand.filter((x) => x === 'sin').length || L['4C'].hand.filter((x) => x === 'sin').length < 2);
+  assert.equal(keyOf(p.game, pendingOf(p).tile), 'a:45');
 });
 
 test('4-D：鳴いた手は役が必要（形が完成しても役なしならロンの選択肢が出ない）、役があればロン', () => {
