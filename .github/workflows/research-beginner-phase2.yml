@@ -20,8 +20,8 @@ jobs:
       - name: Compare AI baseline and candidate settings using current rules
         run: |
           mkdir -p /tmp/beginner-phase2
-          BEGINNER_MATCHES=36 NOVICE_SMART=0 node tools/research-beginner-phase2.mjs | tee /tmp/beginner-phase2/basic.json
-          BEGINNER_MATCHES=36 NOVICE_SMART=1 node tools/research-beginner-phase2.mjs | tee /tmp/beginner-phase2/riichi-chi.json
+          BEGINNER_MATCHES=48 NOVICE_SMART=0 node tools/research-beginner-phase2.mjs | tee /tmp/beginner-phase2/basic.json
+          BEGINNER_MATCHES=48 NOVICE_SMART=1 node tools/research-beginner-phase2.mjs | tee /tmp/beginner-phase2/riichi-chi.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
