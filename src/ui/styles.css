@@ -1178,3 +1178,28 @@ table.values td.undef { color: #999; font-size: 12px; }
 .actions .auto-tsumo .apt-state { font-weight: 700; font-size: 12px; }
 .actions .auto-tsumo.on { background: #1f6f4a; border-color: #2e9a66; color: #fff; }
 .actions.waiting .auto-tsumo { margin-left: auto; }
+
+/* ===== 選んだ牌を捨てた後の聴牌プレビュー（docs/71）：ヒント欄の中の補足行。ヒント欄の大きさは変えず、あふれたら欄の中でスクロール ===== */
+.table .study-dock .discard-preview {
+  flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+  padding: 4px 10px; font-size: 12px; line-height: 1.35; color: var(--ink); text-align: left;
+  border-bottom: 1px solid rgba(206, 223, 227, .12);
+}
+.discard-preview p { margin: 0 0 2px; }
+.discard-preview .dp-verdict { font-weight: 700; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.discard-preview .dp-badge { font-size: 10.5px; font-weight: 700; padding: 0 5px; border-radius: 4px; white-space: nowrap; }
+.discard-preview .dp-badge.dp-yes { background: #1f6f4a; color: #fff; }
+.discard-preview .dp-badge.dp-no { background: rgba(206, 223, 227, .18); color: var(--ink); border: 1px solid rgba(206, 223, 227, .35); }
+.discard-preview .dp-waits { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.discard-preview .dp-label { color: var(--gold); font-weight: 700; }
+.discard-preview .dp-wait { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+.discard-preview .dp-wait small { font-size: 10.5px; color: var(--ink-dim); }
+.discard-preview .dp-wait.no-yaku .tile { opacity: .6; }
+.discard-preview .dp-tag { font-style: normal; font-size: 10px; color: #ffb4a8; border: 1px solid rgba(255, 180, 168, .5); border-radius: 3px; padding: 0 3px; margin-left: 2px; }
+.discard-preview .dp-note { color: #ffd27a; }
+.discard-preview .dp-foot { font-size: 10.5px; color: var(--ink-dim); }
+/* 狭い画面：文字を少し小さく */
+@media (max-width: 360px) {
+  .table .study-dock .discard-preview { font-size: 11px; padding: 3px 8px; }
+  .discard-preview .dp-foot { font-size: 10px; }
+}

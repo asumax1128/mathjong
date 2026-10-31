@@ -8538,6 +8538,146 @@ if (server) {
   PORT = server.address().port;
   LOCAL = `http://localhost:${PORT}${BASE}`;
 }
+
+// ---- docs/71：選んだ牌を捨てた後の聴牌プレビュー（ヒント欄の補足行）----
+const dpState = (page) => page.evaluate(() => {
+  const { S } = window.__mathjong, g = S.game;
+  const b = (e) => { if (!e) return null; const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom, w: r.width, h: r.height }; };
+  const q = (x) => document.querySelector(x);
+  const dp = q('.study-dock .discard-preview');
+  return {
+    text: dp ? dp.innerText.replace(/\s+/g, ' ') : null, waits: dp ? dp.querySelectorAll('.dp-wait').length : 0,
+    waitText: dp ? [...dp.querySelectorAll('.dp-wait small')].map((e) => e.textContent) : [],
+    placeholder: !!q('.study-placeholder'), hint: !!q('.study-dock-content.hint-box'),
+    dp: b(dp), dock: b(q('.study-dock')), hand: b(q('.self .hand')), bar: b(q('footer.bar')), vh: innerHeight, vw: innerWidth,
+    overflow: document.documentElement.scrollWidth - innerWidth, selected: S.selected, accepted: S.input.accepted,
+    pending: g.pending() && { seat: g.pending().seat, type: g.pending().type }, events: g.events.length,
+  };
+});
+async function v14DiscardPreview(browser) {
+  const sizes = [[390, 844], [320, 568], [375, 667], [667, 375], [1180, 820]];
+  for (const [width, height] of sizes) {
+    for (const mode of width === 390 ? ['math1', 'math2'] : ['math1']) {
+      const ctx = await newContext(browser, { viewport: { width, height }, isMobile: width < 1200, hasTouch: true });
+      const page = await ctx.newPage(), errors = watchErrors(page);
+      const label = `${width}x${height} ${mode}`;
+      await page.goto(LOCAL + `?mode=${mode}&seed=7&speed=slow&newrules=2`);
+      await page.locator('.hand .tile').first().waitFor();
+      await r2Scene(page, TENPAI2);
+      const ov = (a, c) => Math.min(a.r, c.r) - Math.max(a.l, c.l) > 0.75 && Math.min(a.b, c.b) - Math.max(a.t, c.t) > 0.75;
+      // (1) 未選択：プレビューなし（従来の案内）
+      let st = await dpState(page);
+      assert.equal(st.text, null, `未選択は表示しない ${label}`);
+      assert.ok(st.placeholder);
+      // (2) ツモ牌（−√3）を1回タップ：聴牌・待ち2種・見えていない枚数（エンジンの公開情報と一致）・注記。打牌はしない
+      await page.locator('.hand .tile.drawn').tap();
+      st = await dpState(page);
+      assert.match(st.text, /この牌を捨てると聴牌です/, label);
+      assert.match(st.text, /待ち牌：/);
+      assert.match(st.text, /山に残っている数ではありません/);
+      assert.doesNotMatch(st.text, /正解|不正解|必ず|山にN枚/);
+      assert.equal(st.waits, 2);
+      const unseen = await page.evaluate(() => {
+        const { S } = window.__mathjong, g = S.game, v = g.viewFor(0);
+        const rest = g.hands[0].filter((id) => id !== S.selected);
+        const waits = g.waitsOf(g.countsOf(rest), g.exposedMelds(0), true);
+        return waits.map((t) => `（自分から見えていない牌：${4 - v.hand.filter((h) => h.type === t).length - v.rivers.flat().filter((x) => x === t).length - v.melds.flat().flatMap((m) => m.tiles).filter((x) => x === t).length - v.doraIndicators.filter((d) => d.type === t).length}枚）`);
+      });
+      assert.deepEqual(st.waitText, unseen, '見えていない枚数は公開情報だけ');
+      assert.equal(st.accepted, 0, '1回タップでは打牌しない');
+      assert.ok(!st.placeholder, '案内の代わりにプレビュー');
+      // 配置：ヒント欄の中・手牌と操作バーに重ならない・画面内・横スクロールなし。
+      // iPhone 標準（390×844）・横長・タブレットはスクロールなしで見える。小さい縦画面（320×568・375×667）のヒント欄は従来どおり
+      // 手牌の下にあり、卓内スクロールで見る（既存の配置。v07TableHintDock と同じ）
+      const visibleNow = !ov(st.dp, st.bar) && st.dp.b <= st.vh + 1;
+      if (width === 390 || width >= 667) assert.ok(visibleNow, `スクロールなしで見える ${label} ${JSON.stringify({ dp: st.dp, bar: st.bar })}`);
+      if (!visibleNow) { await page.locator('.study-dock').scrollIntoViewIfNeeded(); st = await dpState(page); }
+      assert.ok(st.dp.t >= st.dock.t - 0.5 && st.dp.b <= st.dock.b + 0.5, `ヒント欄の中 ${label} ${JSON.stringify([st.dp, st.dock])}`);
+      assert.ok(!ov(st.dp, st.hand) && !ov(st.dp, st.bar), `手牌・操作バーと重ならない ${label} ${JSON.stringify({ dp: st.dp, dock: st.dock, hand: st.hand, bar: st.bar, vh: st.vh })}`);
+      assert.ok(st.bar.b <= st.vh + 1 && st.bar.t >= 0, `操作バーが画面内 ${label}`);
+      assert.ok(st.overflow <= 1, `横にはみ出さない ${label}`);
+      if (!visibleNow) await page.evaluate(() => { document.querySelector('.table').scrollTop = 0; });
+      // 既存の手牌の上の「捨てると待ち」も残る
+      assert.match((await page.locator('.self-info').innerText()).replace(/\s+/g, ' '), /捨てると待ち/);
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/v14-preview-tenpai-${width}x${height}-${mode}.png` });
+      // (3) 選択変更：聴牌にならない牌（cos）→ 表示を更新。「別の牌なら聴牌にできます」
+      const cosId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'f:cos'); });
+      await page.locator(`.hand .tile[data-id="${cosId}"]`).tap();
+      st = await dpState(page);
+      assert.match(st.text, /この牌を捨てると聴牌にはなりません/);
+      assert.match(st.text, /別の牌なら聴牌にできます/);
+      assert.equal(st.waits, 0);
+      assert.equal(st.selected, cosId);
+      if (SHOTS) await page.screenshot({ path: `${SHOTS}/v14-preview-not-${width}x${height}-${mode}.png` });
+      // (4) ヒントを開いても、プレビューはヒントの内容の上に残る（ヒントの内容も表示）
+      await page.locator('button[data-action="hint"]').tap();
+      await page.locator(`.hand .tile.drawn`).tap();
+      st = await dpState(page);
+      assert.match(st.text, /この牌を捨てると聴牌です/);
+      assert.ok(st.hint, 'ヒントの内容も表示');
+      assert.ok(st.dp.t >= st.dock.t - 0.5 && st.dp.b <= st.dock.b + 0.5, `ヒント欄の中（ヒント表示中） ${label}`);
+      await page.locator('button[data-action="hint"]').tap();
+      // (5) 同じ牌を2回目のタップで打牌：プレビューは消える（他家の番）
+      const ev0 = st.events;
+      await page.locator('.hand .tile.drawn').tap();
+      st = await dpState(page);
+      assert.equal(st.accepted, 1, '2回目のタップで打牌');
+      assert.ok(st.events > ev0);
+      assert.equal(st.text, null, '打牌の確定後は表示しない');
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    }
+  }
+  // (6) フリテン：ツモ牌を待ちの牌（30°）にして、それを選ぶ → 聴牌だがフリテン（ロンだけ不可）
+  //     リーチの宣言牌の選択中も同じ表示。他家の打牌（ロン／ポン／チーの判断中）・卒業試験・リーチ中は表示しない。長押しの並び替えで選択とプレビューは消え、打牌しない
+  for (const mode of ['math1', 'math2']) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    const cdp = await ctx.newCDPSession(page);
+    await page.goto(LOCAL + `?mode=${mode}&seed=7&speed=slow&newrules=2`);
+    await page.locator('.hand .tile').first().waitFor();
+    await r2Scene(page, TENPAI2);
+    await page.evaluate(() => { window.__r2.rigDraw('30'); window.__mathjong.render(); });
+    const t30 = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'a:30'); });
+    await page.locator(`.hand .tile[data-id="${t30}"]`).tap();
+    let st = await dpState(page);
+    assert.match(st.text, /この牌を捨てると聴牌です/, mode);
+    assert.match(st.text, /フリテンのためロンできません（ツモは別判定）/);
+    assert.match(st.text, /捨て牌/);
+    // 長押しの並び替え：選択とプレビューが消え、打牌しない
+    const other = await page.evaluate(() => { const { S } = window.__mathjong; return S.game.hands[0].find((x) => x !== S.selected); });
+    const box = await tileBox(page, other);
+    await touchDrag(page, cdp, other, box.x + box.width / 2 + 2, box.y + box.height / 2, { steps: 0 });
+    st = await dpState(page);
+    assert.equal(st.selected, null, '長押しで選択解除');
+    assert.equal(st.text, null, '長押しでプレビューも消える');
+    assert.equal(st.accepted, 0, '長押しで打牌しない');
+    // リーチの宣言牌の選択：聴牌になる牌を選ぶと同じプレビュー（従来の案内も残る）
+    await page.locator('button[data-action="riichi"]').click();
+    await page.locator(`.hand .tile[data-id="${t30}"]`).click();
+    st = await dpState(page);
+    assert.match(st.text, /この牌を捨てると聴牌です/);
+    assert.match(await page.locator('.riichi-status').innerText(), /待ちを確認/);
+    await page.locator('button[data-action="riichi-cancel"]').click();
+    // 卒業試験では表示しない（別PRで検討）
+    await page.evaluate(() => { const m = window.__mathjong; m.S.matchSettings.exam = true; m.render(); });
+    assert.equal((await dpState(page)).text, null, '卒業試験では表示しない');
+    await page.evaluate(() => { const m = window.__mathjong; m.S.matchSettings.exam = false; m.render(); });
+    assert.match((await dpState(page)).text, /この牌を捨てると聴牌です/);
+    // 打牌 → 他家の番：ロン／ポン／チーの判断中を含めて表示しない
+    await page.locator(`.hand .tile[data-id="${t30}"]`).click();
+    for (let i = 0; i < 12; i++) {
+      st = await dpState(page);
+      if (st.pending && st.pending.seat === 0 && st.pending.type === 'turn') break;
+      assert.equal(st.text, null, `自分の打牌番以外は表示しない ${JSON.stringify(st.pending)}`);
+      await page.evaluate(() => { const g = window.__mathjong.S.game, p = g.pending(); if (!p) return; if (p.type === 'claim') g.respond(p.seat, { type: 'pass' }); else g.discard(p.seat, g.drawn); window.__mathjong.render(); clearTimeout(window.__mathjong.S.timer); window.__mathjong.S.timer = null; });
+    }
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 聴牌プレビュー（docs/71）：1回タップで「捨てると聴牌／聴牌にはなりません」・待ちと見えていない枚数・フリテン、選択変更・2回タップの打牌・長押し・リーチの宣言牌・ヒント表示中、5画面でヒント欄の中に収まる');
+}
+
 let browser;
 const stats = { rounds: 0, wins: [0, 0, 0, 0], draws: 0, tsumo: 0, ron: 0, ronDeclined: 0, chi: 0, chiPassed: 0, chiOverriddenByRon: 0, discards: 0, yaku: {} };
 const t0 = Date.now();
@@ -8549,7 +8689,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -8621,6 +8761,7 @@ try {
   await v12WaitsAndYaku(browser);
   await v12Layout(browser);
   await v13RiichiAssist(browser);
+  await v14DiscardPreview(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。

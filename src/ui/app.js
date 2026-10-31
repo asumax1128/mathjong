@@ -11,6 +11,7 @@ import { trigExact } from '../engine/exact.js';
 import { tileHTML, formulaHTML, backHTML, valueHTML, angleHTML, angleText } from './render.js';
 import { yakuCandidates, warmUp, claimForSeat } from '../engine/yakuhint.js';
 import { tenpaiWaitsView } from './waits-view.js';
+import { discardPreview, PREVIEW_TEXT } from './discard-preview.js';
 import { hintKey } from './hintstate.js';
 import { analyzeFormulas, initialSelection, assignColors, exposedSummary } from '../engine/formulahint.js';
 import { createMatch, applyRoundResult, dealerOf, handLabel, ranks, matchAt, START_POINTS, RIICHI_DEPOSIT, potTotal } from '../engine/match.js';
@@ -741,6 +742,46 @@ function selfInfoHTML() {
   return `<div class="self-info${f.furiten ? ' furiten' : ''}">${html}</div>`;
 }
 
+// ---- 選んだ牌を捨てた後の聴牌プレビュー（docs/71）：ヒント欄の補足行。画面だけの補助で、対局の状態は変えない ----
+// 自分の通常の打牌番で牌を1回タップ（選択）したときだけ。リーチ中・他家の番・ロン／ポン／チーの判断中・結果画面・
+// 卒業試験（別PRで検討）では出さない。計算は自分の view と自分だけが知る情報（自分の捨て牌の種類・同巡の見逃し）だけ。
+function discardPreviewData() {
+  const g = S.game;
+  if (!g || S.modal || (S.matchSettings && S.matchSettings.exam)) return null;
+  const p = g.pending();
+  const myTurn = !!(p && p.seat === HUMAN && p.type === 'turn');
+  if (!myTurn || S.selected === null) return null;
+  const allowed = humanDiscardFilter();
+  return discardPreview(rules, g.viewFor(HUMAN), {
+    selected: S.selected, myTurn, inRiichi: !!g.riichi[HUMAN], legalIds: g.hands[HUMAN].filter((id) => allowed(id)),
+    furitenRule: !!g.furitenRule, discardedTypes: g.furitenRule ? g.discarded[HUMAN] : null, tempFuriten: !!(g.furitenRule && g.tempFuriten[HUMAN]),
+  });
+}
+function discardPreviewHTML() {
+  const pv = discardPreviewData();
+  if (!pv) return '';
+  const lines = [];
+  if (pv.tenpai) {
+    const fu = pv.furiten && pv.furiten.ron;
+    lines.push(`<p class="dp-verdict"><span class="dp-badge dp-yes">聴牌</span>${PREVIEW_TEXT.tenpai}</p>`);
+    const ws = pv.waits.map((w) => {
+      const tags = `${w.winnable ? '' : '<em class="dp-tag">役なし</em>'}${pv.furiten && pv.furiten.discard.includes(w.type) ? '<em class="dp-tag">捨て牌</em>' : ''}`;
+      return `<span class="dp-wait${w.winnable ? '' : ' no-yaku'}" title="${typeText(w.type)}：自分から見えていない牌 ${w.unseen}枚${w.winnable ? '' : '（役がないので和了できません）'}">${tileHTML(T(w.type), { size: 'xs' })}<small>（自分から見えていない牌：${w.unseen}枚）</small>${tags}</span>`;
+    }).join('');
+    lines.push(`<p class="dp-waits"><span class="dp-label">待ち牌：</span>${ws}</p>`);
+    const notes = [];
+    if (pv.yaku === 'none') notes.push(PREVIEW_TEXT.noYaku);
+    else if (pv.yaku === 'some') notes.push(PREVIEW_TEXT.someNoYaku);
+    if (fu) notes.push(PREVIEW_TEXT.furiten);
+    if (notes.length) lines.push(`<p class="dp-note">${notes.join('。')}</p>`);
+    lines.push(`<p class="dp-foot">※${PREVIEW_TEXT.unseenNote}</p>`);
+  } else {
+    lines.push(`<p class="dp-verdict"><span class="dp-badge dp-no">聴牌ではない</span>${PREVIEW_TEXT.notTenpai}</p>`);
+    lines.push(`<p class="dp-note">${pv.others === 'tenpai' ? PREVIEW_TEXT.othersTenpai : PREVIEW_TEXT.othersNone}</p>`);
+  }
+  return `<div class="discard-preview ${pv.tenpai ? 'dp-tenpai' : 'dp-not'}" role="status" aria-live="polite" aria-label="選んだ牌を捨てた場合">${lines.join('')}</div>`;
+}
+
 function handHTML() {
   const g = S.game;
   const p = g.pending();
@@ -938,6 +979,7 @@ function render() {
   // ヒント表示中は、役候補が参照する公開情報（手牌・河・公開面子・宣言状態）が変わったときだけ再計算する。
   // 自動更新ではヒント使用回数を加算しない。
   if (S.hintOpen) refreshHintIfChanged();
+  const dpHTML = discardPreviewHTML(); // 選んだ牌を捨てた後の聴牌プレビュー（docs/71）。ヒント欄の中の補足行
   app.innerHTML = `
     ${headerHTML()}
     <main class="table">
@@ -950,7 +992,8 @@ function render() {
           <b id="study-heading">ヒント・数式確認</b>
           <span>${S.hintOpen ? (S.hintStage === 2 ? '数式確認' : '発見ヒント') : 'ヒントOFF'}</span>
         </div>
-        ${S.hintText ? `<div class="study-dock-content hint-box" tabindex="0" aria-label="ヒントの内容（スクロールできます）">${S.hintText}</div>` : '<p class="study-placeholder">タップ2回で打牌、長押しで並べ替え。「ヒント」で数式・役候補を確認。</p>'}
+        ${dpHTML}
+        ${S.hintText ? `<div class="study-dock-content hint-box" tabindex="0" aria-label="ヒントの内容（スクロールできます）">${S.hintText}</div>` : dpHTML ? '' : '<p class="study-placeholder">タップ2回で打牌、長押しで並べ替え。「ヒント」で数式・役候補を確認。</p>'}
       </section>
     </main>
     <footer class="bar">${actionsHTML()}</footer>
