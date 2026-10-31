@@ -1,0 +1,29 @@
+name: Phase 2 beginner AI research (no deploy)
+on:
+  pull_request:
+    paths:
+      - tools/research-beginner-phase2.mjs
+      - .github/workflows/research-beginner-phase2.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check tools/research-beginner-phase2.mjs
+      - name: Compare AI baseline and candidate settings using current rules
+        run: |
+          mkdir -p /tmp/beginner-phase2
+          BEGINNER_MATCHES=18 NOVICE_SMART=0 node tools/research-beginner-phase2.mjs | tee /tmp/beginner-phase2/basic.json
+          BEGINNER_MATCHES=18 NOVICE_SMART=1 node tools/research-beginner-phase2.mjs | tee /tmp/beginner-phase2/riichi-chi.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: beginner-phase2-results
+          path: /tmp/beginner-phase2/*.json
