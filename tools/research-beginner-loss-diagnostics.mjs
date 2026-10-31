@@ -179,13 +179,15 @@ export function playRound({ rules, seed, dealer, agents, decideFor, info }) {
 }
 
 // 1試合：agents は席0〜3の担当（AI の id または 'novice-basic' / 'novice-smart'）
-export function playMatch({ mode, length, agents, seed, startDealer }) {
+// policies（研究用・任意）：{ id: (g, p, seat, rng, info, aiIds) => action } その担当の判断を差し替える（例：あおとの改善案の研究）
+export function playMatch({ mode, length, agents, seed, startDealer, policies = null }) {
   const rules = createRules(makeConfig({ mode }));
   let m = createMatch({ length, startDealer, riichiDeposit: RIICHI_DEPOSIT, agariYame: true });
   let history = newPublicHistory();
   const aiIds = agents.filter((a) => AI4.includes(a));
   const decideFor = (g, p, s, rng, info) => {
     const id = agents[s];
+    if (policies && policies[id]) return policies[id](g, p, s, rng, info, aiIds);
     if (id.startsWith('novice-')) return NOVICE[id.slice(7)](g, p, rng);
     return decideCharacter(g, s, id, rng, info, aiIds);
   };

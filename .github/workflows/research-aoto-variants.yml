@@ -1,0 +1,46 @@
+name: Research aoto variants A-D (no deploy)
+# 研究専用（docs/70）：あおとの改善案4条件の比較ツールの再現性テストと小規模の実行。本番のAI・エンジン・UIは変更しない。公開・デプロイはしない
+on:
+  pull_request:
+    paths:
+      - 'tools/research-aoto-variants.mjs'
+      - 'tools/research-beginner-loss-diagnostics.mjs'
+      - 'tests/research-aoto-variants.test.js'
+      - '.github/workflows/research-aoto-variants.yml'
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: 'サンプル数の倍率'
+        default: '0.2'
+permissions:
+  contents: read
+jobs:
+  variants:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Unit and reproducibility tests
+        run: node --test tests/research-aoto-variants.test.js tests/research-beginner-loss-diagnostics.test.js
+      - name: Run twice with the same seed and compare (reproducibility)
+        run: |
+          mkdir -p /tmp/aoto
+          S="${{ github.event.inputs.scale || '0.1' }}"
+          node tools/research-aoto-variants.mjs --scale "$S" --out /tmp/aoto/a.json
+          node tools/research-aoto-variants.mjs --scale "$S" --out /tmp/aoto/b.json
+          strip() { node -e "const d=require('$1');delete d.seconds;console.log(require('crypto').createHash('sha256').update(JSON.stringify(d)).digest('hex'))"; }
+          a=$(strip /tmp/aoto/a.json); b=$(strip /tmp/aoto/b.json)
+          echo "a=$a"; echo "b=$b"; test "$a" = "$b"
+      - name: Production AI, engine and UI unchanged versus main
+        run: |
+          git fetch --depth=1 origin main
+          git diff --exit-code origin/main -- src index.html
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aoto-variants
+          path: /tmp/aoto
+          if-no-files-found: ignore
