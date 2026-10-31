@@ -6452,7 +6452,10 @@ async function v07BeginnerRoom2(browser) {
     assert.equal(await count('button[data-action="bp-riichi"], button[data-action="bp-discard"]'), 0, '課題で受け付けない操作は表示しない');
     await tap('bp-tsumo');
     assert.match(await page.locator('.bp-result').innerText(), /ツモ和了[\s\S]*ほかの3人が払う/);
-    assert.deepEqual((await page.locator('.bp-settle td:nth-child(3)').allInnerTexts()).map((x) => parseInt(x, 10)), [108, 98, 98, 96], '子ツモの精算と合計400点');
+    // 現行ルール（docs/68）：和了点にドラを含む。子ツモ：親（上家）2B、ほかの子 B
+    const B = parseInt((await page.locator('.bp-result .bp-points').first().innerText()).match(/和了点 (\d+)点/)[1], 10);
+    assert.match(await page.locator('.bp-result').innerText(), /ドラ 1枚（\+1点・役ではない）/);
+    assert.deepEqual((await page.locator('.bp-settle td:nth-child(3)').allInnerTexts()).map((x) => parseInt(x, 10)), [100 + 4 * B, 100 - B, 100 - B, 100 - 2 * B], '子ツモの精算と合計400点');
     // 途中で再読み込み → 一覧の「続きから」
     await tap('br-next');
     await lesson('F1');
@@ -6494,7 +6497,12 @@ async function v07BeginnerRoom2(browser) {
     await tap('bp-continue'); await tap('bp-continue');
     await tap('bp-chi'); await pickTile('90°'); await tap('bp-discard'); await tap('br-next');
     await lesson('4C');
-    await tap('bp-pon'); await pickTile('90°'); await tap('bp-discard'); await tap('br-next');
+    // 7-C：角度牌 45° のポン（関数牌はポンできない・PR #57）
+    assert.match(await page.locator('button[data-action="bp-pon"]').innerText(), /45/);
+    assert.match(await page.locator('.bp-lead').innerText(), /関数牌はポンできない/);
+    await tap('bp-pon'); await pickTile('90°'); await tap('bp-discard');
+    assert.match(await feedback(), /45° で 45°×3 の刻子/);
+    await tap('br-next');
     await lesson('4D');
     await tap('bp-chi'); await pickTile('135°'); await tap('bp-discard');
     assert.match(await page.locator('.bp-pause').innerText(), /役がない/);
@@ -6507,7 +6515,9 @@ async function v07BeginnerRoom2(browser) {
     assert.match(await page.locator('.br-sub').innerText(), /第8段階 \/ 8/);
     await pickTile('90°'); await tap('bp-riichi');
     await tap('bp-pass');
+    assert.match(await feedback(), /リーチの後に見送ったので、この局はもうロンできない（フリテン）/); // 現行ルール
     await tap('bp-tsumo');
+    assert.match(await page.locator('.bp-result').innerText(), /リーチ宣言料：あなた 各−5点（供託へ）/);
     assert.match(await page.locator('.br-panel').innerText(), /卒業試験 合格！|ツモ和了/);
     await tap('br-next');
     // 8-B 卒業試験：数学Ⅰ・Ⅱを選んで1局戦（初級の3人・現行ルール）

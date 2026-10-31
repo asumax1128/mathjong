@@ -1,16 +1,19 @@
 // 初心者の部屋の実戦形式の課題：実際の対局エンジン（Game）で固定の局面を進める練習（段階と課題の並びは beginner-room.js）。
 // 版2（docs/67）：捨て牌の判断（D1）・聴牌と待ち（T1）・リーチ（5A：ボタンの強調・宣言前の待ちの確認・宣言料）・フリテン（F1・F2）を追加。
-// 課題ごとのルールの版（ruleset）：新しい課題は現行（2：フリテン・待ちの表示）。鳴きの課題は関数牌のポンを含むので従来（0）のまま。
+// ルールの版：全課題を現行ルール（ruleset 2・通常対局と同じ）で動かす（docs/68）。関数牌のポン禁止・チーは上家だけ・鳴いた手は役が必要・
+// フリテン・王牌とドラ・リーチ宣言料5点（供託）。7-C のポンは角度牌 45°（PR #57）。旧ルールの課題はない（過去の対局の再現URLの互換は別：replay.js）。
 // ・山は presetWall で固定（seed も固定）。練習用CPUは台本どおりの公開行動だけをする（ツモした牌をそのまま捨てる・宣言はすべて見送る）。
 // ・人間の選択肢（チー・ポン・ロン・ツモ・リーチ）は Game.pending() / riichiOptions() が返すものだけを画面に出す（偽のボタンは作らない）。
 // ・判定・和了・点数はすべて既存のエンジン（Game・rules・match）のもの。この画面は通常対局の規則・AI・記録を変更しない。
 // 第4・5段階の課題では、練習の流れから外れる操作（例：チーの練習で「見送る」）は実行せず、理由を表示してやり直してもらう。
 // 第6段階（卒業試験）は自由に打てる（誤りはヒントで知らせ、「やり直し」で最初の局面からやり直せる）。
 import { Game } from '../engine/game.js';
-import { settle, createMatch, applyRoundResult } from '../engine/match.js';
+import { createMatch, applyRoundResult } from '../engine/match.js';
 import { tileHTML, tileLabel, formulaHTML } from './render.js';
 import { tenpaiWaitsView } from './waits-view.js';
 import { RIICHI_DEPOSIT } from '../engine/match.js';
+import { CURRENT_RULESET } from './replay.js';
+export const PRACTICE_RULESET = CURRENT_RULESET; // 初心者の部屋の全課題のルールの版（通常対局と同じ現行ルール）
 
 export const HUMAN = 0;
 export const SEAT_NAMES = ['あなた', '下家（右）', '対面（向かい）', '上家（左）'];
@@ -30,7 +33,7 @@ const key = (s) => (s.startsWith('=') ? `v:${s.slice(1)}` : /^\d+$/.test(s) ? `a
 // check(p, act)：練習の流れに合わない操作なら理由（文字列）を返す。goal(p)：達成なら完了の説明を返す。
 export const LESSONS = Object.freeze([
   {
-    id: 'D1', label: '2-B', title: '捨てる牌を選ぶ', ruleset: 2,
+    id: 'D1', label: '2-B', title: '捨てる牌を選ぶ',
     lead: '9枚から1枚捨てるよ。完成している sin 30° = 1/2 と、あと1枚で完成する cos 60°・tan 45° は残して、使い道のない牌を捨てよう。',
     dealer: 0,
     hand: ['sin', '30', '=1/2', 'cos', '60', 'tan', '45', '135'],
@@ -46,7 +49,7 @@ export const LESSONS = Object.freeze([
     hint: '135° と 90° は、手の中で面子になりにくい牌だよ。どちらかを捨てよう。',
   },
   {
-    id: 'T1', label: '3-A', title: '聴牌（テンパイ）を作る', ruleset: 2, showWaits: true,
+    id: 'T1', label: '3-A', title: '聴牌（テンパイ）を作る', showWaits: true,
     lead: 'あと1枚で和了の形を「聴牌」というよ。牌を1回タップすると、その牌を捨てた後の待ち牌が手牌の上に出るよ。聴牌になる牌を捨てよう。',
     dealer: 0,
     hand: ['sin', '30', '=1/2', 'cos', '60', '=1/2', 'tan', '135'],
@@ -88,16 +91,16 @@ export const LESSONS = Object.freeze([
   },
   {
     id: '4C', label: '7-C', title: 'ポン',
-    lead: '同じ牌を2枚持っているとき、だれかが同じ牌を捨てたら「ポン」で刻子（同じ牌3枚）を作れるよ。ポンは上家以外からでもできるよ。',
+    lead: '同じ角度牌を2枚持っているとき、だれかが同じ角度牌を捨てたら「ポン」で刻子（同じ牌3枚）を作れるよ。ポンは上家以外からでもできるよ。sin・cos・tan の関数牌はポンできないよ。',
     dealer: 2,
-    hand: ['sin', 'sin', 'cos', '0', '=1', 'tan', '45', '90'],
-    draws: ['sin'],
-    check: (p, act) => (p.pending.type === 'claim' && act.type !== 'pon' ? 'sin を2枚持っているよ。ポンを押してみよう。' : null),
-    goal: (p) => (calledAndDiscarded(p, 'pon') ? 'ポン成功！　対面の sin で sin×3 の刻子を公開し、1枚捨てたよ。' : null),
-    hint: '対面が捨てた sin と、手の sin 2枚で刻子になるよ。ポンの後も、ツモをせずに1枚捨てるよ。',
+    hand: ['45', '45', 'cos', '0', '=1', 'tan', 'sin', '90'],
+    draws: ['45'],
+    check: (p, act) => (p.pending.type === 'claim' && act.type !== 'pon' ? '45° を2枚持っているよ。ポンを押してみよう。' : null),
+    goal: (p) => (calledAndDiscarded(p, 'pon') ? 'ポン成功！　対面の 45° で 45°×3 の刻子を公開し、1枚捨てたよ。関数牌はポンできないことも覚えておこう。' : null),
+    hint: '対面が捨てた 45° と、手の 45° 2枚で刻子になるよ。sin・cos・tan はポンできないよ。ポンの後は1枚捨てるよ。',
   },
   {
-    id: '4D', label: '7-D', title: '鳴いた後のルール',
+    id: '4D', label: '7-D', title: '鳴いた後のルール', showWaits: true,
     lead: 'チー・ポンをした手で和了するには「役」が必要だよ。まず上家の =1/2 をチーして、使わない 135° を捨てよう。',
     dealer: 3,
     hand: ['sin', '30', 'tan', '45', '=1', 'sin', '=√3/2', '135'],
@@ -116,7 +119,7 @@ export const LESSONS = Object.freeze([
     hint: 'チーの後は 135° を捨てよう。120° では役がないのでロンできない。60° ならロンできるよ。',
   },
   {
-    id: '5A', label: '4-A', title: 'リーチ', ruleset: 2, showWaits: true, riichiGuide: true,
+    id: '5A', label: '4-A', title: 'リーチ', showWaits: true, riichiGuide: true,
     lead: `門前（鳴いていない手）で聴牌になる牌を捨てるとき「リーチ」を宣言できるよ。リーチできるときはボタンが金色に光り、聴牌になる牌に金の印がつくよ。牌を選ぶと待ちを確認できる。宣言すると宣言料${RIICHI_DEPOSIT}点を供託に出すよ（和了すれば戻ってくる）。`,
     dealer: 0,
     hand: ['sin', '30', '=1/2', 'cos', '60', '=1/2', 'tan', '45'],
@@ -130,7 +133,7 @@ export const LESSONS = Object.freeze([
     hint: '金の印がついた =−1 を選ぶと、待ちが =1 と表示されるよ。確認したら「リーチして捨てる」。リーチの後は、ツモした牌だけ捨てられるよ。',
   },
   {
-    id: '5B', label: '5-A', title: 'ロン',
+    id: '5B', label: '5-A', title: 'ロン', showWaits: true,
     lead: 'あと1枚（=1）で和了だよ。ほかの人が和了の牌を捨てたら「ロン」で和了できるよ。',
     dealer: 1,
     hand: ['sin', '30', '=1/2', 'cos', '0', '=1', 'tan', '45'],
@@ -140,7 +143,7 @@ export const LESSONS = Object.freeze([
     hint: 'tan 45° = 1 だから、=1 が出たら和了だよ。',
   },
   {
-    id: '5C', label: '5-B', title: 'ツモ',
+    id: '5C', label: '5-B', title: 'ツモ', showWaits: true,
     lead: '同じ手で、今度は自分で和了の牌（=1）を引いたら「ツモ」で和了できるよ。',
     dealer: 3,
     hand: ['sin', '30', '=1/2', 'cos', '0', '=1', 'tan', '45'],
@@ -150,7 +153,7 @@ export const LESSONS = Object.freeze([
     hint: '和了の牌を自分で引いたときは「ツモ」。ほかの人の捨て牌のときは「ロン」だよ。',
   },
   {
-    id: 'F1', label: '6-A', title: '捨て牌のフリテン', ruleset: 2, showWaits: true,
+    id: 'F1', label: '6-A', title: '捨て牌のフリテン', showWaits: true,
     lead: '自分が捨てた牌が待ちに入っていると、ロンできない（フリテン）。ツモ和了はできるよ。まず sin がないので使いにくい 30° を捨てよう。',
     dealer: 0,
     hand: ['cos', '180', '=-1', 'tan', '45', '=1', '=1/2', '30'],
@@ -171,7 +174,7 @@ export const LESSONS = Object.freeze([
     hint: '聴牌したら手牌の上の表示を見よう。「フリテン」と理由が出ているよ。和了の牌を自分で引いたら「ツモ」。',
   },
   {
-    id: 'F2', label: '6-B', title: '見逃しのフリテン', ruleset: 2, showWaits: true,
+    id: 'F2', label: '6-B', title: '見逃しのフリテン', showWaits: true,
     lead: 'ロンできる牌を見送ると、自分の次のツモまでロンできない（同巡のフリテン）。リーチの後に見送ると、その局の終わりまでロンできないよ。下家の 30° を、まずは見送ってみよう。',
     dealer: 1,
     hand: ['cos', '180', '=-1', 'tan', '45', '=1', 'sin', '=1/2'],
@@ -191,11 +194,12 @@ export const LESSONS = Object.freeze([
     hint: '見送った後は、自分のツモでフリテンが解除されるよ。次の 30° でロンしよう。',
   },
   {
-    id: '6', label: '8-A', title: '仕上げの練習：1局を打ち切ろう', exam: true, riichiGuide: true,
+    id: '6', label: '8-A', title: '仕上げの練習：1局を打ち切ろう', exam: true, riichiGuide: true, showWaits: true,
     lead: 'あなたは親（最初の手番）。練習用CPU 3人との1局だよ。聴牌になる牌を捨てて、リーチ。和了の牌が来たらロンかツモで和了しよう。',
     dealer: 0,
     hand: ['sin', '30', '=1/2', 'cos', '0', '=1', 'tan', '135'],
     // あなたの9枚目は 90°。和了の牌（=−1）は、対面の打牌・あなたのツモ・下家の打牌・あなたのツモの順に4回来る。
+    // 現行ルール：リーチ後にロンを見送る、または和了の牌を捨てるとフリテンになり、その後のロン（下家の =−1）は宣言できない（ツモはできる）。
     draws: ['90', '180', '=-1', '=√3', '=-1', '=-1', '120', '=-√3', '=-1'],
     check: () => null,
     goal: (p) => (wonBy(p) ? '卒業試験 合格！' : null),
@@ -229,7 +233,7 @@ export function lessonWall(lesson) {
 
 export function createPractice(rules, lesson) {
   const players = [0, 1, 2, 3].map((s) => (s === HUMAN ? { name: 'あなた', kind: 'human' } : { name: CPU_LABEL, kind: 'ai', personality: 'script' }));
-  const game = new Game({ rules, seed: 1, dealer: lesson.dealer, players, presetWall: lessonWall(lesson), ruleset: lesson.ruleset || 0 });
+  const game = new Game({ rules, seed: 1, dealer: lesson.dealer, players, presetWall: lessonWall(lesson), ruleset: PRACTICE_RULESET });
   const p = { lessonId: lesson.id, game, selected: null, pause: null, cpuDiscards: 0, message: '', warn: '', hint: false, done: false, ended: false, last: null, settlement: null };
   runCpu(p);
   return p;
@@ -277,13 +281,10 @@ function finish(p) {
   if (g.result) {
     p.ended = true;
     if (g.result.type === 'win') {
-      if (lesson.exam) {
-        const m = applyRoundResult(createMatch({ length: 4, startDealer: g.dealer }), g.result);
-        p.settlement = { deltas: m.log[0].deltas, scores: m.scores };
-      } else {
-        const deltas = settle(g.result, g.dealer);
-        p.settlement = { deltas, scores: deltas.map((d) => 100 + d) };
-      }
+      // 通常対局と同じ精算（現行ルール：リーチ宣言料5点を供託へ出し、和了者が供託を得る）。持ち点＋供託＝400
+      const m = applyRoundResult(createMatch({ length: 4, startDealer: g.dealer, riichiDeposit: RIICHI_DEPOSIT }), g.result, { riichi: g.riichi });
+      const e = m.log[0];
+      p.settlement = { deltas: e.deltas, scores: m.scores, payments: e.payments, riichi: e.riichi, potWon: e.potWon };
     }
     if (!p.done) p.warn = g.result.type === 'draw' ? '流局（山がなくなった）。「やり直し」で最初の局面から挑戦しよう。' : '';
   }
@@ -351,8 +352,11 @@ export function practiceContinue(p) {
 // 卒業試験：実際に打った後で、和了の機会を逃した・聴牌が崩れた、を知らせる（操作は止めない）
 function examWarning(p, pd, act) {
   const g = p.game;
-  if (pd.type === 'claim' && pd.ron && act.type !== 'ron') return 'ロンできる牌を見送ったよ。次の和了のチャンスを待とう（「やり直し」で最初からもできるよ）。';
-  if (pd.type === 'turn' && pd.canTsumo && act.type !== 'tsumo') return 'ツモで和了できたのに捨てたよ。次のチャンスを待とう（「やり直し」で最初からもできるよ）。';
+  // 現行ルールのフリテン：リーチ後の見逃しは局の終わりまでロン不可、和了の牌を自分で捨てると捨て牌のフリテン（どちらもツモ和了はできる）
+  if (pd.type === 'claim' && pd.ron && act.type !== 'ron') return g.riichi[HUMAN]
+    ? 'ロンできる牌を見送ったよ。リーチの後に見送ったので、この局はもうロンできない（フリテン）。ツモで和了しよう（「やり直し」で最初からもできるよ）。'
+    : 'ロンできる牌を見送ったよ。自分の次のツモまではロンできない（フリテン）。次のチャンスを待とう（「やり直し」で最初からもできるよ）。';
+  if (pd.type === 'turn' && pd.canTsumo && act.type !== 'tsumo') return 'ツモで和了できたのに捨てたよ。和了の牌を捨てたので、この牌ではもうロンできない（フリテン）。ツモのチャンスを待とう（「やり直し」で最初からもできるよ）。';
   if (act.type === 'discard' && !g.riichi[HUMAN]) {
     const counts = g.countsOf(g.hands[HUMAN].filter((x) => x !== act.id));
     const tenpaiNow = g.waitsOf(counts, g.exposedMelds(HUMAN)).length > 0;
@@ -403,16 +407,25 @@ function eventText(p) {
   return `${p.last.seat === HUMAN ? 'あなた' : SEAT_NAMES[p.last.seat]}が ${esc(tileLabel(typeOfId(g, p.last.tile)))} を捨てた`;
 }
 
+// ドラ（現行ルール）：公開されたドラ表示牌とドラ。和了するとドラ1枚につき +1点（役ではない）
+function doraText(p) {
+  const d = p.game.viewFor(HUMAN).doraIndicators || [];
+  return d.length ? `・ドラ表示牌 ${d.map((x) => tileHTML(p.game.rules.types[x.type], { size: 'xs' })).join('')} → ドラ ${d.map((x) => tileHTML(p.game.rules.types[x.doraType], { size: 'xs' })).join('')}` : '';
+}
+
 function resultHTML(p) {
   const g = p.game;
   const r = g.result;
   if (!r || r.type !== 'win') return '';
   const a = r.analysis;
-  const yaku = a.yaku.map((y) => `<li>${esc(y.name)}（${y.points}点）</li>`).join('');
+  const yaku = a.yaku.map((y) => `<li>${esc(y.name)}（${y.points}点）</li>`).join('') +
+    (a.yakuman ? '' : `<li class="bp-base">通常和了（${g.rules.config.scoring.base}点）</li>`) +
+    (a.doraBonus ? `<li class="bp-dora">ドラ ${a.doraBonus}枚（+${a.doraBonus}点・役ではない）</li>` : '');
   const st = p.settlement;
   const rows = st ? [0, 1, 2, 3].map((s) => `<tr${s === HUMAN ? ' class="me"' : ''}><th>${s === HUMAN ? 'あなた' : SEAT_NAMES[s]}</th><td>${st.deltas[s] > 0 ? '+' : ''}${st.deltas[s]}</td><td>${st.scores[s]}点</td></tr>`).join('') : '';
   return `<div class="bp-result" role="status"><p class="bp-win">${r.how === 'ron' ? 'ロン' : 'ツモ'}和了！ ${a.kind === 'normal' ? a.melds.map((mi) => formulaHTML(g.rules, mi)).join(' ') : ''}</p>` +
     `<ul class="bp-yaku">${yaku}</ul><p class="bp-points">和了点 ${r.points}点${r.how === 'ron' ? `（${SEAT_NAMES[r.from]}が払う）` : '（ほかの3人が払う）'}</p>` +
+    (st && st.riichi.length ? `<p class="bp-points bp-deposit">リーチ宣言料：${st.riichi.map((x) => (x === HUMAN ? 'あなた' : SEAT_NAMES[x])).join('・')} 各−${RIICHI_DEPOSIT}点（供託へ）。和了した${r.winner === HUMAN ? 'あなた' : SEAT_NAMES[r.winner]}が供託 ${st.potWon}点を得たよ。</p>` : '') +
     `<table class="bp-settle"><caption>点数の移動（持ち点100点から・練習なので記録には残りません）</caption>${rows}</table></div>`;
 }
 
@@ -494,7 +507,7 @@ export function practiceHTML(p, { hintText = '' } = {}) {
   return `<div class="bp" data-lesson="${lesson.id}">` +
     `<p class="bp-task"><b>${esc(lesson.label)}</b> ${esc(lesson.title)}</p><p class="bp-lead">${esc(lesson.lead)}</p>` +
     `<div class="bp-table">${[3, 2, 1].map((s) => seatHTML(p, s)).join('')}${seatHTML(p, HUMAN)}</div>` +
-    `<p class="bp-meta">山の残り ${g.wall.length}枚${eventText(p) ? `・直前：${eventText(p)}` : ''}</p>` +
+    `<p class="bp-meta">山の残り ${g.wall.length}枚${doraText(p)}${eventText(p) ? `・直前：${eventText(p)}` : ''}</p>` +
     (p.pause ? `<p class="br-feedback bp-pause" role="status">${esc(p.pause)}</p>` : '') +
     (statusText(p) ? `<p class="bp-status">${statusText(p)}</p>` : '') +
     waitsLineHTML(p) +

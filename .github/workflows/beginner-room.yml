@@ -10,6 +10,7 @@ on:
       - 'src/ui/styles.css'
       - 'tests/beginner-room.test.js'
       - 'tests/beginner-practice.test.js'
+      - 'tests/beginner-ruleset2.test.js'
       - 'tests/e2e/play.mjs'
       - '.github/workflows/beginner-room.yml'
   workflow_dispatch:
