@@ -229,8 +229,10 @@ test('5-B：ロン（エンジンの和了判定と精算）', () => {
   const r = p.game.result;
   assert.equal(r.how, 'ron');
   assert.equal(r.from, 1);
-  assert.equal(r.points, 2);
-  assert.deepEqual(p.settlement.deltas, [8, -8, 0, 0]);
+  // docs/68：現行ルール（王牌・ドラ）。和了点＝通常和了1＋三関制覇1＋ドラ（この固定局面では1枚）
+  assert.equal(r.analysis.doraBonus, 1);
+  assert.equal(r.points, 2 + r.analysis.doraBonus);
+  assert.deepEqual(p.settlement.deltas, [4 * r.points, -4 * r.points, 0, 0]);
   assert.match(practiceHTML(p), /ロン和了/);
   conserved(p);
 });
@@ -247,8 +249,9 @@ test('5-C：ツモ（引いた牌で和了）。捨てる操作は練習では�
   assert.equal(practiceAct(p, { type: 'tsumo' }), true);
   const r = p.game.result;
   assert.equal(r.how, 'tsumo');
-  assert.equal(r.points, 2);
-  assert.deepEqual(p.settlement.deltas, [8, -2, -2, -4], '子ツモ：親（席3）が4点、ほかの子2人が2点ずつ支払う');
+  assert.equal(r.points, 2 + r.analysis.doraBonus, '和了点＝通常和了1＋三関制覇1＋ドラ（現行ルール）');
+  const B = r.points;
+  assert.deepEqual(p.settlement.deltas, [4 * B, -B, -B, -2 * B], '子ツモ：親（席3）が2B、ほかの子2人がBずつ支払う');
   assert.deepEqual(p.settlement.deltas, settle(r, p.game.dealer));
   assert.equal(p.settlement.deltas.reduce((a, b) => a + b, 0), 0);
   assert.equal(p.settlement.scores.reduce((a, b) => a + b, 0), 400);
@@ -316,11 +319,16 @@ test('卒業試験：リーチ→ロンで1局が終わり、試合の精算（�
   assert.equal(g.result.how, 'ron');
   assert.ok(g.result.analysis.riichi);
   assert.equal(p.settlement.scores.reduce((a, b) => a + b, 0), 400);
+  // 現行ルール：リーチ宣言料5点を供託へ出し、和了で供託5点を得る（差し引き0）。精算そのものは settle と同じ
+  assert.deepEqual(p.settlement.payments, settle(g.result, g.dealer));
+  assert.deepEqual(p.settlement.riichi, [HUMAN]);
+  assert.equal(p.settlement.potWon, 5);
   assert.deepEqual(p.settlement.deltas, settle(g.result, g.dealer));
+  assert.match(practiceHTML(p), /リーチ宣言料：あなた 各−5点（供託へ）。和了したあなたが供託 5点を得たよ/);
   conserved(p);
 });
 
-test('卒業試験：自由に打てる。誤りはヒントで知らせ、和了のチャンスは4回ある', () => {
+test('仕上げの練習（8-A）：自由に打てる。誤りはヒントで知らせる。見送るとフリテン（現行ルール）でもツモで和了できる', () => {
   // 聴牌をくずす打牌
   let p = createPractice(rules, L['6']);
   discard(p, 'a:135');
@@ -330,24 +338,29 @@ test('卒業試験：自由に打てる。誤りはヒントで知らせ、和�
   p = createPractice(rules, L['6']);
   discard(p, 'a:90');
   assert.match(p.warn, /リーチはしなかった/);
-  // ロンを見送る→ツモのチャンス→見送る→ロンのチャンス→見送る→ツモのチャンス
+  // ロンを見送る→ツモのチャンス→見送る（和了の牌を捨てる）→ 下家の =−1 はフリテンでロンの宣言なし → ツモのチャンス
+  // （現行ルール：リーチ後の見逃し・捨て牌のフリテン。ツモ和了はできる）
   p = createPractice(rules, L['6']);
   discard(p, 'a:90', true);
   const chances = [];
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 3; i++) {
     const pd = pendingOf(p);
     if (pd.type === 'claim') {
       assert.equal(pd.ron, true);
       chances.push('ron');
-      if (i < 3) { practiceAct(p, { type: 'pass' }); assert.match(p.warn, /見送った/); }
+      practiceAct(p, { type: 'pass' });
+      assert.match(p.warn, /リーチの後に見送ったので、この局はもうロンできない（フリテン）/);
+      assert.ok(p.game.riichiFuriten[HUMAN]);
     } else {
       assert.equal(pd.canTsumo, true);
       chances.push('tsumo');
-      if (i < 3) { practiceSelect(p, p.game.drawn); practiceAct(p, { type: 'discard' }); assert.match(p.warn, /ツモで和了できた/); }
+      if (i < 2) { practiceSelect(p, p.game.drawn); practiceAct(p, { type: 'discard' }); assert.match(p.warn, /ツモで和了できた/); }
     }
     conserved(p);
   }
-  assert.deepEqual(chances, ['ron', 'tsumo', 'ron', 'tsumo']);
+  assert.deepEqual(chances, ['ron', 'tsumo', 'tsumo'], '下家の =−1 はフリテンでロンできない');
+  assert.ok(p.game.ronBlocked[HUMAN], '下家の =−1 はフリテンで見送らされた');
+  assert.match(practiceHTML(p), /フリテン<\/b>ロン不可/);
   practiceAct(p, { type: 'tsumo' });
   assert.equal(p.done, true);
   assert.equal(p.game.result.how, 'tsumo');
