@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - tools/research-beginner-phase2.mjs
+      - src/engine/character-ai-trio.js
       - .github/workflows/research-beginner-phase2.yml
   workflow_dispatch:
 permissions:

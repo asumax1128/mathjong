@@ -5,6 +5,7 @@ import { makeConfig } from '../src/engine/config.js';
 import { Game } from '../src/engine/game.js';
 import { applyAction } from '../src/engine/ai.js';
 import { beginnerDiscard } from '../src/engine/ai-levels.js';
+import { TRIO_PARAMS } from '../src/engine/character-ai-trio.js';
 import { BEGINNER_PARAMS } from '../src/engine/character-ai-prototype.js';
 import { decideCharacter, newPublicHistory, recordPublicRound } from '../src/engine/characters.js';
 import { createMatch, applyRoundResult, dealerOf, ranks } from '../src/engine/match.js';
@@ -14,17 +15,9 @@ const N=Number(process.env.BEGINNER_MATCHES||18), seed0=Number(process.env.BEGIN
 const modeList=['math1','math2'],lengths=[1,4,8];
 const base={kanata:{...BEGINNER_PARAMS.kanata,pick:BEGINNER_PARAMS.kanata.pick.slice()},mitsuki:{...BEGINNER_PARAMS.mitsuki,pick:BEGINNER_PARAMS.mitsuki.pick.slice()},aoto:{...BEGINNER_PARAMS.aoto}};
 const scenarios={
- baseline:()=>Object.assign(BEGINNER_PARAMS,{kanata:{...base.kanata},mitsuki:{...base.mitsuki},aoto:{...base.aoto}}),
- strategic_light:()=>{
-  BEGINNER_PARAMS.kanata={...base.kanata,readyBase:.7,readyPerLive:.04,readExact:.04,readKind:.01,readPerWait:.08,readMax:.12};
-  BEGINNER_PARAMS.mitsuki={...base.mitsuki,sinTile:4.5,sinPair:3.75,sinSingle:.6};
-  BEGINNER_PARAMS.aoto={...base.aoto};
- },
- strategic_strong:()=>{
-  BEGINNER_PARAMS.kanata={...base.kanata,readyBase:.3,readyPerLive:.015,readExact:0,readKind:0,readPerWait:0,readMax:0};
-  BEGINNER_PARAMS.mitsuki={...base.mitsuki,sinTile:6,sinPair:5,sinSingle:1};
-  BEGINNER_PARAMS.aoto={...base.aoto};
- },
+ baseline:()=>{Object.assign(BEGINNER_PARAMS,{kanata:{...base.kanata},mitsuki:{...base.mitsuki},aoto:{...base.aoto}});TRIO_PARAMS.yujin.tripletWeight=4;TRIO_PARAMS.yujin.formulaWeight=.25;},
+ triplet_light:()=>{Object.assign(BEGINNER_PARAMS,{kanata:{...base.kanata},mitsuki:{...base.mitsuki},aoto:{...base.aoto}}); TRIO_PARAMS.yujin.tripletWeight=3;TRIO_PARAMS.yujin.formulaWeight=.65;},
+ triplet_medium:()=>{Object.assign(BEGINNER_PARAMS,{kanata:{...base.kanata},mitsuki:{...base.mitsuki},aoto:{...base.aoto}}); TRIO_PARAMS.yujin.tripletWeight=2;TRIO_PARAMS.yujin.formulaWeight=1.25;},
 };
 function novice(g,p,rng){
  if(p.type==='claim') { if(p.ron)return {type:'ron'}; if(process.env.NOVICE_SMART==='1' && p.chi.length && rng.next()<.22 && g.melds[p.seat].length===0)return {type:'chi',option:rng.int(p.chi.length)}; return {type:'pass'}; }
