@@ -8678,6 +8678,239 @@ async function v14DiscardPreview(browser) {
   console.log('✓ 聴牌プレビュー（docs/71）：1回タップで「捨てると聴牌／聴牌にはなりません」・待ちと見えていない枚数・フリテン、選択変更・2回タップの打牌・長押し・リーチの宣言牌・ヒント表示中、5画面でヒント欄の中に収まる');
 }
 
+
+// ---- Ver.0.8 第1段階（docs/74）：通常対局の牌譜の自動記録・IndexedDB への保存・記録された選択による再現 ----
+// 画面のボタン・牌をタップして試合を最後まで進める（ロンとツモはする・ときどきリーチ・リーチ後は自動ツモ切りを ON）
+async function pfPlayOut(page, { stopAfterHuman = null, riichi = true } = {}) {
+  let human = 0;
+  for (let i = 0; i < 6000; i++) {
+    const st = await page.evaluate(() => {
+      const m = window.__mathjong, S = m.S, g = S.game;
+      if (S.modal === 'final') return { kind: 'final' };
+      if (S.modal === 'result') return { kind: 'result' };
+      const p = g && g.pending();
+      if (!p || p.seat !== 0) return { kind: 'wait' };
+      return { kind: p.type, canTsumo: !!p.canTsumo, ron: !!p.ron, drawn: g.drawn, inRiichi: !!g.riichi[0], riichiOk: g.riichiOptions(0).length > 0,
+        auto: S.autoTsumo.on, events: g.events.length };
+    });
+    if (st.kind === 'final') return human;
+    if (st.kind === 'result') { await page.locator('.overlay button[data-action="next"]').click(); continue; }
+    if (st.kind === 'wait') { await page.waitForTimeout(10); continue; }
+    if (stopAfterHuman !== null && human >= stopAfterHuman) return human;
+    human++;
+    if (st.kind === 'claim') { await page.locator(`.bar button[data-action="${st.ron ? 'ron' : 'pass'}"]`).click(); continue; }
+    if (st.canTsumo) { await page.locator('.bar button[data-action="tsumo"]').click(); continue; }
+    if (st.inRiichi) {
+      if (!st.auto) await page.locator('.bar button[data-action="toggle-auto-tsumogiri"]').click(); // 自動ツモ切り（出どころ auto-tsumogiri）
+      else await page.waitForTimeout(10);
+      continue;
+    }
+    if (riichi && st.riichiOk) {
+      await page.locator('.bar button[data-action="riichi"]').click();
+      await page.locator('.hand .tile.riichi-ok').first().click();
+      await page.locator('.bar button[data-action="riichi-discard"]').click();
+      continue;
+    }
+    const t = page.locator(`.hand .tile[data-id="${st.drawn}"]`);
+    await t.click(); await t.click(); // 2回タップで打牌
+  }
+  throw new Error('pfPlayOut: too many steps');
+}
+// 保存の完了を待ち、この端末の牌譜をすべて読み込んで検証する（読み込み＝decode の中で記録された選択を再生して照合）
+const pfSnapshot = (page) => page.evaluate(async () => {
+  const m = window.__mathjong;
+  for (let i = 0; i < 400; i++) { const st = m.paifu.status(); if (!['saving'].includes(st.state) && !st.dirty) break; await new Promise((r) => setTimeout(r, 25)); }
+  const pf = await import(new URL('src/engine/paifu.js', location.href));
+  const list = await m.paifuStore.list();
+  const records = [];
+  for (const e of list.ok ? list.entries : []) {
+    const r = await m.paifuStore.loadPrivate(e.id);
+    if (!r.ok) { records.push({ id: e.id, ok: false, code: r.error.code }); continue; }
+    const p = r.record, v = pf.verifyPaifu(p);
+    records.push({ id: e.id, ok: true, status: p.status, mode: p.settings.mode, length: p.settings.length, rounds: p.rounds.length, final: p.final,
+      termination: p.termination, steps: p.rounds.reduce((n, x) => n + x.steps.length, 0), valid: v.valid,
+      sources: [...new Set(p.rounds.flatMap((x) => x.steps.map((s) => s.source)))].sort(),
+      riichi: p.rounds.some((x) => x.steps.some((s) => s.action.riichi)), lastDigest: p.rounds.at(-1) && p.rounds.at(-1).steps.at(-1) ? p.rounds.at(-1).steps.at(-1).digest : null,
+      lastSettled: p.rounds.at(-1) ? p.rounds.at(-1).settlement !== null : null });
+  }
+  const S = m.S;
+  return { status: m.paifu.status(), list: list.ok ? { count: list.entries.length, unreadable: list.unreadable } : { error: list.error.code }, records,
+    live: S.game ? { digest: pf.stateDigest(S.game), scores: S.match.scores.slice(), played: S.match.played, over: S.match.over } : null,
+    finalText: document.querySelector('.final .paifu-status') ? document.querySelector('.final .paifu-status').innerText : null };
+});
+async function pfStart(page, { mode = 'math1', length = 1, ids } = {}) {
+  await page.locator(`input[data-action="title-mode"][value="${mode}"]`).check();
+  await page.locator(`input[data-action="title-length"][value="${length}"]`).check();
+  await chooseAndStart(page, ids);
+}
+async function v15PaifuRecording(browser) {
+  // (1) iPhone 縦（390×844）・数学Ⅰ・1局戦：画面で最後まで打つ → 完了として保存。読み込んで検証でき、最終の持ち点・局数・最後の状態が実際の対局と一致
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  await page.goto(LOCAL + '?speed=test');
+  await page.waitForSelector('.title-screen');
+  await page.waitForSelector('.title-paifu');
+  assert.match(await page.locator('.title-paifu').innerText(), /牌譜：(この端末に0件|確認中)/);
+  await pfStart(page, { mode: 'math1', length: 1 });
+  await pfPlayOut(page);
+  let snap = await pfSnapshot(page);
+  assert.equal(snap.list.count, 1, JSON.stringify(snap));
+  let r = snap.records[0];
+  assert.deepEqual([r.ok, r.valid, r.status, r.mode, r.length, r.rounds], [true, true, 'complete', 'math1', 1, 1]);
+  assert.deepEqual(r.final.scores, snap.live.scores, '最終の持ち点は実際の対局と同じ');
+  assert.equal(r.final.scores.reduce((a, b) => a + b, 0), 400);
+  assert.equal(r.lastDigest, snap.live.digest, '最後の状態の要約は実際の対局と同じ');
+  assert.ok(r.sources.includes('human') && r.sources.includes('ai'));
+  assert.match(snap.finalText, /この試合をこの端末に保存しました（端末内だけ・送信しません）/);
+  // 最終結果の画面：iPhone 縦で横にはみ出さない
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 1);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/v15-final-390x844.png` });
+  // (2) 同じ3人と再戦 → 数学Ⅰ・1局戦をもう1試合（別の記録）
+  await page.locator('.final button[data-action="again"]').click();
+  await page.waitForSelector('.hand .tile');
+  await pfPlayOut(page);
+  snap = await pfSnapshot(page);
+  assert.equal(snap.list.count, 2);
+  assert.ok(snap.records.every((x) => x.ok && x.valid && x.status === 'complete'));
+  // (3) タイトルへ：件数を表示。削除は2段階（やめる → 削除する）で、この端末の牌譜だけを消す
+  const before = await page.evaluate(() => ({ ...localStorage }));
+  await page.locator('.final button[data-action="to-title"]').click();
+  await page.waitForFunction(() => /この端末に2件/.test(document.querySelector('.title-paifu') ? document.querySelector('.title-paifu').innerText : ''));
+  await page.locator('button[data-action="paifu-clear"]').click();
+  await page.locator('button[data-action="paifu-clear-no"]').click();
+  assert.match(await page.locator('.title-paifu').innerText(), /この端末に2件/);
+  await page.locator('button[data-action="paifu-clear"]').click();
+  await page.locator('button[data-action="paifu-clear-yes"]').click();
+  await page.waitForFunction(() => /この端末に0件/.test(document.querySelector('.title-paifu') ? document.querySelector('.title-paifu').innerText : ''));
+  assert.deepEqual(await page.evaluate(() => ({ ...localStorage })), before, '既存の保存キー（localStorage）は変えない');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/v15-title-390x844.png` });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+
+  // (4) 数学Ⅱ・4局戦（チー・ポンの自動パス ON）：完了として保存し、各局の精算・400点・出どころ（auto-pass を含みうる）を検証
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?speed=test');
+    await page.waitForSelector('.title-screen');
+    await pfStart(page, { mode: 'math2', length: 4 });
+    await page.locator('button[data-action="toggle-chi-autopass"]').click();
+    await page.locator('button[data-action="toggle-pon-autopass"]').click();
+    await pfPlayOut(page, { riichi: true });
+    const snap = await pfSnapshot(page);
+    const r = snap.records[0];
+    assert.deepEqual([snap.list.count, r.valid, r.status, r.mode, r.length, r.rounds], [1, true, 'complete', 'math2', 4, snap.live.played]);
+    assert.deepEqual(r.final.scores, snap.live.scores);
+    for (const src of r.sources) assert.ok(['human', 'auto-pass', 'auto-tsumogiri', 'ai'].includes(src));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (5) 途中退出：数学Ⅰ・8局戦を数手で「タイトルへ戻る」→ 中断（left-match）として保存。未精算の局はそのまま（精算を作らない）
+  {
+    const ctx = await newContext(browser, { viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?speed=test');
+    await page.waitForSelector('.title-screen');
+    await pfStart(page, { mode: 'math1', length: 8 });
+    await pfPlayOut(page, { stopAfterHuman: 3 });
+    await page.locator('button[data-action="settings"]').click();
+    await page.locator('button[data-action="ask-title"]').click();
+    await page.locator('button[data-action="to-title"]').click();
+    await page.waitForSelector('.title-screen');
+    const snap = await pfSnapshot(page);
+    const r = snap.records[0];
+    assert.deepEqual([snap.list.count, r.valid, r.status, r.termination, r.final, r.lastSettled], [1, true, 'aborted', { reason: 'left-match' }, null, false]);
+    await page.waitForFunction(() => /この端末に1件/.test(document.querySelector('.title-paifu').innerText));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 牌譜（docs/74）：数学Ⅰ1局戦・数学Ⅱ4局戦（自動パス）を画面で打って完了として保存・読込で再生検証・最終の持ち点と状態が一致、再戦で別の記録、途中退出は中断、タイトルの件数と2段階の削除、localStorage は不変');
+}
+
+async function v15PaifuExclusions(browser) {
+  // (1) 卒業試験・(2) 再現 URL は記録しない。(3) 保存できない端末（IndexedDB の利用不可）でも試合は最後まで進み、「保存できませんでした」
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  await page.goto(LOCAL + '?speed=test');
+  await page.waitForSelector('.title-screen');
+  await page.evaluate(() => window.__mathjong.startMatch({ settings: { mode: 'math1', length: 1, chars: ['ousuke', 'natsuki', 'yuki'], ruleset: 2, exam: true } }));
+  await page.waitForSelector('.hand .tile');
+  assert.deepEqual(await page.evaluate(() => { const s = window.__mathjong.paifu.status(); return [s.state, s.reason]; }), ['off', 'exam']);
+  await pfPlayOut(page);
+  let snap = await pfSnapshot(page);
+  assert.equal(snap.list.count, 0, '卒業試験は通常の牌譜に入れない');
+  assert.match(await page.locator('.final').innerText(), /この対局は牌譜の記録の対象外です/);
+  // 再現 URL
+  const p2 = await ctx.newPage();
+  await p2.goto(LOCAL + '?seed=123&round=1&dealer=0&hand=0&renchan=0&len=1&mode=math1&newrules=2&speed=test');
+  await p2.waitForSelector('.hand .tile');
+  assert.deepEqual(await p2.evaluate(() => { const s = window.__mathjong.paifu.status(); return [s.state, s.reason]; }), ['off', 'replay-url']);
+  await pfPlayOut(p2);
+  snap = await pfSnapshot(p2);
+  assert.equal(snap.list.count, 0, '再現 URL の対局は記録しない');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  // 保存できない端末：IndexedDB へのアクセスを拒否（Safari のプライベートモード相当）
+  const ctx3 = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await ctx3.addInitScript(() => { Object.defineProperty(window, 'indexedDB', { configurable: true, get() { throw new DOMException('denied', 'SecurityError'); } }); });
+  const p3 = await ctx3.newPage(), errors3 = watchErrors(p3);
+  await p3.goto(LOCAL + '?speed=test');
+  await p3.waitForFunction(() => /保存を確認できません/.test(document.querySelector('.title-paifu') ? document.querySelector('.title-paifu').innerText : ''));
+  await pfStart(p3, { mode: 'math2', length: 1 });
+  await pfPlayOut(p3);
+  const st = await p3.evaluate(async () => { const m = window.__mathjong; for (let i = 0; i < 200 && m.paifu.status().state === 'saving'; i++) await new Promise((r) => setTimeout(r, 25)); return { s: m.paifu.status(), over: m.S.match.over }; });
+  assert.deepEqual([st.over, st.s.state, st.s.saveError], [true, 'failed', 'unavailable']);
+  assert.match(await p3.locator('.final').innerText(), /この端末に保存できませんでした（ゲームの進行・結果には影響しません）/);
+  assert.deepEqual(errors3, []);
+  await ctx3.close();
+  console.log('✓ 牌譜：卒業試験・再現 URL は記録しない、IndexedDB が使えない端末でも試合は最後まで進み「保存できませんでした」');
+}
+
+async function v15PaifuStorage(browser) {
+  // 実際の IndexedDB：(1) 上限に達したら古い完了・中断の記録から自動で削除（記録中は残す）、(2) 2つのタブで同時に記録しても両方を保存・検証できる
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  await page.goto(LOCAL + '?speed=test');
+  await page.waitForSelector('.title-screen');
+  // 記録は Node 側（tests/paifu-harness.mjs）で作り、JSON でページへ渡す（ページの中で decode＝再生検証してから保存）
+  const { playRecorded } = await import('../paifu-harness.mjs');
+  const { encodePaifu } = await import('../../src/engine/paifu.js');
+  const mk = (id, seedBase, open = false) => encodePaifu(playRecorded({ mode: 'math1', length: 1, seedBase, id, ...(open ? { stopAfterSteps: 5, leaveOpen: true } : {}) }).record);
+  const jsons = [mk('rec-open', 1, true), mk('c1', 10), mk('c2', 11), mk('c3', 12), mk('c4', 20)];
+  const ev = await page.evaluate(async (jsons) => {
+    const st = await import(new URL('src/ui/paifu-storage.js', location.href));
+    const pf = await import(new URL('src/engine/paifu.js', location.href));
+    const store = st.createPaifuStore({ maxRecords: 3 });
+    const [open, c1, c2, c3, c4] = jsons.map((j) => pf.decodePaifu(j));
+    const out = [];
+    out.push(await store.save(open, { evict: true })); // 記録中（削除しない）
+    for (const r of [c1, c2, c3]) { out.push(await store.save(r, { evict: true })); await new Promise((res) => setTimeout(res, 5)); }
+    const list = await store.list();
+    const noEvict = await store.save(c4);
+    const full = await store.clearAll();
+    return { saves: out.map((r) => [r.ok, r.evicted]), ids: list.entries.map((e) => e.id).sort(), noEvict: noEvict.ok ? 'ok' : noEvict.error.code, full: full.ok };
+  }, jsons);
+  assert.deepEqual(ev.saves, [[true, 0], [true, 0], [true, 0], [true, 1]]);
+  assert.deepEqual(ev.ids, ['c2', 'c3', 'rec-open'], '古い完了の記録（c1）だけを削除・記録中は残す');
+  assert.equal(ev.noEvict, 'capacity-exceeded', 'evict なしは上限で失敗（既存を消さない）');
+  // 2つのタブ
+  const a = page, b = await ctx.newPage();
+  await b.goto(LOCAL + '?speed=test');
+  await b.waitForSelector('.title-screen');
+  await pfStart(a, { mode: 'math1', length: 1 });
+  await pfStart(b, { mode: 'math2', length: 1 });
+  await Promise.all([pfPlayOut(a), pfPlayOut(b)]);
+  await pfSnapshot(a);
+  const snap = await pfSnapshot(b);
+  assert.equal(snap.list.count, 2);
+  assert.deepEqual(snap.records.map((x) => [x.ok, x.valid, x.status]).sort(), [[true, true, 'complete'], [true, true, 'complete']]);
+  assert.deepEqual(snap.records.map((x) => x.mode).sort(), ['math1', 'math2']);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  console.log('✓ 牌譜（実際の IndexedDB）：上限で古い完了の記録から自動削除・記録中は残す・evict なしは既存を消さずに失敗、2つのタブの同時記録を両方保存・検証');
+}
+
 let browser;
 const stats = { rounds: 0, wins: [0, 0, 0, 0], draws: 0, tsumo: 0, ron: 0, ronDeclined: 0, chi: 0, chiPassed: 0, chiOverriddenByRon: 0, discards: 0, yaku: {} };
 const t0 = Date.now();
@@ -8689,7 +8922,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -8762,6 +8995,9 @@ try {
   await v12Layout(browser);
   await v13RiichiAssist(browser);
   await v14DiscardPreview(browser);
+  await v15PaifuRecording(browser);
+  await v15PaifuExclusions(browser);
+  await v15PaifuStorage(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。

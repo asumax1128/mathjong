@@ -28,6 +28,8 @@ import { validateReplay, replayQuery, CURRENT_RULESET } from './replay.js';
 import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, scanEffects, fxOffer, fxAdvance, fxTimes, fxProgress, isLiteEffect } from './effects.js';
 import { SOUND_KEY, parseSoundSetting, pickSound, createSoundPlayer } from './sound.js';
 import { VOICE_KEY, parseVoiceSetting, createVoicePlayer } from './voice.js';
+import { createPaifuStore } from './paifu-storage.js';
+import { createPaifuRecorder } from './paifu-recorder.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
@@ -154,6 +156,27 @@ const playersFor = (seatIds) => [{ name: 'あなた', kind: 'human' }, ...seatId
 S.opp = { selected: [], detail: null, notice: null };
 S.beginnerRoom = createRoomState(); // 通常の対戦相手選択・対局とは独立した練習
 
+// ---- 牌譜の自動記録（Ver.0.8 第1段階・docs/74）：通常対局だけ。保存はこの端末のブラウザ内（IndexedDB）だけで、送信しない。
+// ゲームの進行は記録・保存の成否に依存しない（保存は非同期・待たない）。牌譜の内容（手牌・山）は画面に出さない。
+const paifuStore = createPaifuStore();
+const paifu = createPaifuRecorder({ store: paifuStore, appVersion: APP_VERSION,
+  // 保存状態が変わったら、それを表示している画面（最終結果・設定）だけを描き直す（対局中の手牌の操作を妨げない）。
+  // タイトル画面（途中退出の保存がタイトルへ戻った後に終わる）では件数を読み直す
+  onChange: () => {
+    if (S.screen === 'game' && (S.modal === 'final' || S.modal === 'settings')) render();
+    else if (S.screen === 'title' && !paifu.status().dirty) refreshPaifuInfo();
+  } });
+S.paifuInfo = null; // タイトル画面の保存件数（{ ok, count, unreadable } または読込中は null）
+S.paifuConfirm = false; // 牌譜の削除の確認（2段階）
+function refreshPaifuInfo() {
+  S.paifuInfo = null;
+  paifuStore.list().then((r) => {
+    S.paifuInfo = r.ok ? { ok: true, count: r.entries.length, unreadable: r.unreadable || 0 } : { ok: false, code: r.error.code };
+    if (S.screen === 'title') render();
+  }).catch(() => { S.paifuInfo = { ok: false, code: 'storage-error' }; if (S.screen === 'title') render(); });
+}
+window.addEventListener('pagehide', () => paifu.flush()); // ページを離れる：いまの記録を保存しておく（ベストエフォート）
+
 function startRound() {
   clearTimeout(S.timer);
   S.timer = null;
@@ -166,6 +189,7 @@ function startRound() {
   S.nextPresetWall = null;
   const ruleset = S.matchSettings ? S.matchSettings.ruleset : 0; // 試合の開始時に確定したルールの版
   S.game = new Game({ rules, seed, dealer: S.dealer, players: PLAYERS, round: S.round, presetWall, ruleset });
+  paifu.roundStarted(S.game, { presetWall: !!presetWall }); // 牌譜：標準の配牌の局だけ記録（テスト用の山は記録をやめる）
   S.aiRng = createRng(seed ^ 0x5bd1e995);
   warmUp(rules); // 役候補ヒント用の評価を少しずつ事前計算（判定・進行には影響しない）
   S.selected = null;
@@ -233,7 +257,7 @@ function step(changed = false) {
       if (autoPassDue(policy, p, HUMAN)) {
         policy.tried = true;
         const kind = autoPassedKind(p);
-        if (applyHumanAction({ type: 'pass' }) === 'ok') {
+        if (applyHumanAction({ type: 'pass' }, 'auto-pass') === 'ok') {
           S.autoPass.count++;
           S.autoPass.noticePending = true;
           S.autoPass.noticeKind = mergeKind(S.autoPass.noticeKind, kind);
@@ -272,7 +296,9 @@ function step(changed = false) {
     const cid = PLAYERS[p.seat].id; // 判断したキャラクター（表示している名前と同じ席の項目）。難易度別・キャラ別に数える（確認用）
     S.aiDecisions[LEVEL_BY_ID[cid]] = (S.aiDecisions[LEVEL_BY_ID[cid]] || 0) + 1;
     S.aiDecisionsBySeat[p.seat][cid] = (S.aiDecisionsBySeat[p.seat][cid] || 0) + 1;
+    const eventsBefore = g.events.length;
     applyAction(g, p.seat, action);
+    paifu.actionApplied(g, p.seat, action, 'ai', eventsBefore); // 牌譜：エンジンが受け付けた行動だけ
     // 描画は step() が行う（自分の宣言を自動で見送る場合は、宣言ボタンを一度も描画しない）
     step(true);
   }, p.type === 'turn' ? turnDelay : claimDelay);
@@ -298,7 +324,7 @@ function scheduleAutoTsumogiri() {
     S.timer = null;
     if (g !== S.game || stateKey() !== key || !autoTsumogiriDue(g, HUMAN, S.autoTsumo.on)) return;
     if (drag && drag.isDragging()) { S.stepDeferred = true; return; } // 並び替え中は待つ（指を離すと step() から予約し直す）
-    const r = applyHumanAction({ type: 'discard', tile: autoTsumogiriTile(g) });
+    const r = applyHumanAction({ type: 'discard', tile: autoTsumogiriTile(g) }, 'auto-tsumogiri');
     if (r !== 'ok') { S.autoTsumo.on = false; render(); return; } // 拒否されたら自動をやめて手動へ（局面は変わらない）
     S.autoTsumo.count++;
     S.selected = null;
@@ -317,6 +343,7 @@ function finishRound() {
     // 通し局数が MAX_ROUND に達したら試合を終える（出力する round・renchan を再現 URL の範囲内に保つ。
     // 終了の理由は S.match.endReason に残る：'normal'＝通常終了、'round-limit'＝上限による打ち切り）
     S.match = applyRoundResult(S.match, g.result, { round: S.round, maxRound: MAX_ROUND, riichi: g.riichi });
+    paifu.roundSettled(g, S.match, { maxRound: MAX_ROUND }); // 牌譜：精算を記録して保存（非同期。待たない）
     S.scores = S.match.scores;
     S.history.push({ round: S.round, result: g.result.type === 'win' ? { ...g.result, analysis: undefined } : g.result });
     // 卒業試験（初心者の部屋）：1局戦を最後まで打ったら合格。順位を進み具合に記録する（既存の記録は消さない）
@@ -335,16 +362,19 @@ function finishRound() {
 
 // 人間の行動をエンジンに適用する（状態の変更だけ。描画・進行は呼び出し元が行う）。
 // 戻り値：'ok'＝成立／'ignored'＝自分の判断番ではない／'failed'＝エンジンが拒否。
-function applyHumanAction(action) {
+// source：牌譜の出どころ（'human'＝手動、'auto-pass'＝チー・ポンの自動パス、'auto-tsumogiri'＝リーチ後の自動ツモ切り）
+function applyHumanAction(action, source = 'human') {
   const g = S.game;
   const p = g.pending();
   if (!p || p.seat !== HUMAN) return 'ignored';
+  const eventsBefore = g.events.length;
   try {
     applyAction(g, HUMAN, action);
   } catch (e) {
     console.error(e);
     return 'failed';
   }
+  paifu.actionApplied(g, HUMAN, action, source, eventsBefore); // 牌譜：受け付けた行動だけ（拒否された操作は記録しない）
   return 'ok';
 }
 
@@ -1130,6 +1160,17 @@ function doraResultHTML() {
 const ROUND_LIMIT_NOTE = `通し局数の上限（${MAX_ROUND.toLocaleString('en-US')}局）に達したため、試合を終了しました。親の連荘もここで終了します。`;
 
 // 試合終了のリザルト（最終順位・得点・開始点との差・和了回数・最高和了・局数・連荘・設定）
+// 牌譜の保存状態（短い文）。内容（手牌・山）は出さない。端末内だけの保存で、送信しないことを明記する
+function paifuStatusText() {
+  const st = paifu.status();
+  if (st.state === 'off') return st.reason === 'exam' || st.reason === 'replay-url' || st.reason === 'old-ruleset' ? 'この対局は牌譜の記録の対象外です' : null;
+  if (st.state === 'error') return '牌譜：この試合は記録できませんでした（ゲームの進行・結果には影響しません）';
+  if (st.state === 'failed') return '牌譜：この端末に保存できませんでした（ゲームの進行・結果には影響しません）';
+  if (st.state === 'saving' || st.dirty) return '牌譜：この端末に保存しています…';
+  if (st.state === 'saved') return st.savedStatus === 'complete' ? '牌譜：この試合をこの端末に保存しました（端末内だけ・送信しません）' : '牌譜：ここまでの記録をこの端末に保存しました（端末内だけ・送信しません）';
+  return '牌譜：この試合を記録しています（終局ごとにこの端末へ保存）';
+}
+
 function finalHTML() {
   const m = S.match;
   const rk = ranks(m.scores);
@@ -1152,6 +1193,7 @@ function finalHTML() {
       ${m.endReason === 'agari-yame' ? '<li class="agari-yame-note">終了の理由：オーラスの親が和了して単独1位（アガリやめ）</li>' : ''}
       ${m.riichiDeposit ? `<li class="note">リーチ宣言料 ${m.riichiDeposit}点（供託）。次の和了者がすべて得る。試合終了時に残った供託は宣言者へ返還。</li>` : ''}
       <li class="note">開始時の持ち点は各${START_POINTS}点（合計${START_POINTS * 4}点）。同点は同順位。点数配分は試作段階の暫定値です。</li>
+      ${paifuStatusText() ? `<li class="note paifu-status" role="status">${paifuStatusText()}</li>` : ''}
     </ul>
     ${matchLogHTML(m)}
     ${S.matchSettings.exam ? examResultHTML(rk[HUMAN]) : ''}
@@ -1218,8 +1260,19 @@ function titleHTML() {
     </div>
     <button data-action="choose-opponents" class="primary start-btn">対戦相手を選ぶ</button>
     <button data-action="br-open" class="br-open">初心者の部屋（練習）</button>
+    ${paifuTitleHTML()}
     <p class="note title-ver">持ち点 各${START_POINTS}点 ／ 画面 v${APP_VERSION}・エンジン v${ENGINE_VERSION}</p>
   </main>`;
+}
+// タイトル画面の牌譜の件数と削除（2段階）。振り返り・戦績の画面は第2・第3段階（別PR）
+function paifuTitleHTML() {
+  const i = S.paifuInfo;
+  if (!i) return '<p class="note title-paifu" aria-live="polite">牌譜：確認中…</p>';
+  if (!i.ok) return `<p class="note title-paifu">牌譜：この端末では保存を確認できません${i.code === 'unavailable' ? '（ブラウザの設定・プライベートモードなど）' : ''}。対局はできます。</p>`;
+  const del = !i.count ? '' : S.paifuConfirm
+    ? '<span class="paifu-confirm">全部削除しますか？<button data-action="paifu-clear-yes" class="small danger">削除する</button><button data-action="paifu-clear-no" class="small">やめる</button></span>'
+    : '<button data-action="paifu-clear" class="small">削除</button>';
+  return `<p class="note title-paifu">牌譜：この端末に${i.count}件（通常対局を自動で記録・このブラウザ内だけに保存し、送信しません）${i.unreadable ? `・読めない記録${i.unreadable}件` : ''} ${del}</p>`;
 }
 
 // ---------- 対戦相手の選択（Ver.0.6） ----------
@@ -1417,6 +1470,7 @@ function settingsHTML() {
     <p class="note sound-note">打牌・チー・ポン・リーチ・ロン・ツモの効果音です。オフでもゲームは同じように進みます。音が出ないときは、画面を一度タップしてからお試しください（マナーモードでは鳴らない端末があります）。</p>
     <p class="note setting-note">チー・ポンの自動パスは、対戦画面の手牌の下のボタンで切り替えます（いま：チー ${S.chiAutoPass ? 'ON' : 'OFF'}・ポン ${S.ponAutoPass ? 'ON' : 'OFF'}）。チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。</p>
     ${reportInfoHTML()}
+    ${paifuStatusText() ? `<p class="note paifu-status" role="status">${paifuStatusText()}</p>` : ''}
     <div class="modal-actions"><button data-action="reset">新しい対局（得点リセット）</button>
       ${S.confirmTitle ? '<span class="confirm-title">この対局を終了しますか？<button data-action="to-title" class="danger">終了してタイトルへ</button><button data-action="cancel-title">続ける</button></span>' : '<button data-action="ask-title">タイトルへ戻る</button>'}</div>`;
 }
@@ -1829,6 +1883,15 @@ app.addEventListener('click', (ev) => {
       S.opp.notice = null;
       render();
       break;
+    case 'paifu-clear': S.paifuConfirm = true; render(); break;
+    case 'paifu-clear-no': S.paifuConfirm = false; render(); break;
+    case 'paifu-clear-yes':
+      // この端末の牌譜（専用のデータベースの2つの表だけ）を消す。設定・初心者の進み具合・再現 URL は消さない
+      S.paifuConfirm = false;
+      S.paifuInfo = null;
+      render();
+      paifuStore.clearAll().then(() => refreshPaifuInfo(), () => refreshPaifuInfo());
+      break;
     case 'ask-title': S.confirmTitle = true; render(); break;
     case 'cancel-title': S.confirmTitle = false; render(); break;
     case 'to-title':
@@ -1925,10 +1988,11 @@ function goRound(n, dealer = (n - 1) % 4) {
   S.round = n;
   startRound();
 }
-if (IS_LOCAL) window.__mathjong = { S, get rules() { return rules; }, decide, startRound, startMatch, goRound, render, step, drag, fx: { fire: fxFire, clear: fxClear, scan: fxScan, tick: fxTick }, sound, soundScan, voice };
+if (IS_LOCAL) window.__mathjong = { S, get rules() { return rules; }, decide, startRound, startMatch, goRound, render, step, drag, fx: { fire: fxFire, clear: fxClear, scan: fxScan, tick: fxTick }, sound, soundScan, voice, paifu, paifuStore };
 
 // 対局を終了して別の画面へ（AI の進行・ドラッグ・ヒント・演出・音を止める）
 function leaveGame(screen) {
+  paifu.leave('left-match'); // 牌譜：試合の途中なら「途中退出」として保存（終わった試合は何もしない）
   clearTimeout(S.timer);
   S.timer = null;
   if (drag && drag.isDragging()) drag.cancel('render');
@@ -1942,6 +2006,8 @@ function leaveGame(screen) {
   S.autoTsumo.key = null;
   S.publicAiHistory = newPublicHistory();
   S.screen = screen;
+  S.paifuConfirm = false;
+  if (screen === 'title') refreshPaifuInfo();
   render();
 }
 
@@ -1984,9 +2050,14 @@ function startMatch({ fromUrl = false, settings = null } = {}) {
     S.round = 1;
   }
   S.scores = S.match.scores;
+  // 牌譜：通常対局（現行ルール・選択画面／再戦／新しい対局から始めた試合）だけ記録する。
+  // 卒業試験・再現 URL・過去のルールの版・旧規則は記録しない（通常の牌譜に混ぜない）
+  const why = cfg.exam ? 'exam' : fromUrl ? 'replay-url' : LEGACY || ruleset !== CURRENT_RULESET ? 'old-ruleset' : null;
+  paifu.startMatch({ eligible: !why, reason: why, mode: cfg.mode, length: cfg.length, seedBase: S.seedBase, match: S.match,
+    players: [{ kind: 'human', name: 'あなた' }, ...seats.map((id) => ({ kind: 'ai', name: ROSTER_BY_ID[id] ? ROSTER_BY_ID[id].name : id, id }))] });
   startRound();
 }
 
 // 再現 URL：その URL のルールの版で再生する（newrules なし＝従来ルール、1＝新ルール初版、2＝現行）
 if (REPLAY.kind !== 'none' && REPLAY.ok) startMatch({ fromUrl: true, settings: RV.chars ? { mode: S.nextMode, length: S.length, chars: RV.chars, seats: RV.chars, ruleset: RV.ruleset } : { mode: S.nextMode, length: S.length, ai: S.ai, ruleset: RV.ruleset } });
-else render(); // タイトル画面、または再現 URL のエラー画面
+else { if (S.screen === 'title') refreshPaifuInfo(); render(); } // タイトル画面、または再現 URL のエラー画面
