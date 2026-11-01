@@ -1,0 +1,52 @@
+name: Selected-discard tenpai preview checks (no deploy)
+# docs/71（PR #66 の仕様）：選んだ牌を捨てた後の聴牌プレビュー。単体テスト・ブラウザ回帰・エンジン／AI に差分がないことを確認する。公開・デプロイはしない
+on:
+  pull_request:
+    paths:
+      - 'src/ui/discard-preview.js'
+      - 'src/ui/waits-view.js'
+      - 'src/ui/app.js'
+      - 'src/ui/styles.css'
+      - 'tests/discard-preview.test.js'
+      - 'tests/waits-view.test.js'
+      - 'tests/e2e/play.mjs'
+      - '.github/workflows/tenpai-preview.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax checks
+        run: |
+          node --check src/ui/discard-preview.js
+          node --check src/ui/app.js
+          node --check tests/e2e/play.mjs
+      - name: Engine and AI unchanged versus main (UI-only feature)
+        run: |
+          git fetch --depth=1 origin main
+          git diff --exit-code origin/main -- src/engine
+      - name: Unit tests (preview, waits view, furiten)
+        run: node --test tests/discard-preview.test.js tests/waits-view.test.js tests/ruleset2-furiten.test.js
+      - name: Install browser
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Browser regression (preview, waits, riichi assist, hand reorder)
+        run: |
+          mkdir -p /tmp/tenpai-preview
+          node tests/e2e/play.mjs --only v14DiscardPreview,v12WaitsAndYaku,v13RiichiAssist,v09FuritenWaits,handReorder --shots /tmp/tenpai-preview
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tenpai-preview-shots
+          path: /tmp/tenpai-preview
+          if-no-files-found: ignore
