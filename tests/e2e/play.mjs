@@ -9160,7 +9160,13 @@ async function v15PaifuEpochNoBC(browser) {
         assert.ok(i < 200, '設定を開けない');
         const modal = await a.evaluate(() => window.__mathjong.S.modal);
         if (modal === 'result') { await a.locator('.overlay button[data-action="next"]').click(); continue; }
-        if (modal == null) { await a.locator('button[data-action="settings"]').click(); break; }
+        // 確かめた直後に次の局の結果が出て押せないことがある：短い待ちで押し、押せなければ最初から
+        if (modal == null) {
+          const ok = await a.locator('button[data-action="settings"]').click({ timeout: 1500 }).then(() => true, () => false);
+          if (ok && await a.evaluate(() => window.__mathjong.S.modal === 'settings')) break;
+          continue;
+        }
+        assert.notEqual(modal, 'final', '4局戦が1局目で終わった（この試験の前提が成り立たない）');
         await a.waitForTimeout(10);
       }
       await a.locator('button[data-action="reset"]').click();
