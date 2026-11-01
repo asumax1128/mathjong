@@ -30,10 +30,10 @@ jobs:
           node --check src/ui/discard-preview.js
           node --check src/ui/app.js
           node --check tests/e2e/play.mjs
-      - name: Engine and AI unchanged versus main (UI-only feature)
+      - name: Engine and AI unchanged versus main (UI-only feature; new engine modules such as paifu.js are checked by their own workflow)
         run: |
           git fetch --depth=1 origin main
-          git diff --exit-code origin/main -- src/engine
+          git diff --exit-code origin/main -- $(git ls-tree -r --name-only origin/main src/engine)
       - name: Unit tests (preview, waits view, furiten)
         run: node --test tests/discard-preview.test.js tests/waits-view.test.js tests/ruleset2-furiten.test.js
       - name: Install browser

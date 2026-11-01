@@ -8678,6 +8678,679 @@ async function v14DiscardPreview(browser) {
   console.log('✓ 聴牌プレビュー（docs/71）：1回タップで「捨てると聴牌／聴牌にはなりません」・待ちと見えていない枚数・フリテン、選択変更・2回タップの打牌・長押し・リーチの宣言牌・ヒント表示中、5画面でヒント欄の中に収まる');
 }
 
+
+// ---- Ver.0.8 第1段階（docs/74）：通常対局の牌譜の自動記録・IndexedDB への保存・記録された選択による再現 ----
+// 画面のボタン・牌をタップして試合を最後まで進める（ロンとツモはする・ときどきリーチ・リーチ後は自動ツモ切りを ON）
+async function pfPlayOut(page, { stopAfterHuman = null, riichi = true, stopOnResult = false } = {}) {
+  let human = 0;
+  for (let i = 0; i < 6000; i++) {
+    const st = await page.evaluate(() => {
+      const m = window.__mathjong, S = m.S, g = S.game;
+      if (S.modal === 'final') return { kind: 'final' };
+      if (S.modal === 'result') return { kind: 'result' };
+      const p = g && g.pending();
+      if (!p || p.seat !== 0) return { kind: 'wait' };
+      return { kind: p.type, canTsumo: !!p.canTsumo, ron: !!p.ron, drawn: g.drawn, inRiichi: !!g.riichi[0], riichiOk: g.riichiOptions(0).length > 0,
+        auto: S.autoTsumo.on, events: g.events.length };
+    });
+    if (st.kind === 'final') return human;
+    if (st.kind === 'result') { if (stopOnResult) return human; await page.locator('.overlay button[data-action="next"]').click(); continue; }
+    if (st.kind === 'wait') { await page.waitForTimeout(10); continue; }
+    if (stopAfterHuman !== null && human >= stopAfterHuman) return human;
+    human++;
+    if (st.kind === 'claim') { await page.locator(`.bar button[data-action="${st.ron ? 'ron' : 'pass'}"]`).click(); continue; }
+    if (st.canTsumo) { await page.locator('.bar button[data-action="tsumo"]').click(); continue; }
+    if (st.inRiichi) {
+      if (!st.auto) await page.locator('.bar button[data-action="toggle-auto-tsumogiri"]').click(); // 自動ツモ切り（出どころ auto-tsumogiri）
+      else await page.waitForTimeout(10);
+      continue;
+    }
+    if (riichi && st.riichiOk) {
+      await page.locator('.bar button[data-action="riichi"]').click();
+      await page.locator('.hand .tile.riichi-ok').first().click();
+      await page.locator('.bar button[data-action="riichi-discard"]').click();
+      continue;
+    }
+    const t = page.locator(`.hand .tile[data-id="${st.drawn}"]`);
+    await t.click(); await t.click(); // 2回タップで打牌
+  }
+  throw new Error('pfPlayOut: too many steps');
+}
+// 保存の完了を待ち、この端末の牌譜をすべて読み込んで検証する（読み込み＝decode の中で記録された選択を再生して照合）
+const pfSnapshot = (page) => page.evaluate(async () => {
+  const m = window.__mathjong;
+  await m.paifuLoading;
+  for (let i = 0; i < 400; i++) { const st = m.paifu.status(); if (!st.inFlight && !st.dirty) break; await new Promise((r) => setTimeout(r, 25)); }
+  const pf = await import(new URL('src/engine/paifu.js', location.href));
+  const store = m.paifuSys.store;
+  const list = await store.list();
+  const records = [];
+  for (const e of list.ok ? list.entries : []) {
+    const r = await store.loadPrivate(e.id);
+    if (!r.ok) { records.push({ id: e.id, ok: false, code: r.error.code }); continue; }
+    const p = r.record, v = pf.verifyPaifu(p);
+    records.push({ id: e.id, ok: true, status: p.status, mode: p.settings.mode, length: p.settings.length, rounds: p.rounds.length, final: p.final,
+      termination: p.termination, steps: p.rounds.reduce((n, x) => n + x.steps.length, 0), valid: v.valid,
+      sources: [...new Set(p.rounds.flatMap((x) => x.steps.map((s) => s.source)))].sort(),
+      riichi: p.rounds.some((x) => x.steps.some((s) => s.action.riichi)), lastDigest: p.rounds.at(-1) && p.rounds.at(-1).steps.at(-1) ? p.rounds.at(-1).steps.at(-1).digest : null,
+      lastSettled: p.rounds.at(-1) ? p.rounds.at(-1).settlement !== null : null });
+  }
+  const S = m.S;
+  return { status: m.paifu.status(), list: list.ok ? { count: list.entries.length, unreadable: list.unreadable } : { error: list.error.code }, records,
+    live: S.game ? { digest: pf.stateDigest(S.game), scores: S.match.scores.slice(), played: S.match.played, over: S.match.over } : null,
+    finalText: document.querySelector('.final .paifu-status') ? document.querySelector('.final .paifu-status').innerText : null };
+});
+// 牌譜の機能の読込（動的 import）と削除の世代の読込を待つ（準備の前に始めた試合は記録しない仕様のため）
+const pfReady = (page) => page.evaluate(async () => { await window.__mathjong.paifuLoading; await window.__mathjong.paifuSys.ready; return window.__mathjong.S.paifuLoad; });
+async function pfStart(page, { mode = 'math1', length = 1, ids } = {}) {
+  assert.equal(await pfReady(page), 'ready');
+  await page.locator(`input[data-action="title-mode"][value="${mode}"]`).check();
+  await page.locator(`input[data-action="title-length"][value="${length}"]`).check();
+  await chooseAndStart(page, ids);
+}
+async function v15PaifuRecording(browser) {
+  // (1) iPhone 縦（390×844）・数学Ⅰ・1局戦：画面で最後まで打つ → 完了として保存。読み込んで検証でき、最終の持ち点・局数・最後の状態が実際の対局と一致
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  await page.goto(LOCAL + '?speed=test');
+  await page.waitForSelector('.title-screen');
+  await page.waitForSelector('.title-paifu');
+  assert.match(await page.locator('.title-paifu').innerText(), /牌譜：(この端末に0件|確認中)/);
+  await pfStart(page, { mode: 'math1', length: 1 });
+  await pfPlayOut(page);
+  let snap = await pfSnapshot(page);
+  assert.equal(snap.list.count, 1, JSON.stringify(snap));
+  let r = snap.records[0];
+  assert.deepEqual([r.ok, r.valid, r.status, r.mode, r.length, r.rounds], [true, true, 'complete', 'math1', 1, 1]);
+  assert.deepEqual(r.final.scores, snap.live.scores, '最終の持ち点は実際の対局と同じ');
+  assert.equal(r.final.scores.reduce((a, b) => a + b, 0), 400);
+  assert.equal(r.lastDigest, snap.live.digest, '最後の状態の要約は実際の対局と同じ');
+  assert.ok(r.sources.includes('human') && r.sources.includes('ai'));
+  assert.match(snap.finalText, /この試合をこの端末に保存しました（端末内だけ・送信しません）/);
+  // 最終結果の画面：iPhone 縦で横にはみ出さない
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth) <= 1);
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/v15-final-390x844.png` });
+  // (2) 同じ3人と再戦 → 数学Ⅰ・1局戦をもう1試合（別の記録）
+  await page.locator('.final button[data-action="again"]').click();
+  await page.waitForSelector('.hand .tile');
+  await pfPlayOut(page);
+  snap = await pfSnapshot(page);
+  assert.equal(snap.list.count, 2);
+  assert.ok(snap.records.every((x) => x.ok && x.valid && x.status === 'complete'));
+  // (3) タイトルへ：件数を表示。削除は2段階（やめる → 削除する）で、この端末の牌譜だけを消す
+  const before = await page.evaluate(() => ({ ...localStorage }));
+  await page.locator('.final button[data-action="to-title"]').click();
+  await page.waitForFunction(() => /この端末に2件/.test(document.querySelector('.title-paifu') ? document.querySelector('.title-paifu').innerText : ''));
+  await page.locator('button[data-action="paifu-clear"]').click();
+  await page.locator('button[data-action="paifu-clear-no"]').click();
+  assert.match(await page.locator('.title-paifu').innerText(), /この端末に2件/);
+  await page.locator('button[data-action="paifu-clear"]').click();
+  await page.locator('button[data-action="paifu-clear-yes"]').click();
+  await page.waitForFunction(() => /この端末に0件/.test(document.querySelector('.title-paifu') ? document.querySelector('.title-paifu').innerText : ''));
+  assert.deepEqual(await page.evaluate(() => ({ ...localStorage })), before, '既存の保存キー（localStorage）は変えない');
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/v15-title-390x844.png` });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+
+  // (4) 数学Ⅱ・4局戦（チー・ポンの自動パス ON）：完了として保存し、各局の精算・400点・出どころ（auto-pass を含みうる）を検証
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?speed=test');
+    await page.waitForSelector('.title-screen');
+    await pfStart(page, { mode: 'math2', length: 4 });
+    await page.locator('button[data-action="toggle-chi-autopass"]').click();
+    await page.locator('button[data-action="toggle-pon-autopass"]').click();
+    await pfPlayOut(page, { riichi: true });
+    const snap = await pfSnapshot(page);
+    const r = snap.records[0];
+    assert.deepEqual([snap.list.count, r.valid, r.status, r.mode, r.length, r.rounds], [1, true, 'complete', 'math2', 4, snap.live.played]);
+    assert.deepEqual(r.final.scores, snap.live.scores);
+    for (const src of r.sources) assert.ok(['human', 'auto-pass', 'auto-tsumogiri', 'ai'].includes(src));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+
+  // (5) 途中退出：数学Ⅰ・8局戦を数手で「タイトルへ戻る」→ 中断（left-match）として保存。未精算の局はそのまま（精算を作らない）
+  {
+    const ctx = await newContext(browser, { viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    await page.goto(LOCAL + '?speed=test');
+    await page.waitForSelector('.title-screen');
+    await pfStart(page, { mode: 'math1', length: 8 });
+    // リーチ（自動ツモ切り）をしない：止めた後もゲームが自動で進んで局が終わり、結果画面が設定のボタンを覆うことがあった。
+    // 止めた時点が「人の番で、人の操作を待っている・結果画面なし」であることを確かめてから設定を開く
+    await pfPlayOut(page, { stopAfterHuman: 3, riichi: false });
+    const waiting = await page.evaluate(() => { const m = window.__mathjong, g = m.S.game, p = g.pending();
+      return { modal: m.S.modal, seat: p && p.seat, riichi: !!g.riichi[0], autoTsumo: m.S.autoTsumo.on }; });
+    assert.deepEqual(waiting, { modal: null, seat: 0, riichi: false, autoTsumo: false }, '人の操作待ちで止まっている');
+    await page.locator('button[data-action="settings"]').click();
+    await page.locator('button[data-action="ask-title"]').click();
+    await page.locator('button[data-action="to-title"]').click();
+    await page.waitForSelector('.title-screen');
+    const snap = await pfSnapshot(page);
+    const r = snap.records[0];
+    assert.deepEqual([snap.list.count, r.valid, r.status, r.termination, r.final, r.lastSettled], [1, true, 'aborted', { reason: 'left-match' }, null, false]);
+    await page.waitForFunction(() => /この端末に1件/.test(document.querySelector('.title-paifu').innerText));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 牌譜（docs/74）：数学Ⅰ1局戦・数学Ⅱ4局戦（自動パス）を画面で打って完了として保存・読込で再生検証・最終の持ち点と状態が一致、再戦で別の記録、途中退出は中断、タイトルの件数と2段階の削除、localStorage は不変');
+}
+
+async function v15PaifuExclusions(browser) {
+  // (1) 卒業試験・(2) 再現 URL は記録しない。(3) 保存できない端末（IndexedDB の利用不可）でも試合は最後まで進み、「保存できませんでした」
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  await page.goto(LOCAL + '?speed=test');
+  await page.waitForSelector('.title-screen');
+  await pfReady(page);
+  await page.evaluate(() => window.__mathjong.startMatch({ settings: { mode: 'math1', length: 1, chars: ['ousuke', 'natsuki', 'yuki'], ruleset: 2, exam: true } }));
+  await page.waitForSelector('.hand .tile');
+  assert.deepEqual(await page.evaluate(() => { const s = window.__mathjong.paifu.status(); return [s.state, s.reason]; }), ['off', 'exam']);
+  await pfPlayOut(page);
+  let snap = await pfSnapshot(page);
+  assert.equal(snap.list.count, 0, '卒業試験は通常の牌譜に入れない');
+  assert.match(await page.locator('.final').innerText(), /この対局は牌譜の記録の対象外です/);
+  // 再現 URL
+  const p2 = await ctx.newPage();
+  await p2.goto(LOCAL + '?seed=123&round=1&dealer=0&hand=0&renchan=0&len=1&mode=math1&newrules=2&speed=test');
+  await p2.waitForSelector('.hand .tile');
+  await pfReady(p2); // 再現 URL の試合は読込の前に始まるが、理由（対象外）は読込の後も引き継ぐ
+  assert.deepEqual(await p2.evaluate(() => { const s = window.__mathjong.paifu.status(); return [s.state, s.reason]; }), ['off', 'replay-url']);
+  await pfPlayOut(p2);
+  snap = await pfSnapshot(p2);
+  assert.equal(snap.list.count, 0, '再現 URL の対局は記録しない');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  // 保存できない端末：IndexedDB へのアクセスを拒否（Safari のプライベートモード相当）
+  const ctx3 = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  await ctx3.addInitScript(() => { Object.defineProperty(window, 'indexedDB', { configurable: true, get() { throw new DOMException('denied', 'SecurityError'); } }); });
+  const p3 = await ctx3.newPage(), errors3 = watchErrors(p3);
+  await p3.goto(LOCAL + '?speed=test');
+  await p3.waitForFunction(() => /保存を確認できません/.test(document.querySelector('.title-paifu') ? document.querySelector('.title-paifu').innerText : ''));
+  await pfStart(p3, { mode: 'math2', length: 1 });
+  await pfPlayOut(p3);
+  const st = await p3.evaluate(async () => { const m = window.__mathjong; return { s: m.paifu.status(), over: m.S.match.over }; });
+  // 保存できない端末：削除の世代を読めない → 試合は記録しない（記録したふりをしない）。試合は最後まで進む
+  assert.deepEqual([st.over, st.s.state, st.s.reason], [true, 'off', 'storage-unavailable']);
+  assert.match(await p3.locator('.final').innerText(), /この端末では保存できないため、記録していません/);
+  assert.deepEqual(errors3, []);
+  await ctx3.close();
+  console.log('✓ 牌譜：卒業試験・再現 URL は記録しない（読込の後も理由を保つ）、IndexedDB が使えない端末でも試合は最後まで進み「保存できないため記録していません」');
+}
+
+async function v15PaifuStorage(browser) {
+  // 実際の IndexedDB：(1) 上限（件数・バイト数）に達したら保存は capacity-exceeded で失敗し、既存の牌譜（ID・トークン・要約・本文）は
+  // 1文字も変えない（自動削除なし・PR #69 監査 P2-1）。(2) 2つのタブで同時に記録しても両方を保存・検証できる
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  await page.goto(LOCAL + '?speed=test');
+  await page.waitForSelector('.title-screen');
+  await pfReady(page);
+  // 記録は Node 側（tests/paifu-harness.mjs）で作り、JSON でページへ渡す（ページの中で decode＝再生検証してから保存）
+  const { playRecorded } = await import('../paifu-harness.mjs');
+  const { encodePaifu } = await import('../../src/engine/paifu.js');
+  const mk = (id, seedBase, open = false) => encodePaifu(playRecorded({ mode: 'math1', length: 1, seedBase, id, ...(open ? { stopAfterSteps: 5, leaveOpen: true } : {}) }).record);
+  const jsons = [mk('rec-open', 1, true), mk('c1', 10), mk('c2', 11), mk('c3', 12)];
+  const ev = await page.evaluate(async (jsons) => {
+    const st = await import(new URL('src/ui/paifu-storage.js', location.href));
+    const pf = await import(new URL('src/engine/paifu.js', location.href));
+    const [open, c1, c2, c3] = jsons.map((j) => pf.decodePaifu(j));
+    // 生の行（本文・トークン・要約）を読む：上限の前後で既存の行が変わらないことを確かめる
+    const raw = () => new Promise((res, rej) => { const r = indexedDB.open(st.PAIFU_DB_NAME); r.onsuccess = () => { const db = r.result, tx = db.transaction(['records', 'index'], 'readonly'), out = {}; let n = 2;
+      for (const name of ['records', 'index']) { const q = tx.objectStore(name).getAll(); q.onsuccess = () => { out[name] = q.result.sort((a, b) => a.id.localeCompare(b.id)); if (--n === 0) { db.close(); res(JSON.stringify(out)); } }; } }; r.onerror = () => rej(r.error); });
+    const base = await import(new URL('src/ui/paifu-storage.js', location.href));
+    const clear = await base.createPaifuStore().clearAll();
+    const epoch = clear.epoch;
+    // (a) 件数の上限 3：3件まで保存、4件目は失敗。既存の3件は不変
+    const s3 = st.createPaifuStore({ maxRecords: 3 });
+    const a = [];
+    for (const r of [open, c1, c2]) a.push(await s3.save(r, { epoch }));
+    const before = await raw();
+    const over = await s3.save(c3, { epoch });
+    const afterCount = await raw();
+    const listA = await s3.list();
+    // (b) バイト数の上限：いまの合計＋4件目の大きさ−1 → 4件目は失敗。既存は不変。既存の記録の更新で上限を超える場合も失敗し、元の行のまま
+    const used = listA.entries.reduce((n, e) => n + e.bytes, 0);
+    const c3bytes = new TextEncoder().encode(jsons[3]).length;
+    const sB = st.createPaifuStore({ maxRecords: 100, maxBytes: used + c3bytes - 1 });
+    const overBytes = await sB.save(c3, { epoch });
+    const afterBytes = await raw();
+    const openMeta = listA.entries.find((e) => e.id === 'rec-open');
+    const sTight = st.createPaifuStore({ maxRecords: 100, maxBytes: used });
+    const grown = pf.endRecording(open, 'left-match'); // 同じ ID の更新（大きさは少し増える）
+    const overUpdate = await sTight.save(grown, { epoch, expectedToken: openMeta.token });
+    const afterUpdate = await raw();
+    // evict の指定は受け付けない
+    const evict = await s3.save(c3, { epoch, evict: true });
+    await base.createPaifuStore().clearAll();
+    return { a: a.map((r) => r.ok), over: over.ok ? 'ok' : over.error.code, unchangedCount: before === afterCount,
+      overBytes: overBytes.ok ? 'ok' : overBytes.error.code, unchangedBytes: before === afterBytes,
+      overUpdate: overUpdate.ok ? 'ok' : overUpdate.error.code, unchangedUpdate: before === afterUpdate,
+      ids: listA.entries.map((e) => e.id).sort(), evict: evict.ok ? 'ok' : evict.error.code };
+  }, jsons);
+  assert.deepEqual(ev.a, [true, true, true]);
+  assert.deepEqual([ev.over, ev.unchangedCount], ['capacity-exceeded', true], '件数の上限：保存は失敗し、既存の行は不変');
+  assert.deepEqual([ev.overBytes, ev.unchangedBytes], ['capacity-exceeded', true], 'バイト数の上限：保存は失敗し、既存の行は不変');
+  assert.deepEqual([ev.overUpdate, ev.unchangedUpdate], ['capacity-exceeded', true], '更新で上限を超える：失敗し、元の行のまま');
+  assert.deepEqual(ev.ids, ['c1', 'c2', 'rec-open']);
+  assert.equal(ev.evict, 'invalid-argument', '自動削除の指定は受け付けない');
+  // アプリ：上限（1件）に達した端末で新しい試合 → 「上限に達しているため保存できませんでした。既存の牌譜は削除していません」、既存の1件は不変
+  const p4 = await ctx.newPage(), errors4 = watchErrors(p4);
+  await p4.goto(LOCAL + '?speed=test&paifuMaxRecords=1');
+  await p4.waitForSelector('.title-screen');
+  await pfStart(p4, { mode: 'math1', length: 1 });
+  await pfPlayOut(p4);
+  let snap = await pfSnapshot(p4);
+  assert.equal(snap.list.count, 1);
+  const firstId = snap.records[0].id;
+  await p4.locator('.final button[data-action="again"]').click();
+  await p4.waitForSelector('.hand .tile');
+  await pfPlayOut(p4);
+  snap = await pfSnapshot(p4);
+  assert.deepEqual([snap.list.count, snap.records[0].id, snap.status.state, snap.status.saveError], [1, firstId, 'failed', 'capacity-exceeded']);
+  assert.match(await p4.locator('.final').innerText(), /保存の上限（1件・32MB）に達しているため保存できませんでした。既存の牌譜は削除していません/);
+  assert.deepEqual(errors4, []);
+  await p4.evaluate(() => window.__mathjong.paifuSys.clearAll());
+  await p4.close();
+  // 2つのタブ
+  const a = page, b = await ctx.newPage();
+  await b.goto(LOCAL + '?speed=test');
+  await b.waitForSelector('.title-screen');
+  await pfStart(a, { mode: 'math1', length: 1 });
+  await pfStart(b, { mode: 'math2', length: 1 });
+  await Promise.all([pfPlayOut(a), pfPlayOut(b)]);
+  await pfSnapshot(a);
+  snap = await pfSnapshot(b);
+  assert.equal(snap.list.count, 2);
+  assert.deepEqual(snap.records.map((x) => [x.ok, x.valid, x.status]).sort(), [[true, true, 'complete'], [true, true, 'complete']]);
+  assert.deepEqual(snap.records.map((x) => x.mode).sort(), ['math1', 'math2']);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  console.log('✓ 牌譜（実際の IndexedDB）：件数・バイト数・更新の上限で保存は失敗し既存の行は不変（自動削除なし）・アプリは上限の理由を表示、2つのタブの同時記録を両方保存・検証');
+}
+
+async function v15PaifuEpoch(browser) {
+  // 全件削除と、削除の前に始まった保存要求（PR #69 監査 P2-2）。実際の IndexedDB で、削除の世代（epoch）の照合を時点ごとに確かめる：
+  // 初回の保存前・要約（SHA-256）の計算中・IndexedDB の書込み待ち（削除と保存の両方の順序）・保存の後の次の保存。削除の後の新しい試合は保存できる
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  await page.goto(LOCAL + '?speed=test');
+  await page.waitForSelector('.title-screen');
+  await pfReady(page);
+  const { playRecorded } = await import('../paifu-harness.mjs');
+  const { encodePaifu } = await import('../../src/engine/paifu.js');
+  const json = encodePaifu(playRecorded({ mode: 'math2', length: 1, seedBase: 77, id: 'e1' }).record);
+  const json2 = encodePaifu(playRecorded({ mode: 'math1', length: 1, seedBase: 78, id: 'e2' }).record);
+  const r = await page.evaluate(async ([json, json2]) => {
+    const st = await import(new URL('src/ui/paifu-storage.js', location.href));
+    const pf = await import(new URL('src/engine/paifu.js', location.href));
+    const rec = pf.decodePaifu(json), rec2 = pf.decodePaifu(json2);
+    let gate = null;
+    const hold = () => { let open; gate = new Promise((res) => { open = res; }); return open; };
+    const hooks = { afterEncode: async () => { if (gate && hooks.at === 'encode') await gate; }, afterDigest: async () => { if (gate && hooks.at === 'digest') await gate; } };
+    const store = st.createPaifuStore({ hooks });
+    const plain = st.createPaifuStore();
+    const count = async () => (await plain.list()).entries.length;
+    const out = {};
+    let e0 = (await plain.clearAll()).epoch;
+    // (1) 初回の保存前に削除：開始時の世代 e0 の保存は拒否
+    let e1 = (await plain.clearAll()).epoch;
+    out.beforeFirst = [(await store.save(rec, { epoch: e0 })).error?.code, await count()];
+    // (2) 要約の計算中（encode の後）に削除
+    hooks.at = 'encode'; let open = hold();
+    let pending = store.save(rec, { epoch: e1 });
+    await new Promise((res) => setTimeout(res, 20));
+    const e2 = (await plain.clearAll()).epoch; open();
+    out.duringEncode = [(await pending).error?.code, await count()];
+    // (3) SHA-256 の後（DB の書込みの直前）に削除
+    hooks.at = 'digest'; open = hold();
+    pending = store.save(rec, { epoch: e2 });
+    await new Promise((res) => setTimeout(res, 20));
+    const e3 = (await plain.clearAll()).epoch; open();
+    out.duringDigest = [(await pending).error?.code, await count()];
+    hooks.at = null; gate = null;
+    // (4) DB 待ち：削除を先に始め、すぐ保存（削除が先に確定 → 保存は拒否）
+    const clearFirst = plain.clearAll();
+    const saveAfter = store.save(rec, { epoch: e3 });
+    const e4 = (await clearFirst).epoch;
+    out.clearThenSave = [(await saveAfter).error?.code, await count()];
+    // (5) DB 待ち：保存を先に始め、すぐ削除（保存が先に確定しても、削除で消える。復活しない）
+    hooks.at = 'digest'; open = hold();
+    const saveFirst = store.save(rec, { epoch: e4 });
+    await new Promise((res) => setTimeout(res, 20));
+    open(); hooks.at = null; gate = null;
+    const sf = await saveFirst;
+    const e5 = (await plain.clearAll()).epoch;
+    out.saveThenClear = [sf.ok, await count()];
+    // (6) 保存の後に削除 → 同じ試合の次の保存（トークンあり）は拒否
+    const ok6 = await store.save(rec, { epoch: e5 });
+    const e6 = (await plain.clearAll()).epoch;
+    out.afterSave = [ok6.ok, (await store.save(rec, { epoch: e5, expectedToken: ok6.metadata.token })).error?.code, await count()];
+    // (7) 削除の後の新しい試合（新しい世代）は保存できる
+    out.newAfterClear = [(await store.save(rec2, { epoch: e6 })).ok, await count()];
+    await plain.clearAll();
+    return out;
+  }, [json, json2]);
+  assert.deepEqual(r.beforeFirst, ['stale-epoch', 0], '初回の保存前に削除');
+  assert.deepEqual(r.duringEncode, ['stale-epoch', 0], '要約の計算中に削除');
+  assert.deepEqual(r.duringDigest, ['stale-epoch', 0], 'SHA-256 の後・書込み前に削除');
+  assert.deepEqual(r.clearThenSave, ['stale-epoch', 0], '削除の確定の後の書込み');
+  assert.deepEqual(r.saveThenClear, [true, 0], '保存の確定の後に削除');
+  assert.deepEqual(r.afterSave, [true, 'stale-epoch', 0], '保存の後に削除 → 次の保存で復活しない');
+  assert.deepEqual(r.newAfterClear, [true, 1], '削除の後の新しい試合は保存できる');
+
+  // アプリの2つのタブ：A が4局戦の途中（1局目を保存済み）、B がタイトルで全件削除 → A の以後の保存は拒否（復活しない）・表示は「削除されたため保存しません」。
+  // A がその後に始めた試合（別のタブからの通知で新しい世代）は保存できる
+  // （上の検査は保存先を直接操作して世代を進めたので、アプリのタブは読み直してから始める）
+  const a = page, b = await ctx.newPage();
+  await a.reload();
+  await a.waitForSelector('.title-screen');
+  await b.goto(LOCAL + '?speed=test');
+  await b.waitForSelector('.title-screen');
+  await pfReady(b);
+  await pfStart(a, { mode: 'math1', length: 4 });
+  // 1局目の精算まで進めて保存を待つ
+  await pfPlayOut(a, { stopOnResult: true });
+  await a.waitForFunction(() => { const s = window.__mathjong.paifu.status(); return s.everSaved && !s.inFlight; });
+  assert.equal((await a.evaluate(() => window.__mathjong.paifu.status())).everSaved, true, 'A は1局目を保存済み');
+  await b.waitForFunction(() => /この端末に1件/.test(document.querySelector('.title-paifu') ? document.querySelector('.title-paifu').innerText : ''), null, { timeout: 15000 }).catch(async () => { await b.evaluate(() => window.__mathjong.paifuSys.list()); });
+  await b.evaluate(() => window.__mathjong.paifuSys.clearAll());
+  await pfPlayOut(a); // A は試合の最後まで（局の精算ごとに保存を試みる）
+  let snap = await pfSnapshot(a);
+  assert.deepEqual([snap.list.count, snap.status.state, snap.status.saveError], [0, 'failed', 'stale-epoch'], '削除の後に復活しない');
+  assert.match(await a.locator('.final').innerText(), /保存済みの牌譜がすべて削除されたため、この試合は保存しません/);
+  // A の次の試合は保存できる（B からの通知・または再読込で新しい世代）
+  await a.locator('.final button[data-action="again"]').click();
+  await a.waitForSelector('.hand .tile');
+  await pfPlayOut(a);
+  snap = await pfSnapshot(a);
+  assert.deepEqual([snap.list.count, snap.records[0].status, snap.records[0].valid, snap.status.state], [1, 'complete', true, 'saved']);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  console.log('✓ 牌譜：全件削除と保存の順序（初回の保存前・要約の計算中・SHA-256 の後・DB の書込み待ちの両順序・保存の後）で、削除の前の保存要求は牌譜を復活させない。2つのタブでも同じ。削除の後の新しい試合は保存できる');
+}
+
+async function v15PaifuLoadFailure(browser) {
+  // 牌譜の機能の読込の失敗・構文エラー・遅延（PR #69 監査 P2-3）：タイトル・通常対局・初心者の部屋が動く。準備の前に始まった試合は記録しない
+  const cases = [
+    ['fetch-fail', 'src/ui/paifu-system.js', (route) => route.abort('failed')],
+    ['syntax-error', 'src/ui/paifu-recorder.js', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: 'export const x = ;' })],
+    ['engine-syntax', 'src/engine/paifu.js', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: 'export function (' })],
+    ['http-500', 'src/ui/paifu-storage.js', (route) => route.fulfill({ status: 500, body: 'error' })],
+  ];
+  for (const [name, path, handler] of cases) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const pageErrors = [];
+    page.on('pageerror', (e) => pageErrors.push(String(e)));
+    await page.route(`**/${path}*`, handler);
+    await page.goto(LOCAL + '?speed=test');
+    await page.waitForSelector('.title-screen');
+    await page.evaluate(() => window.__mathjong.paifuLoading);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.paifuLoad), 'failed', name);
+    await page.waitForFunction(() => /機能を読み込めませんでした/.test(document.querySelector('.title-paifu') ? document.querySelector('.title-paifu').innerText : ''));
+    // 通常対局を最後まで
+    await page.locator(`input[data-action="title-length"][value="1"]`).check();
+    await chooseAndStart(page);
+    await pfPlayOut(page);
+    assert.match(await page.locator('.final').innerText(), /機能を読み込めなかったため、記録していません/);
+    assert.equal(await page.evaluate(() => window.__mathjong.S.match.over), true);
+    // 初心者の部屋
+    await page.locator('.final button[data-action="to-title"]').click();
+    await page.locator('button[data-action="br-open"]').click();
+    await page.waitForFunction(() => window.__mathjong.S.screen === 'beginner-room');
+    assert.ok(await page.locator('.room, .br-room, main').count() > 0);
+    assert.deepEqual(pageErrors, [], `${name}：未処理の例外なし`);
+    await ctx.close();
+  }
+  // 遅延：読込に4秒かかる。読込の前に始めた試合は記録しない（途中から記録しない）。読込の後の試合は記録する
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page);
+    let released = false;
+    await page.route('**/src/ui/paifu-system.js*', async (route) => { await new Promise((r) => setTimeout(r, 4000)); released = true; await route.continue(); });
+    await page.goto(LOCAL + '?speed=test');
+    await page.waitForSelector('.title-screen');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.paifuLoad), 'loading');
+    await page.locator(`input[data-action="title-length"][value="1"]`).check();
+    await chooseAndStart(page);
+    assert.equal(released, false, '読込の前に試合を開始');
+    await pfPlayOut(page);
+    await page.evaluate(() => window.__mathjong.paifuLoading);
+    const st = await page.evaluate(() => window.__mathjong.paifu.status());
+    assert.deepEqual([st.state, st.reason], ['off', 'not-ready']);
+    assert.match(await page.locator('.final').innerText(), /準備ができる前に始まった対局のため、記録していません/);
+    let snap = await pfSnapshot(page);
+    assert.equal(snap.list.count, 0, '途中から記録しない');
+    await page.locator('.final button[data-action="again"]').click();
+    await page.waitForSelector('.hand .tile');
+    await pfPlayOut(page);
+    snap = await pfSnapshot(page);
+    assert.deepEqual([snap.list.count, snap.records[0].status, snap.records[0].valid], [1, 'complete', true], '読込の後の試合は記録');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 牌譜の機能の読込の失敗（取得失敗・構文エラー2種・HTTP 500）でもタイトル・通常対局・初心者の部屋が動く、読込の遅延中に始めた試合は記録しない・読込の後の試合は記録');
+}
+
+
+async function v15PaifuEpochNoBC(browser) {
+  // PR #69 第2回監査 P2-A：BroadcastChannel がない環境で、別のタブの全件削除の後に「新しい対局」「再戦」を、旧試合の保存の失敗より先に行う。
+  // 旧試合の保存は拒否・新試合の保存は成功・削除済みの記録は復活しない（実際の IndexedDB・画面での対局）
+  for (const how of ['reset', 'again']) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    await ctx.addInitScript(() => { try { delete window.BroadcastChannel; } catch { /* 無視 */ } window.BroadcastChannel = undefined; });
+    const a = await ctx.newPage(), errors = watchErrors(a);
+    // 再戦：旧試合の最後の保存を 2 秒遅らせる（その間に別のタブで削除し、保存の失敗より先に再戦する）
+    await a.goto(LOCAL + `?speed=test${how === 'again' ? '&paifuSaveDelay=2000' : ''}`);
+    await a.waitForSelector('.title-screen');
+    const b = await ctx.newPage();
+    await b.goto(LOCAL + '?speed=test');
+    await b.waitForSelector('.title-screen');
+    await pfReady(b);
+    assert.equal(await a.evaluate(() => typeof window.BroadcastChannel), 'undefined', 'BroadcastChannel なし');
+    let oldId;
+    if (how === 'reset') {
+      // 旧試合：4局戦の1局目を精算して保存（世代 E）。まだ途中
+      await pfStart(a, { mode: 'math1', length: 4 });
+      await pfPlayOut(a, { stopOnResult: true });
+      await a.waitForFunction(() => { const s = window.__mathjong.paifu.status(); return s.everSaved && !s.inFlight; });
+      oldId = await a.evaluate(() => window.__mathjong.paifu.privateRecord().id);
+      await b.evaluate(() => window.__mathjong.paifuSys.clearAll()); // 別のタブで全件削除（A に通知は届かない）
+      // A：設定 → 新しい対局（旧試合の中断の保存は、この後に拒否される）
+      // 局の結果を閉じ、結果画面がない（対局中）ことを確かめてから設定を開く（test 速度では次の局の結果がすぐ出ることがある）
+      for (let i = 0; ; i++) {
+        assert.ok(i < 200, '設定を開けない');
+        const modal = await a.evaluate(() => window.__mathjong.S.modal);
+        if (modal === 'result') { await a.locator('.overlay button[data-action="next"]').click(); continue; }
+        // 確かめた直後に次の局の結果が出て押せないことがある：短い待ちで押し、押せなければ最初から
+        if (modal == null) {
+          const ok = await a.locator('button[data-action="settings"]').click({ timeout: 1500 }).then(() => true, () => false);
+          if (ok && await a.evaluate(() => window.__mathjong.S.modal === 'settings')) break;
+          continue;
+        }
+        assert.notEqual(modal, 'final', '4局戦が1局目で終わった（この試験の前提が成り立たない）');
+        await a.waitForTimeout(10);
+      }
+      await a.locator('button[data-action="reset"]').click();
+    } else {
+      await pfStart(a, { mode: 'math2', length: 1 });
+      await pfPlayOut(a);
+      oldId = await a.evaluate(() => window.__mathjong.paifu.privateRecord().id);
+      assert.equal(await a.evaluate(() => window.__mathjong.paifu.status().inFlight), true, '旧試合の最後の保存は待ち中');
+      await b.evaluate(() => window.__mathjong.paifuSys.clearAll());
+      await a.locator('.final button[data-action="again"]').click(); // 保存の失敗より先に再戦
+    }
+    await a.waitForSelector('.hand .tile');
+    const st0 = await a.evaluate(() => window.__mathjong.paifu.status());
+    assert.equal(st0.state === 'recording' || st0.state === 'saving' || st0.state === 'saved', true, JSON.stringify(st0));
+    await pfPlayOut(a);
+    const snap = await pfSnapshot(a);
+    const ids = snap.records.map((x) => x.id);
+    assert.ok(!ids.includes(oldId), `${how}：旧試合は復活しない`);
+    assert.deepEqual([snap.list.count, snap.records[0].status, snap.records[0].valid, snap.status.state], [1, 'complete', true, 'saved'], `${how}：新試合は保存`);
+    const epochs = await a.evaluate(async () => ({ rec: window.__mathjong.paifu.status().epoch, db: (await window.__mathjong.paifuSys.store.epoch()).epoch }));
+    assert.equal(epochs.rec, epochs.db, '新試合は削除の後の世代');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 牌譜（BroadcastChannel なし・2つのタブ）：別のタブの全件削除の後、旧試合の保存の失敗より先に「新しい対局」「再戦」→ 旧試合は拒否・復活しない、新試合は削除の後の世代で保存');
+}
+
+async function v15PaifuEpochFallback(browser) {
+  // PR #69 第3回監査 P2 の固定反例（実際の IndexedDB・2つのタブ）：A が世代 0 を取得 → A の接続を閉じる → 次の世代の取得を保留 →
+  // A で通常対局を開始（行動0件・1件）→ pagehide の保存を要求 → B で全件削除（世代 1）→ A の世代の取得を完了。
+  // 旧試合は保存されず件数は0件。削除の後の新しい試合は保存できる。BroadcastChannel あり／なし。
+  // A は本物の createPaifuSystem・createPaifuStore を使い、接続の有無と世代の読込の時点だけを外から操作する
+  for (const bc of [true, false]) for (const actions of [0, 1]) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 } });
+    if (!bc) await ctx.addInitScript(() => { try { delete window.BroadcastChannel; } catch { /* 無視 */ } window.BroadcastChannel = undefined; });
+    const a = await ctx.newPage(), b = await ctx.newPage(), errA = watchErrors(a), errB = watchErrors(b);
+    for (const pg of [a, b]) { await pg.goto(LOCAL + '?speed=test'); await pg.waitForSelector('.title-screen'); await pfReady(pg); }
+    await b.evaluate(() => window.__mathjong.paifuSys.clearAll()); // 前の検証の残りを消して、世代を確定する
+    const where = `BroadcastChannel${bc ? 'あり' : 'なし'}・行動${actions}件`;
+    const { PLAYERS } = await import('../paifu-harness.mjs');
+    const e0 = await a.evaluate(async ([actions, PLAYERS]) => {
+      const st = await import(new URL('src/ui/paifu-storage.js', location.href));
+      const sy = await import(new URL('src/ui/paifu-system.js', location.href));
+      const [{ Game }, { applyAction }, { decideCharacter }, { createRng }, M, { MAX_ROUND }, pf] = await Promise.all(
+        ['src/engine/game.js', 'src/engine/ai.js', 'src/engine/characters.js', 'src/engine/rng.js', 'src/engine/match.js', 'src/ui/params.js', 'src/engine/paifu.js']
+          .map((u) => import(new URL(u, location.href))));
+      const real = st.createPaifuStore();
+      let blocked = false, gate = null, release = null;
+      const store = { ...real, epochNow: () => (blocked ? null : real.epochNow()), epoch: async () => { if (gate) await gate; return real.epoch(); } };
+      const S = sy.createPaifuSystem({ appVersion: 'e2e', store, useWorker: true });
+      await S.ready; // 1：世代を取得
+      const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5)); };
+      const IDS = ['yujin', 'aoto', 'kanata', 'mitsuki'];
+      // app.js と同じ順序の呼び出し（行動 n 件で止める。null なら最後まで）
+      const play = async (seedBase, length, n) => {
+        let match = M.createMatch({ length, riichiDeposit: M.RIICHI_DEPOSIT, agariYame: true });
+        S.recorder.startMatch({ eligible: true, mode: 'math1', length, seedBase, players: PLAYERS, match });
+        const rng = createRng(seedBase);
+        let round = 1, steps = 0;
+        while (!match.over) {
+          if (n === 0) return;
+          const g = new Game({ rules: pf.paifuRules('math1'), seed: seedBase + round * pf.ROUND_SEED_STEP, dealer: M.dealerOf(match), players: PLAYERS, round, ruleset: 2 });
+          S.recorder.roundStarted(g, { presetWall: false });
+          while (g.pending()) {
+            const q = g.pending(), act = decideCharacter(g, q.seat, IDS[q.seat], rng, null, IDS), before = g.events.length;
+            applyAction(g, q.seat, act);
+            S.recorder.actionApplied(g, q.seat, act, q.seat ? 'ai' : 'human', before);
+            if (n !== null && ++steps >= n) return;
+          }
+          match = M.applyRoundResult(match, g.result, { round, maxRound: MAX_ROUND, riichi: g.riichi });
+          S.recorder.roundSettled(g, match, { maxRound: MAX_ROUND });
+          await settle();
+          round++;
+        }
+        await settle();
+      };
+      window.__fb = { S, real, play, settle,
+        dropConnection() { blocked = true; real.close(); }, // 2
+        hold() { gate = new Promise((r) => { release = r; }); }, // 3
+        release() { const r = release; gate = null; release = null; r(); },
+        reconnect() { blocked = false; real.warm(); } };
+      return S.epochState().epoch;
+    }, [actions, PLAYERS]);
+    // 2〜5（A）
+    const oldId = await a.evaluate(async (actions) => {
+      const f = window.__fb;
+      f.dropConnection(); f.hold();
+      await f.play(1700 + actions, 4, actions); // 4：通常対局を開始
+      f.S.recorder.flush(); // 5：pagehide
+      await f.settle();
+      return f.S.recorder.privateRecord().id;
+    }, actions);
+    // 6（B）：全件削除。A に通知が届くかは BroadcastChannel の有無による
+    const e1 = (await b.evaluate(() => window.__mathjong.paifuSys.clearAll())).epoch;
+    assert.equal(e1, e0 + 1, where);
+    // 7（A）：世代の取得を完了 → 旧試合は記録しない
+    const after = await a.evaluate(async () => {
+      const f = window.__fb;
+      f.release();
+      await f.settle();
+      f.S.recorder.flush(); f.S.recorder.leave('left-match');
+      await f.settle();
+      const l = await f.real.list();
+      return { st: f.S.recorder.status(), count: l.entries.length, ids: l.entries.map((e) => e.id) };
+    });
+    assert.deepEqual([after.st.state, after.st.reason, after.st.bound], ['off', 'epoch-changed', false], where);
+    assert.equal(after.count, 0, `${where}：削除の後の件数は0件`);
+    assert.ok(!after.ids.includes(oldId), where);
+    // 削除の後の新しい試合：接続がないまま・接続を戻した後のどちらも保存できる（世代 e1）
+    const fresh = await a.evaluate(async () => {
+      const f = window.__fb, out = [];
+      await f.play(1710, 1, null);
+      out.push([f.S.recorder.status().state, f.S.recorder.status().epoch]);
+      f.reconnect(); await f.settle();
+      await f.play(1711, 1, null);
+      out.push([f.S.recorder.status().state, f.S.recorder.status().epoch]);
+      const l = await f.real.list();
+      const v = [];
+      for (const e of l.entries) { const r = await f.real.verify(e.id); v.push(r.ok && r.valid); }
+      f.S.close(); f.real.close();
+      return { out, count: l.entries.length, v };
+    });
+    assert.deepEqual(fresh.out, [['saved', e1], ['saved', e1]], `${where}：削除の後の新しい試合は保存`);
+    assert.deepEqual([fresh.count, fresh.v], [2, [true, true]], where);
+    assert.deepEqual(await b.evaluate(async () => (await window.__mathjong.paifuSys.store.list()).entries.length), 2, 'B から見ても同じ');
+    await b.evaluate(() => window.__mathjong.paifuSys.clearAll());
+    assert.deepEqual([...errA, ...errB], []);
+    await ctx.close();
+  }
+  console.log('✓ 牌譜（第3回監査の固定反例・実際の IndexedDB・2つのタブ）：接続なしで始めた行動0件・1件の試合 → pagehide → 別のタブで全件削除 → 世代の取得の完了で、旧試合は保存されず0件。削除の後の新しい試合は保存（BroadcastChannel あり／なし）');
+}
+
+async function v15PaifuSnapshot(browser) {
+  // PR #69 第2回監査 P2-B：保存の途中で呼び出し元が元のオブジェクトを書き換えても、保存されるのは save を呼んだ時点の内容で、
+  // 読込・再検証は必ず成功する。Worker の経路と、Worker なしの分割検証の経路。時点：呼んだ直後・検証の途中・検証の後（書込みの前）
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  await page.goto(LOCAL + '?speed=test');
+  await page.waitForSelector('.title-screen');
+  await pfReady(page);
+  const { playRecorded } = await import('../paifu-harness.mjs');
+  const { encodePaifu } = await import('../../src/engine/paifu.js');
+  const json = encodePaifu(playRecorded({ mode: 'math2', length: 8, seedBase: 9393, id: 'snap' }).record);
+  const out = await page.evaluate(async (json) => {
+    const st = await import(new URL('src/ui/paifu-storage.js', location.href));
+    const pf = await import(new URL('src/engine/paifu.js', location.href));
+    const sys = await import(new URL('src/ui/paifu-system.js', location.href));
+    const res = [];
+    for (const path of ['worker', 'chunked']) {
+      for (const when of ['immediately', 'duringVerify', 'afterVerify']) {
+        const rec = JSON.parse(json); // 呼び出し元の変更できる記録
+        const mutate = () => { rec.rounds[0].steps[0].digest = '0000000000000000'; rec.rounds[1].steps.length = 3; rec.status = 'aborted'; rec.final = null; };
+        const fallback = (s) => pf.encodePaifuSnapshotAsync(s, { budgetMs: 1 });
+        const base = path === 'worker' ? sys.createWorkerEncoder({ url: new URL('src/ui/paifu-worker.js', location.href), fallback }) : fallback;
+        // 検証の途中で書き換える：Worker は処理中（postMessage の後）、分割は最初の区切り（イベントループへ戻った）後
+        const encode = when === 'duringVerify' ? (s) => { const p = base(s); setTimeout(mutate, 0); return p; } : base;
+        const store = st.createPaifuStore({ encode, hooks: { afterEncode: async () => { if (when === 'afterVerify') mutate(); } } });
+        const epoch = (await store.clearAll()).epoch;
+        const pr = store.save(rec, { epoch });
+        if (when === 'immediately') mutate();
+        const r = await pr;
+        const back = r.ok ? await store.loadPrivate('snap') : null;
+        res.push({ path, when, ok: r.ok, code: r.ok ? null : r.error.code, loaded: !!(back && back.ok),
+          same: back && back.ok ? pf.canonical(back.record) === pf.canonical(JSON.parse(json)) : false,
+          worker: path === 'worker' && typeof base.usingWorker === 'function' ? base.usingWorker() : false });
+        await store.clearAll();
+      }
+    }
+    return res;
+  }, json);
+  for (const r of out) {
+    assert.deepEqual([r.ok, r.loaded, r.same], [true, true, true], `${r.path}・${r.when}：保存は呼んだ時点の内容・読込と再検証が成功 ${JSON.stringify(r)}`);
+    if (r.path === 'worker') assert.equal(r.worker, true, 'Worker を使った');
+  }
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  console.log('✓ 牌譜：保存の途中（呼んだ直後・検証の途中・検証の後）に元のオブジェクトを書き換えても、Worker・分割検証の両方で保存は呼んだ時点の内容・読込と再検証が成功');
+}
+
 let browser;
 const stats = { rounds: 0, wins: [0, 0, 0, 0], draws: 0, tsumo: 0, ron: 0, ronDeclined: 0, chi: 0, chiPassed: 0, chiOverriddenByRon: 0, discards: 0, yaku: {} };
 const t0 = Date.now();
@@ -8689,7 +9362,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage, v15PaifuEpoch, v15PaifuLoadFailure, v15PaifuEpochNoBC, v15PaifuEpochFallback, v15PaifuSnapshot };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -8762,6 +9435,14 @@ try {
   await v12Layout(browser);
   await v13RiichiAssist(browser);
   await v14DiscardPreview(browser);
+  await v15PaifuRecording(browser);
+  await v15PaifuExclusions(browser);
+  await v15PaifuStorage(browser);
+  await v15PaifuEpoch(browser);
+  await v15PaifuLoadFailure(browser);
+  await v15PaifuEpochNoBC(browser);
+  await v15PaifuEpochFallback(browser);
+  await v15PaifuSnapshot(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。

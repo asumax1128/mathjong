@@ -1,0 +1,60 @@
+name: Paifu recording stage 1 checks (no deploy)
+# docs/74：通常対局の牌譜の自動記録・IndexedDB 保存・記録された選択による再現の検証。公開・デプロイはしない
+on:
+  pull_request:
+    paths:
+      - 'src/engine/paifu.js'
+      - 'src/ui/paifu-storage.js'
+      - 'src/ui/paifu-recorder.js'
+      - 'src/ui/paifu-system.js'
+      - 'src/ui/paifu-worker.js'
+      - 'src/ui/app.js'
+      - 'src/ui/styles.css'
+      - 'tests/paifu*.js'
+      - 'tests/paifu-harness.mjs'
+      - 'tests/e2e/play.mjs'
+      - '.github/workflows/paifu-recording.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  paifu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax checks
+        run: |
+          node --check src/engine/paifu.js
+          node --check src/ui/paifu-storage.js
+          node --check src/ui/paifu-recorder.js
+          node --check src/ui/paifu-system.js
+          node --check src/ui/paifu-worker.js
+          node --check tests/e2e/paifu-perf.mjs
+          node --check src/ui/app.js
+          node --check tests/e2e/play.mjs
+      - name: Game engine, AI and rules unchanged versus main (paifu.js is a new, separate module)
+        run: |
+          git fetch --depth=1 origin main
+          git diff --exit-code origin/main -- $(git ls-tree -r --name-only origin/main src/engine)
+      - name: Unit tests (record, replay verification, storage contracts, recorder)
+        run: node --test tests/paifu.test.js tests/paifu-storage.test.js tests/paifu-recorder.test.js tests/paifu-system.test.js tests/paifu-epoch-fallback.test.js tests/discard-preview.test.js tests/sound.test.js
+      - name: Install browser
+        run: |
+          npm install --no-save playwright@1.56.1
+          npx playwright install --with-deps chromium
+      - name: Browser (real IndexedDB, real play through the UI, tenpai support regression)
+        run: |
+          mkdir -p /tmp/paifu
+          node tests/e2e/play.mjs --only v15PaifuRecording,v15PaifuExclusions,v15PaifuStorage,v15PaifuEpoch,v15PaifuEpochNoBC,v15PaifuEpochFallback,v15PaifuSnapshot,v15PaifuLoadFailure,v14DiscardPreview,handReorder,v07BeginnerRoom --shots /tmp/paifu
+      - name: Main-thread blocking during save (8-round records, CPU 1x/6x; informational)
+        run: node tests/e2e/paifu-perf.mjs --out /tmp/paifu/paifu-perf.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: paifu-recording-shots
+          path: /tmp/paifu
+          if-no-files-found: ignore

@@ -1203,3 +1203,9 @@ table.values td.undef { color: #999; font-size: 12px; }
   .table .study-dock .discard-preview { font-size: 11px; padding: 3px 8px; }
   .discard-preview .dp-foot { font-size: 10px; }
 }
+
+/* ===== 牌譜（Ver.0.8 第1段階・docs/74）：保存状態の短い文・タイトルの件数と削除 ===== */
+.paifu-status { color: var(--ink-dim); }
+.title-screen .title-paifu { max-width: 380px; margin: 6px auto 0; font-size: 11.5px; line-height: 1.45; text-align: center; }
+.title-screen .title-paifu button { margin-left: 4px; min-height: 28px; }
+.title-screen .paifu-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-left: 4px; }
