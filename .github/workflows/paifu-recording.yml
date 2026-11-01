@@ -6,6 +6,8 @@ on:
       - 'src/engine/paifu.js'
       - 'src/ui/paifu-storage.js'
       - 'src/ui/paifu-recorder.js'
+      - 'src/ui/paifu-system.js'
+      - 'src/ui/paifu-worker.js'
       - 'src/ui/app.js'
       - 'src/ui/styles.css'
       - 'tests/paifu*.js'
@@ -29,6 +31,9 @@ jobs:
           node --check src/engine/paifu.js
           node --check src/ui/paifu-storage.js
           node --check src/ui/paifu-recorder.js
+          node --check src/ui/paifu-system.js
+          node --check src/ui/paifu-worker.js
+          node --check tests/e2e/paifu-perf.mjs
           node --check src/ui/app.js
           node --check tests/e2e/play.mjs
       - name: Game engine, AI and rules unchanged versus main (paifu.js is a new, separate module)
@@ -36,7 +41,7 @@ jobs:
           git fetch --depth=1 origin main
           git diff --exit-code origin/main -- $(git ls-tree -r --name-only origin/main src/engine)
       - name: Unit tests (record, replay verification, storage contracts, recorder)
-        run: node --test tests/paifu.test.js tests/paifu-storage.test.js tests/paifu-recorder.test.js tests/discard-preview.test.js
+        run: node --test tests/paifu.test.js tests/paifu-storage.test.js tests/paifu-recorder.test.js tests/paifu-system.test.js tests/discard-preview.test.js tests/sound.test.js
       - name: Install browser
         run: |
           npm install --no-save playwright@1.56.1
@@ -44,7 +49,9 @@ jobs:
       - name: Browser (real IndexedDB, real play through the UI, tenpai support regression)
         run: |
           mkdir -p /tmp/paifu
-          node tests/e2e/play.mjs --only v15PaifuRecording,v15PaifuExclusions,v15PaifuStorage,v14DiscardPreview,handReorder --shots /tmp/paifu
+          node tests/e2e/play.mjs --only v15PaifuRecording,v15PaifuExclusions,v15PaifuStorage,v15PaifuEpoch,v15PaifuLoadFailure,v14DiscardPreview,handReorder,v07BeginnerRoom --shots /tmp/paifu
+      - name: Main-thread blocking during save (8-round records, CPU 1x/6x; informational)
+        run: node tests/e2e/paifu-perf.mjs --out /tmp/paifu/paifu-perf.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

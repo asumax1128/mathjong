@@ -1,5 +1,25 @@
 # 数雀｜牌譜 第1段階：Codex 独立監査の引き継ぎ資料
 
+## 限定再監査（PR #69 監査 HEAD 6e2fb71 の指摘の修正）
+| 指摘 | 修正 | 確かめてほしいこと | 固定のテスト |
+|---|---|---|---|
+| P2-1 上限での自動削除 | `src/ui/paifu-storage.js` から自動削除を取り除いた。上限超過は `capacity-exceeded` | 上限（件数・バイト数・既存の記録の更新）で既存の行が変わらないか。`evict` が受け付けられないか。保存の失敗が表示されるか | E2E `v15PaifuStorage`、単体 `paifu-storage`（`evict` の拒否） |
+| P2-2 全件削除と保存の競合 | DB の `meta` 表の削除の世代。`clearAll` は表の消去と世代の更新を同じトランザクションで。`save` は世代を必須にし、トランザクションの中で照合（`stale-epoch`） | 初回の保存前・SHA-256 の計算中・DB 待ち（両順序）・保存の後で、削除の前の要求が牌譜を復活させないか。別のタブ。削除の後の新しい試合 | E2E `v15PaifuEpoch`（保存先の各時点の決定的な割り込み＋アプリの2つのタブ）、単体 `paifu-recorder`（P2-2） |
+| P2-3 読込の障害の分離 | `src/ui/app.js` は `import('./paifu-system.js')`（動的）。読込前・失敗時は何もしない窓口。読込の前に始まった試合は記録しない | 取得失敗・構文エラー・HTTP 500・遅延で、タイトル・通常対局・初心者の部屋が動くか。途中から記録しないか | E2E `v15PaifuLoadFailure`、単体 `paifu-recorder`（P2-3） |
+| P3-1 表示の区別 | `describePaifuStatus`（`src/ui/paifu-recorder.js`） | 記録中・未保存／保存処理中／保存済み／保存失敗／対象外が別の文か。「保存中」は実際に保存している間だけか | 単体 `paifu-recorder`（P3-1） |
+| 性能 | 検証を Web Worker（`src/ui/paifu-worker.js`）で。失敗時は主スレッドで分割（`verifyPaifuAsync`） | 検証を省略していないか（Worker・分割とも同じ検証）。主スレッドの停止の実測 | `tests/e2e/paifu-perf.mjs`・`docs/validation/paifu-perf.json`、単体 `paifu-system` |
+
+再現：
+```
+node --test tests/paifu.test.js tests/paifu-storage.test.js tests/paifu-recorder.test.js tests/paifu-system.test.js
+node tests/e2e/play.mjs --only v15PaifuStorage,v15PaifuEpoch,v15PaifuLoadFailure,v15PaifuRecording,v15PaifuExclusions
+node tests/e2e/paifu-perf.mjs
+```
+
+---
+
+## 初回の監査の資料（HEAD 6e2fb71）
+
 対象：牌譜の自動記録・端末内保存（docs/74）。監査は PR の固定 HEAD（フル SHA）を GitHub から取得して行う。
 本番の AI・ルール・得点・既存のエンジンのファイル・ヒント・聴牌サポート・再現 URL・localStorage のキーは変更しない設計。mainマージ・Pages公開はしていない。
 
@@ -7,7 +27,7 @@
 | 種別 | ファイル |
 |---|---|
 | 新規（エンジン層・DOMなし） | `src/engine/paifu.js` |
-| 新規（UI層・保存） | `src/ui/paifu-storage.js`、`src/ui/paifu-recorder.js` |
+| 新規（UI層・保存） | `src/ui/paifu-storage.js`、`src/ui/paifu-recorder.js`、`src/ui/paifu-system.js`（動的 import の入口）、`src/ui/paifu-worker.js`（検証の Worker） |
 | 変更（接続・表示） | `src/ui/app.js`、`src/ui/styles.css` |
 | テスト | `tests/paifu.test.js`、`tests/paifu-storage.test.js`、`tests/paifu-recorder.test.js`、`tests/paifu-harness.mjs`、`tests/e2e/play.mjs`（`v15Paifu*`） |
 | CI・文書 | `.github/workflows/paifu-recording.yml`、`docs/74`、`docs/75` |

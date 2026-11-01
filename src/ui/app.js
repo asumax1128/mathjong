@@ -28,8 +28,6 @@ import { validateReplay, replayQuery, CURRENT_RULESET } from './replay.js';
 import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, scanEffects, fxOffer, fxAdvance, fxTimes, fxProgress, isLiteEffect } from './effects.js';
 import { SOUND_KEY, parseSoundSetting, pickSound, createSoundPlayer } from './sound.js';
 import { VOICE_KEY, parseVoiceSetting, createVoicePlayer } from './voice.js';
-import { createPaifuStore } from './paifu-storage.js';
-import { createPaifuRecorder } from './paifu-recorder.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
@@ -158,19 +156,56 @@ S.beginnerRoom = createRoomState(); // 通常の対戦相手選択・対局と�
 
 // ---- 牌譜の自動記録（Ver.0.8 第1段階・docs/74）：通常対局だけ。保存はこの端末のブラウザ内（IndexedDB）だけで、送信しない。
 // ゲームの進行は記録・保存の成否に依存しない（保存は非同期・待たない）。牌譜の内容（手牌・山）は画面に出さない。
-const paifuStore = createPaifuStore();
-const paifu = createPaifuRecorder({ store: paifuStore, appVersion: APP_VERSION,
-  // 保存状態が変わったら、それを表示している画面（最終結果・設定）だけを描き直す（対局中の手牌の操作を妨げない）。
-  // タイトル画面（途中退出の保存がタイトルへ戻った後に終わる）では件数を読み直す
-  onChange: () => {
-    if (S.screen === 'game' && (S.modal === 'final' || S.modal === 'settings')) render();
-    else if (S.screen === 'title' && !paifu.status().dirty) refreshPaifuInfo();
-  } });
+// 牌譜の機能（src/ui/paifu-system.js とその依存）は起動後に動的 import で読み込む。読込の失敗・遅延・構文エラーでも
+// タイトル・通常対局・初心者の部屋は動く（PR #69 監査 P2-3）。読込が終わる前に始まった試合は記録しない（途中から記録しない）。
+// 読込前・失敗時は、同じ呼び出し口を持つ「何もしない」窓口（paifuPlaceholder）を使う。
+S.paifuLoad = 'loading'; // 'loading' | 'ready' | 'failed'
+let paifuSys = null;
+function paifuPlaceholder() {
+  let st = { state: 'off', reason: null };
+  const off = (reason) => { st = { state: 'off', reason }; };
+  return Object.freeze({
+    startMatch({ eligible, reason }) { off(eligible ? (S.paifuLoad === 'failed' ? 'unavailable' : 'not-ready') : reason); },
+    roundStarted() {}, actionApplied() {}, roundSettled() {}, leave() {}, flush() {}, skipMatch(reason) { off(reason); },
+    status: () => Object.freeze({ ...st, dirty: false, inFlight: false, everSaved: false }),
+  });
+}
+let paifu = paifuPlaceholder();
+// 保存状態が変わったら、それを表示している画面（最終結果・設定）だけを描き直す（対局中の手牌の操作を妨げない）。
+// タイトル画面（途中退出の保存がタイトルへ戻った後に終わる・別のタブの削除）では件数を読み直す
+function paifuChanged() {
+  if (S.screen === 'game' && (S.modal === 'final' || S.modal === 'settings')) render();
+  else if (S.screen === 'title' && !paifu.status().dirty && !paifu.status().inFlight) refreshPaifuInfo();
+}
+// ローカルの検証用：保存の上限と Worker の有無を URL で変えられる（公開サイトでは無効）
+const paifuOptions = () => {
+  if (!IS_LOCAL) return {};
+  const n = (k) => (params.has(k) && Number.isSafeInteger(Number(params.get(k))) ? Number(params.get(k)) : undefined);
+  const limits = Object.fromEntries([['maxRecords', n('paifuMaxRecords')], ['maxBytes', n('paifuMaxBytes')]].filter(([, v]) => v !== undefined));
+  return { limits, useWorker: params.get('paifuWorker') !== '0' };
+};
+const paifuLoading = import('./paifu-system.js').then((m) => {
+  paifuSys = m.createPaifuSystem({ appVersion: APP_VERSION, onChange: paifuChanged, ...paifuOptions() });
+  // 読込の前に始まった試合（進行中・結果表示中）は記録しない。理由（対象外・準備前）は読込前の窓口のものを引き継ぐ
+  if (S.screen === 'game') paifuSys.recorder.skipMatch(paifu.status().reason || 'not-ready');
+  paifu = paifuSys.recorder;
+  S.paifuLoad = 'ready';
+  return paifuSys.ready.then(() => { if (S.screen === 'title') refreshPaifuInfo(); });
+}).catch(() => {
+  // 読込・初期化の失敗：記録しない（ゲームは続く）。進行中の試合の表示も「読み込めなかった」に
+  S.paifuLoad = 'failed';
+  paifuSys = null;
+  if (S.screen === 'game') { const r = paifu.status().reason; paifu.skipMatch(r === 'not-ready' || !r ? 'unavailable' : r); }
+  if (S.screen === 'title') refreshPaifuInfo();
+});
 S.paifuInfo = null; // タイトル画面の保存件数（{ ok, count, unreadable } または読込中は null）
 S.paifuConfirm = false; // 牌譜の削除の確認（2段階）
 function refreshPaifuInfo() {
+  if (!paifuSys) { S.paifuInfo = S.paifuLoad === 'failed' ? { ok: false, code: 'module' } : null; if (S.screen === 'title') render(); return; }
+  const sys = paifuSys;
   S.paifuInfo = null;
-  paifuStore.list().then((r) => {
+  // 削除の世代も読み直す（別のタブの全件削除を、通知が届かない環境でも反映）
+  sys.refreshEpoch().catch(() => {}).then(() => sys.list()).then((r) => {
     S.paifuInfo = r.ok ? { ok: true, count: r.entries.length, unreadable: r.unreadable || 0 } : { ok: false, code: r.error.code };
     if (S.screen === 'title') render();
   }).catch(() => { S.paifuInfo = { ok: false, code: 'storage-error' }; if (S.screen === 'title') render(); });
@@ -1160,15 +1195,15 @@ function doraResultHTML() {
 const ROUND_LIMIT_NOTE = `通し局数の上限（${MAX_ROUND.toLocaleString('en-US')}局）に達したため、試合を終了しました。親の連荘もここで終了します。`;
 
 // 試合終了のリザルト（最終順位・得点・開始点との差・和了回数・最高和了・局数・連荘・設定）
-// 牌譜の保存状態（短い文）。内容（手牌・山）は出さない。端末内だけの保存で、送信しないことを明記する
+// 牌譜の保存状態（短い文）。内容（手牌・山）は出さない。記録中・未保存／保存中／保存済み／保存失敗／対象外を区別する
+// （文言は src/ui/paifu-recorder.js の describePaifuStatus。牌譜の機能の読込前・失敗時は、ここの短い文）
 function paifuStatusText() {
   const st = paifu.status();
-  if (st.state === 'off') return st.reason === 'exam' || st.reason === 'replay-url' || st.reason === 'old-ruleset' ? 'この対局は牌譜の記録の対象外です' : null;
-  if (st.state === 'error') return '牌譜：この試合は記録できませんでした（ゲームの進行・結果には影響しません）';
-  if (st.state === 'failed') return '牌譜：この端末に保存できませんでした（ゲームの進行・結果には影響しません）';
-  if (st.state === 'saving' || st.dirty) return '牌譜：この端末に保存しています…';
-  if (st.state === 'saved') return st.savedStatus === 'complete' ? '牌譜：この試合をこの端末に保存しました（端末内だけ・送信しません）' : '牌譜：ここまでの記録をこの端末に保存しました（端末内だけ・送信しません）';
-  return '牌譜：この試合を記録しています（終局ごとにこの端末へ保存）';
+  if (paifuSys) return paifuSys.describe(st).text;
+  if (st.reason === 'exam' || st.reason === 'replay-url' || st.reason === 'old-ruleset') return 'この対局は牌譜の記録の対象外です';
+  if (st.reason === 'unavailable') return '牌譜：機能を読み込めなかったため、記録していません（ゲームには影響しません）';
+  if (st.reason === 'not-ready') return '牌譜：準備ができる前に始まった対局のため、記録していません';
+  return null;
 }
 
 function finalHTML() {
@@ -1268,6 +1303,7 @@ function titleHTML() {
 function paifuTitleHTML() {
   const i = S.paifuInfo;
   if (!i) return '<p class="note title-paifu" aria-live="polite">牌譜：確認中…</p>';
+  if (!i.ok && i.code === 'module') return '<p class="note title-paifu">牌譜：機能を読み込めませんでした（記録・保存はしません）。対局はできます。</p>';
   if (!i.ok) return `<p class="note title-paifu">牌譜：この端末では保存を確認できません${i.code === 'unavailable' ? '（ブラウザの設定・プライベートモードなど）' : ''}。対局はできます。</p>`;
   const del = !i.count ? '' : S.paifuConfirm
     ? '<span class="paifu-confirm">全部削除しますか？<button data-action="paifu-clear-yes" class="small danger">削除する</button><button data-action="paifu-clear-no" class="small">やめる</button></span>'
@@ -1890,7 +1926,9 @@ app.addEventListener('click', (ev) => {
       S.paifuConfirm = false;
       S.paifuInfo = null;
       render();
-      paifuStore.clearAll().then(() => refreshPaifuInfo(), () => refreshPaifuInfo());
+      // 削除の世代も進む（削除の前に始まった試合の保存要求は、削除の後に牌譜を復活させない。別のタブにも通知）
+      if (paifuSys) paifuSys.clearAll().then(() => refreshPaifuInfo(), () => refreshPaifuInfo());
+      else refreshPaifuInfo();
       break;
     case 'ask-title': S.confirmTitle = true; render(); break;
     case 'cancel-title': S.confirmTitle = false; render(); break;
@@ -1988,7 +2026,7 @@ function goRound(n, dealer = (n - 1) % 4) {
   S.round = n;
   startRound();
 }
-if (IS_LOCAL) window.__mathjong = { S, get rules() { return rules; }, decide, startRound, startMatch, goRound, render, step, drag, fx: { fire: fxFire, clear: fxClear, scan: fxScan, tick: fxTick }, sound, soundScan, voice, paifu, paifuStore };
+if (IS_LOCAL) window.__mathjong = { S, get rules() { return rules; }, decide, startRound, startMatch, goRound, render, step, drag, fx: { fire: fxFire, clear: fxClear, scan: fxScan, tick: fxTick }, sound, soundScan, voice, get paifu() { return paifu; }, get paifuSys() { return paifuSys; }, paifuLoading };
 
 // 対局を終了して別の画面へ（AI の進行・ドラッグ・ヒント・演出・音を止める）
 function leaveGame(screen) {

@@ -9,7 +9,7 @@ import { decideCharacter } from '../src/engine/characters.js';
 import { createRng } from '../src/engine/rng.js';
 import { createMatch, applyRoundResult, dealerOf, RIICHI_DEPOSIT } from '../src/engine/match.js';
 import { MAX_ROUND } from '../src/ui/params.js';
-import { createPaifuRecorder } from '../src/ui/paifu-recorder.js';
+import { createPaifuRecorder, describePaifuStatus } from '../src/ui/paifu-recorder.js';
 import { verifyPaifu, encodePaifu, paifuRules, ROUND_SEED_STEP, stateDigest } from '../src/engine/paifu.js';
 import { PLAYERS } from './paifu-harness.mjs';
 
@@ -19,22 +19,28 @@ const settle = async () => { for (let i = 0; i < 10; i++) await flush(); };
 function fakeStore(results = []) {
   const saved = [];
   const toks = new Map(); // 記録の ID ごとのトークン（本物と同じ）
-  let n = 0;
-  return {
+  let n = 0, epoch = 0;
+  const store = {
     saved,
+    get epochValue() { return epoch; },
+    // 本物と同じ：全件削除で世代を進め、保存はその世代の試合だけを受け付ける
+    clearAll: async () => { epoch++; toks.clear(); saved.length = 0; return { ok: true, cleared: true, epoch }; },
+    epoch: async () => ({ ok: true, epoch }),
     save: async (p, opts) => {
       const r = results[n++];
       if (r === 'throw') throw new Error('boom');
       if (r && !r.ok) return r;
-      assert.equal(opts.evict, true);
+      assert.deepEqual(Object.keys(opts).sort(), ['epoch', 'expectedToken'], '自動削除（evict）は指定しない');
+      if (opts.epoch !== epoch) return { ok: false, error: { code: 'stale-epoch', retryable: false } };
       if (opts.expectedToken !== (toks.get(p.id) ?? null)) return { ok: false, error: { code: 'conflict', retryable: false } };
       const json = encodePaifu(p); // 本物と同じく保存の前に検証（選択の再生）
       const tok = (n.toString(16) + 'f'.repeat(32)).slice(0, 32);
       toks.set(p.id, tok);
       saved.push(JSON.parse(json));
-      return { ok: true, metadata: { id: p.id, token: tok }, evicted: 0 };
+      return { ok: true, metadata: { id: p.id, token: tok } };
     },
   };
+  return store;
 }
 // app.js と同じ流れで試合を進める（席0は AI の方針で代わりに打つ）。hooks で途中の操作を差し込む
 async function playApp(rec, { mode = 'math1', length = 1, seedBase = 321, exam = false, stopAfter = null, tamper = null } = {}) {
@@ -247,4 +253,105 @@ test('前の試合の保存が終わる前に新しい試合を始めても、�
   assert.deepEqual(first.at(-1).termination, { reason: 'reset' });
   assert.equal(inner.saved.filter((x) => x.id !== id1).at(-1).status, 'complete', '新しい試合は完了まで保存');
   assert.equal(rec.status().state, 'saved', '表示はいまの試合の状態');
+});
+
+// ---- PR #69 監査 P2-2：全件削除と、削除の前に始まった試合の保存（削除の世代 epoch）----
+const epochOf = (store) => () => ({ epoch: store.epochValue, error: null });
+test('P2-2 保存の後に全件削除：削除の前の試合の次の保存は stale-epoch で拒否（復活しない）。削除の後の新しい試合は保存できる', async () => {
+  const store = fakeStore();
+  let known = 0; // アプリが知っている世代（全件削除・通知で更新される）
+  const rec = createPaifuRecorder({ store, appVersion: '0.7.0', epoch: () => ({ epoch: known, error: null }) });
+  await playApp(rec, { length: 8, seedBase: 920, stopAfter: 120 }); // 1局目を精算して保存済み
+  assert.ok(store.saved.length >= 1);
+  const r = await store.clearAll(); known = r.epoch; // 全件削除（世代 1）
+  await playApp(rec, { length: 1, seedBase: 921 }); // 新しい試合（前の試合は reset として中断の保存を試みる → 拒否）
+  const ids = new Set(store.saved.map((x) => x.id));
+  assert.equal(ids.size, 1, '削除の後に残るのは新しい試合の記録だけ');
+  assert.equal(store.saved.at(-1).status, 'complete');
+  assert.equal(rec.status().state, 'saved');
+});
+
+test('P2-2 初回の保存の前に全件削除：その試合は1回も保存されず、状態は「削除されたため保存しません」', async () => {
+  const store = fakeStore();
+  const rec = createPaifuRecorder({ store, appVersion: '0.7.0', epoch: () => ({ epoch: 0, error: null }) }); // 削除を知らないタブ
+  const m = createMatch({ length: 4, riichiDeposit: RIICHI_DEPOSIT, agariYame: true });
+  rec.startMatch({ eligible: true, mode: 'math1', length: 4, seedBase: 922, players: PLAYERS, match: m });
+  await store.clearAll(); // 別のタブで全件削除（このタブはまだ知らない）
+  let stale = 0;
+  const rec2 = createPaifuRecorder({ store, appVersion: '0.7.0', epoch: () => ({ epoch: 0, error: null }), onStaleEpoch: () => stale++ });
+  await playApp(rec2, { length: 4, seedBase: 923 });
+  assert.equal(store.saved.length, 0, '削除の前の世代の記録は保存しない');
+  assert.equal(rec2.status().state, 'failed');
+  assert.equal(rec2.status().saveError, 'stale-epoch');
+  assert.ok(stale >= 1, '世代を読み直す');
+  assert.match(describePaifuStatus(rec2.status()).text, /すべて削除されたため、この試合は保存しません/);
+  assert.ok(rec);
+});
+
+// ---- PR #69 監査 P2-3：準備ができる前に始まった試合は記録しない ----
+test('P2-3 世代が分からない（読込前）・保存できない端末：その試合は記録しない（途中から記録しない）。skipMatch で記録をやめる', async () => {
+  const store = fakeStore();
+  const rec = createPaifuRecorder({ store, appVersion: '0.7.0', epoch: () => ({ epoch: null, error: null }) });
+  await playApp(rec, { length: 1, seedBase: 924 });
+  assert.equal(store.saved.length, 0);
+  assert.deepEqual([rec.status().state, rec.status().reason], ['off', 'not-ready']);
+  assert.match(describePaifuStatus(rec.status()).text, /準備ができる前に始まった対局/);
+  const rec2 = createPaifuRecorder({ store, appVersion: '0.7.0', epoch: () => ({ epoch: null, error: 'unavailable' }) });
+  await playApp(rec2, { length: 1, seedBase: 925 });
+  assert.deepEqual([rec2.status().state, rec2.status().reason], ['off', 'storage-unavailable']);
+  assert.equal(store.saved.length, 0);
+  // 記録中の試合で skipMatch：以後は記録しない（中断として保存を試みる）
+  const rec3 = createPaifuRecorder({ store, appVersion: '0.7.0', epoch: epochOf(store) });
+  await playApp(rec3, { length: 8, seedBase: 926, stopAfter: 10 });
+  rec3.skipMatch('not-ready');
+  assert.deepEqual([rec3.status().state, rec3.status().reason], ['off', 'not-ready']);
+});
+
+// ---- PR #69 監査 P3-1：保存状態の表示 ----
+test('P3-1 表示：記録中・未保存／保存処理中／保存済み／保存失敗／記録対象外を別の文で示す', async () => {
+  const D = (st) => describePaifuStatus({ dirty: false, inFlight: false, everSaved: false, saveError: null, savedStatus: null, reason: null, ...st });
+  const cases = {
+    recordingUnsaved: D({ state: 'recording', dirty: true }),
+    recordingAfterSave: D({ state: 'saved', dirty: true, everSaved: true, savedStatus: 'recording' }),
+    saving: D({ state: 'saving', dirty: true, inFlight: true }),
+    savedPartial: D({ state: 'saved', everSaved: true, savedStatus: 'recording' }),
+    savedComplete: D({ state: 'saved', everSaved: true, savedStatus: 'complete' }),
+    savedAborted: D({ state: 'saved', everSaved: true, savedStatus: 'aborted' }),
+    failedCapacity: D({ state: 'failed', dirty: true, saveError: 'capacity-exceeded' }),
+    failedStale: D({ state: 'failed', saveError: 'stale-epoch' }),
+    failedUnavailable: D({ state: 'failed', saveError: 'unavailable' }),
+    failedOther: D({ state: 'failed', saveError: 'timeout' }),
+    excluded: D({ state: 'off', reason: 'exam' }),
+    notReady: D({ state: 'off', reason: 'not-ready' }),
+    error: D({ state: 'error' }),
+  };
+  const kinds = Object.fromEntries(Object.entries(cases).map(([k, v]) => [k, v.kind]));
+  assert.deepEqual(kinds, { recordingUnsaved: 'recording', recordingAfterSave: 'recording', saving: 'saving', savedPartial: 'saved', savedComplete: 'saved',
+    savedAborted: 'saved', failedCapacity: 'failed', failedStale: 'failed', failedUnavailable: 'failed', failedOther: 'failed', excluded: 'excluded', notReady: 'not-recorded', error: 'error' });
+  const texts = Object.values(cases).map((c) => c.text);
+  assert.equal(new Set(texts).size, texts.length, 'すべて別の文');
+  assert.match(cases.recordingUnsaved.text, /記録中（まだ保存していません/);
+  assert.match(cases.recordingAfterSave.text, /前の局までは保存済み/);
+  assert.doesNotMatch(cases.recordingUnsaved.text, /保存しています/, '未保存を「保存中」と言わない');
+  assert.match(cases.saving.text, /保存しています/);
+  assert.match(cases.savedComplete.text, /この試合をこの端末に保存しました/);
+  assert.match(cases.failedCapacity.text, /上限（100件・32MB）.*既存の牌譜は削除していません/);
+  assert.match(cases.excluded.text, /対象外/);
+  // 実際の流れ：保存中（in flight）だけが「保存中」、終われば保存済み、次の行動で「記録中（前の局までは保存済み）」
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const inner = fakeStore();
+  const store = { ...inner, save: async (p, o) => { await gate; return inner.save(p, o); } };
+  const rec = createPaifuRecorder({ store, appVersion: '0.7.0' });
+  const m = createMatch({ length: 4, riichiDeposit: RIICHI_DEPOSIT, agariYame: true });
+  rec.startMatch({ eligible: true, mode: 'math1', length: 4, seedBase: 927, players: PLAYERS, match: m });
+  assert.equal(describePaifuStatus(rec.status()).kind, 'recording');
+  await playApp(rec, { length: 4, seedBase: 927, stopAfter: 150 }); // 1局目の精算で保存要求（保留中）
+  await flush();
+  assert.equal(describePaifuStatus(rec.status()).kind, 'saving');
+  release();
+  await settle();
+  const k = describePaifuStatus(rec.status());
+  assert.ok(k.kind === 'recording' || k.kind === 'saved', k.kind);
+  assert.equal(rec.status().everSaved, true);
 });

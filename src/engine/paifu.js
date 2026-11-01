@@ -239,7 +239,11 @@ function perform(g, seat, a) {
   else if (a.type === 'ankan') g.ankan(seat, a.tileType);
   else g.respond(seat, a);
 }
-function replayRound(p, r, index, upTo = null) {
+// 検証は生成関数（generator）で書き、同期の検証（drain）と、主スレッドを長く止めない非同期の検証（verifyPaifuAsync：
+// 一定時間ごとにイベントループへ戻る）の両方で同じ処理を使う。途中で yield するのは状態を変えない区切り（行動の間・局の間）だけ。
+const STEP_CHUNK = 24;
+function drain(gen) { let r = gen.next(); while (!r.done) r = gen.next(); return r.value; }
+function* replayRound(p, r, index, upTo = null) {
   const match = index ? p.rounds[index - 1].settlement.matchAfter : p.initialMatch;
   same(r.matchBefore, match, `rounds.${index}.matchBefore`);
   integer(r.round, 1, PAIFU_MAX_ROUNDS, `rounds.${index}.round`);
@@ -261,10 +265,11 @@ function replayRound(p, r, index, upTo = null) {
     g.checkInvariants();
     same(s.events, g.events.length, `${path}.events`);
     same(s.digest, stateDigest(g), `${path}.digest`);
+    if ((i + 1) % STEP_CHUNK === 0) yield;
   }
   return g;
 }
-function verify(p) {
+function* verify(p) {
   header(p);
   exactKeys(p, ['format', 'schemaVersion', 'kind', 'engineVersion', 'appVersion', 'visibility', 'id', 'createdAt', 'settings',
     'initialMatch', 'status', 'rounds', 'final', 'termination'], 'paifu');
@@ -276,16 +281,18 @@ function verify(p) {
   requireThat(STATUSES.includes(p.status), 'status', 'unknown status');
   requireThat(Array.isArray(p.rounds) && p.rounds.length <= PAIFU_MAX_ROUNDS, 'rounds', 'array required');
   let decisions = 0;
-  p.rounds.forEach((r, i) => {
+  for (let i = 0; i < p.rounds.length; i++) {
+    const r = p.rounds[i];
     exactKeys(r, ['round', 'dealer', 'seed', 'matchBefore', 'startDigest', 'steps', 'result', 'settlement'], `rounds.${i}`);
     const last = i === p.rounds.length - 1;
     requireThat(r.settlement !== null || last, `rounds.${i}.settlement`, 'only the last round may be unsettled');
-    const g = replayRound(p, r, i);
+    const g = yield* replayRound(p, r, i);
     decisions += r.steps.length;
+    yield;
     if (r.settlement === null) {
       // 未精算の最後の局（記録中・中断）：途中でも、終局の直後（精算の前）でもよい。精算・流局は作らない
       requireThat(r.result === null && p.status !== 'complete', `rounds.${i}`, 'unsettled round in a complete record');
-      return;
+      continue;
     }
     exactKeys(r.settlement, ['maxRound', 'riichi', 'deltas', 'matchAfter'], `rounds.${i}.settlement`);
     requireThat(g.phase === 'ended' && !g.pending(), `rounds.${i}.settlement`, 'round not ended by the recorded steps');
@@ -297,7 +304,7 @@ function verify(p) {
     matchCheck(expected, `rounds.${i}.settlement.matchAfter`);
     same(r.settlement.deltas, expected.scores.map((n, k) => n - r.matchBefore.scores[k]), `rounds.${i}.settlement.deltas`);
     requireThat(!expected.over || last, `rounds.${i}`, 'rounds after the match ended');
-  });
+  }
   const end = lastMatch(p.rounds.length && p.rounds.at(-1).settlement === null ? { ...p, rounds: p.rounds.slice(0, -1) } : p);
   if (p.status === 'complete') {
     requireThat(end.over && p.termination === null, 'status', 'complete requires an ended match');
@@ -309,8 +316,20 @@ function verify(p) {
   }
   return { valid: true, status: p.status, rounds: p.rounds.length, decisions };
 }
+const wrapError = (e) => (e instanceof PaifuError ? e : new PaifuError('record', e && e.message ? e.message : 'invalid'));
 export function verifyPaifu(p) {
-  try { return verify(p); } catch (e) { if (e instanceof PaifuError) throw e; throw new PaifuError('record', e && e.message ? e.message : 'invalid'); }
+  try { return drain(verify(p)); } catch (e) { throw wrapError(e); }
+}
+// 非同期の検証：同じ検証を、budgetMs ごとに pause()（既定はタイマーで次のタスクへ）を待って進める。検証は省略しない
+export async function verifyPaifuAsync(p, { budgetMs = 8, pause = () => new Promise((r) => setTimeout(r, 0)), now = () => Date.now() } = {}) {
+  const gen = verify(p);
+  let t0 = now();
+  try {
+    for (let r = gen.next(); ; r = gen.next()) {
+      if (r.done) return r.value;
+      if (now() - t0 >= budgetMs) { await pause(); t0 = now(); }
+    }
+  } catch (e) { throw wrapError(e); }
 }
 
 // 信頼できる内部・テスト用：roundIndex の局を step 手目まで再現した Game を返す（振り返り画面は第2段階・別PR）
@@ -319,7 +338,7 @@ export function replayPaifuRound(p, roundIndex, step = null) {
   integer(roundIndex, 0, p.rounds.length - 1, 'roundIndex');
   const r = p.rounds[roundIndex];
   if (step !== null) integer(step, 0, r.steps.length, 'step');
-  return replayRound(p, r, roundIndex, step);
+  return drain(replayRound(p, r, roundIndex, step));
 }
 
 // ---- JSON（保存用）：プレーンな JSON だけ・深さと要素数の上限・危険なキーを拒否・バイト上限 ----
@@ -336,6 +355,14 @@ function jsonCheck(x, depth = 0, budget = { nodes: 0 }) {
 export function encodePaifu(p) {
   jsonCheck(p);
   verifyPaifu(p);
+  const s = canonical(p);
+  requireThat(new TextEncoder().encode(s).length <= PAIFU_MAX_BYTES, 'json', 'byte limit exceeded');
+  return s;
+}
+// 非同期版（保存用）：検証を verifyPaifuAsync で行う。結果は encodePaifu と同じ文字列
+export async function encodePaifuAsync(p, opts = {}) {
+  jsonCheck(p);
+  await verifyPaifuAsync(p, opts);
   const s = canonical(p);
   requireThat(new TextEncoder().encode(s).length <= PAIFU_MAX_BYTES, 'json', 'byte limit exceeded');
   return s;

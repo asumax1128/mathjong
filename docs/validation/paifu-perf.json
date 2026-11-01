@@ -1,0 +1,151 @@
+{
+  "tool": "tests/e2e/paifu-perf.mjs",
+  "browser": "Chromium (headless shell)",
+  "note": "CPU 6x は CDP の CPU スロットリング（主スレッドのページ）。iPhone 実機の値ではない",
+  "results": [
+    {
+      "cpu": "1x",
+      "mode": "math1",
+      "length": 8,
+      "bytes": 109743,
+      "how": "sync",
+      "ok": true,
+      "saveMs": 80,
+      "maxMainThreadBlockMs": 75,
+      "beats": 20,
+      "usingWorker": false
+    },
+    {
+      "cpu": "1x",
+      "mode": "math1",
+      "length": 8,
+      "bytes": 109743,
+      "how": "worker",
+      "ok": true,
+      "saveMs": 77,
+      "maxMainThreadBlockMs": 5,
+      "beats": 37,
+      "usingWorker": true
+    },
+    {
+      "cpu": "1x",
+      "mode": "math1",
+      "length": 8,
+      "bytes": 109743,
+      "how": "chunked",
+      "ok": true,
+      "saveMs": 80,
+      "maxMainThreadBlockMs": 20,
+      "beats": 24,
+      "usingWorker": false
+    },
+    {
+      "cpu": "1x",
+      "mode": "math2",
+      "length": 8,
+      "bytes": 85896,
+      "how": "sync",
+      "ok": true,
+      "saveMs": 64,
+      "maxMainThreadBlockMs": 60,
+      "beats": 20,
+      "usingWorker": false
+    },
+    {
+      "cpu": "1x",
+      "mode": "math2",
+      "length": 8,
+      "bytes": 85896,
+      "how": "worker",
+      "ok": true,
+      "saveMs": 74,
+      "maxMainThreadBlockMs": 4,
+      "beats": 36,
+      "usingWorker": true
+    },
+    {
+      "cpu": "1x",
+      "mode": "math2",
+      "length": 8,
+      "bytes": 85896,
+      "how": "chunked",
+      "ok": true,
+      "saveMs": 70,
+      "maxMainThreadBlockMs": 19,
+      "beats": 24,
+      "usingWorker": false
+    },
+    {
+      "cpu": "6x",
+      "mode": "math1",
+      "length": 8,
+      "bytes": 109743,
+      "how": "sync",
+      "ok": true,
+      "saveMs": 557,
+      "maxMainThreadBlockMs": 545,
+      "beats": 21,
+      "usingWorker": false
+    },
+    {
+      "cpu": "6x",
+      "mode": "math1",
+      "length": 8,
+      "bytes": 109743,
+      "how": "worker",
+      "ok": true,
+      "saveMs": 112,
+      "maxMainThreadBlockMs": 16,
+      "beats": 43,
+      "usingWorker": true
+    },
+    {
+      "cpu": "6x",
+      "mode": "math1",
+      "length": 8,
+      "bytes": 109743,
+      "how": "chunked",
+      "ok": true,
+      "saveMs": 596,
+      "maxMainThreadBlockMs": 36,
+      "beats": 69,
+      "usingWorker": false
+    },
+    {
+      "cpu": "6x",
+      "mode": "math2",
+      "length": 8,
+      "bytes": 85896,
+      "how": "sync",
+      "ok": true,
+      "saveMs": 442,
+      "maxMainThreadBlockMs": 431,
+      "beats": 21,
+      "usingWorker": false
+    },
+    {
+      "cpu": "6x",
+      "mode": "math2",
+      "length": 8,
+      "bytes": 85896,
+      "how": "worker",
+      "ok": true,
+      "saveMs": 94,
+      "maxMainThreadBlockMs": 14,
+      "beats": 34,
+      "usingWorker": true
+    },
+    {
+      "cpu": "6x",
+      "mode": "math2",
+      "length": 8,
+      "bytes": 85896,
+      "how": "chunked",
+      "ok": true,
+      "saveMs": 590,
+      "maxMainThreadBlockMs": 42,
+      "beats": 64,
+      "usingWorker": false
+    }
+  ]
+}
