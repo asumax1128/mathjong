@@ -8818,7 +8818,12 @@ async function v15PaifuRecording(browser) {
     await page.goto(LOCAL + '?speed=test');
     await page.waitForSelector('.title-screen');
     await pfStart(page, { mode: 'math1', length: 8 });
-    await pfPlayOut(page, { stopAfterHuman: 3 });
+    // リーチ（自動ツモ切り）をしない：止めた後もゲームが自動で進んで局が終わり、結果画面が設定のボタンを覆うことがあった。
+    // 止めた時点が「人の番で、人の操作を待っている・結果画面なし」であることを確かめてから設定を開く
+    await pfPlayOut(page, { stopAfterHuman: 3, riichi: false });
+    const waiting = await page.evaluate(() => { const m = window.__mathjong, g = m.S.game, p = g.pending();
+      return { modal: m.S.modal, seat: p && p.seat, riichi: !!g.riichi[0], autoTsumo: m.S.autoTsumo.on }; });
+    assert.deepEqual(waiting, { modal: null, seat: 0, riichi: false, autoTsumo: false }, '人の操作待ちで止まっている');
     await page.locator('button[data-action="settings"]').click();
     await page.locator('button[data-action="ask-title"]').click();
     await page.locator('button[data-action="to-title"]').click();
@@ -9194,6 +9199,111 @@ async function v15PaifuEpochNoBC(browser) {
   console.log('✓ 牌譜（BroadcastChannel なし・2つのタブ）：別のタブの全件削除の後、旧試合の保存の失敗より先に「新しい対局」「再戦」→ 旧試合は拒否・復活しない、新試合は削除の後の世代で保存');
 }
 
+async function v15PaifuEpochFallback(browser) {
+  // PR #69 第3回監査 P2 の固定反例（実際の IndexedDB・2つのタブ）：A が世代 0 を取得 → A の接続を閉じる → 次の世代の取得を保留 →
+  // A で通常対局を開始（行動0件・1件）→ pagehide の保存を要求 → B で全件削除（世代 1）→ A の世代の取得を完了。
+  // 旧試合は保存されず件数は0件。削除の後の新しい試合は保存できる。BroadcastChannel あり／なし。
+  // A は本物の createPaifuSystem・createPaifuStore を使い、接続の有無と世代の読込の時点だけを外から操作する
+  for (const bc of [true, false]) for (const actions of [0, 1]) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 } });
+    if (!bc) await ctx.addInitScript(() => { try { delete window.BroadcastChannel; } catch { /* 無視 */ } window.BroadcastChannel = undefined; });
+    const a = await ctx.newPage(), b = await ctx.newPage(), errA = watchErrors(a), errB = watchErrors(b);
+    for (const pg of [a, b]) { await pg.goto(LOCAL + '?speed=test'); await pg.waitForSelector('.title-screen'); await pfReady(pg); }
+    await b.evaluate(() => window.__mathjong.paifuSys.clearAll()); // 前の検証の残りを消して、世代を確定する
+    const where = `BroadcastChannel${bc ? 'あり' : 'なし'}・行動${actions}件`;
+    const { PLAYERS } = await import('../paifu-harness.mjs');
+    const e0 = await a.evaluate(async ([actions, PLAYERS]) => {
+      const st = await import(new URL('src/ui/paifu-storage.js', location.href));
+      const sy = await import(new URL('src/ui/paifu-system.js', location.href));
+      const [{ Game }, { applyAction }, { decideCharacter }, { createRng }, M, { MAX_ROUND }, pf] = await Promise.all(
+        ['src/engine/game.js', 'src/engine/ai.js', 'src/engine/characters.js', 'src/engine/rng.js', 'src/engine/match.js', 'src/ui/params.js', 'src/engine/paifu.js']
+          .map((u) => import(new URL(u, location.href))));
+      const real = st.createPaifuStore();
+      let blocked = false, gate = null, release = null;
+      const store = { ...real, epochNow: () => (blocked ? null : real.epochNow()), epoch: async () => { if (gate) await gate; return real.epoch(); } };
+      const S = sy.createPaifuSystem({ appVersion: 'e2e', store, useWorker: true });
+      await S.ready; // 1：世代を取得
+      const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5)); };
+      const IDS = ['yujin', 'aoto', 'kanata', 'mitsuki'];
+      // app.js と同じ順序の呼び出し（行動 n 件で止める。null なら最後まで）
+      const play = async (seedBase, length, n) => {
+        let match = M.createMatch({ length, riichiDeposit: M.RIICHI_DEPOSIT, agariYame: true });
+        S.recorder.startMatch({ eligible: true, mode: 'math1', length, seedBase, players: PLAYERS, match });
+        const rng = createRng(seedBase);
+        let round = 1, steps = 0;
+        while (!match.over) {
+          if (n === 0) return;
+          const g = new Game({ rules: pf.paifuRules('math1'), seed: seedBase + round * pf.ROUND_SEED_STEP, dealer: M.dealerOf(match), players: PLAYERS, round, ruleset: 2 });
+          S.recorder.roundStarted(g, { presetWall: false });
+          while (g.pending()) {
+            const q = g.pending(), act = decideCharacter(g, q.seat, IDS[q.seat], rng, null, IDS), before = g.events.length;
+            applyAction(g, q.seat, act);
+            S.recorder.actionApplied(g, q.seat, act, q.seat ? 'ai' : 'human', before);
+            if (n !== null && ++steps >= n) return;
+          }
+          match = M.applyRoundResult(match, g.result, { round, maxRound: MAX_ROUND, riichi: g.riichi });
+          S.recorder.roundSettled(g, match, { maxRound: MAX_ROUND });
+          await settle();
+          round++;
+        }
+        await settle();
+      };
+      window.__fb = { S, real, play, settle,
+        dropConnection() { blocked = true; real.close(); }, // 2
+        hold() { gate = new Promise((r) => { release = r; }); }, // 3
+        release() { const r = release; gate = null; release = null; r(); },
+        reconnect() { blocked = false; real.warm(); } };
+      return S.epochState().epoch;
+    }, [actions, PLAYERS]);
+    // 2〜5（A）
+    const oldId = await a.evaluate(async (actions) => {
+      const f = window.__fb;
+      f.dropConnection(); f.hold();
+      await f.play(1700 + actions, 4, actions); // 4：通常対局を開始
+      f.S.recorder.flush(); // 5：pagehide
+      await f.settle();
+      return f.S.recorder.privateRecord().id;
+    }, actions);
+    // 6（B）：全件削除。A に通知が届くかは BroadcastChannel の有無による
+    const e1 = (await b.evaluate(() => window.__mathjong.paifuSys.clearAll())).epoch;
+    assert.equal(e1, e0 + 1, where);
+    // 7（A）：世代の取得を完了 → 旧試合は記録しない
+    const after = await a.evaluate(async () => {
+      const f = window.__fb;
+      f.release();
+      await f.settle();
+      f.S.recorder.flush(); f.S.recorder.leave('left-match');
+      await f.settle();
+      const l = await f.real.list();
+      return { st: f.S.recorder.status(), count: l.entries.length, ids: l.entries.map((e) => e.id) };
+    });
+    assert.deepEqual([after.st.state, after.st.reason, after.st.bound], ['off', 'epoch-changed', false], where);
+    assert.equal(after.count, 0, `${where}：削除の後の件数は0件`);
+    assert.ok(!after.ids.includes(oldId), where);
+    // 削除の後の新しい試合：接続がないまま・接続を戻した後のどちらも保存できる（世代 e1）
+    const fresh = await a.evaluate(async () => {
+      const f = window.__fb, out = [];
+      await f.play(1710, 1, null);
+      out.push([f.S.recorder.status().state, f.S.recorder.status().epoch]);
+      f.reconnect(); await f.settle();
+      await f.play(1711, 1, null);
+      out.push([f.S.recorder.status().state, f.S.recorder.status().epoch]);
+      const l = await f.real.list();
+      const v = [];
+      for (const e of l.entries) { const r = await f.real.verify(e.id); v.push(r.ok && r.valid); }
+      f.S.close(); f.real.close();
+      return { out, count: l.entries.length, v };
+    });
+    assert.deepEqual(fresh.out, [['saved', e1], ['saved', e1]], `${where}：削除の後の新しい試合は保存`);
+    assert.deepEqual([fresh.count, fresh.v], [2, [true, true]], where);
+    assert.deepEqual(await b.evaluate(async () => (await window.__mathjong.paifuSys.store.list()).entries.length), 2, 'B から見ても同じ');
+    await b.evaluate(() => window.__mathjong.paifuSys.clearAll());
+    assert.deepEqual([...errA, ...errB], []);
+    await ctx.close();
+  }
+  console.log('✓ 牌譜（第3回監査の固定反例・実際の IndexedDB・2つのタブ）：接続なしで始めた行動0件・1件の試合 → pagehide → 別のタブで全件削除 → 世代の取得の完了で、旧試合は保存されず0件。削除の後の新しい試合は保存（BroadcastChannel あり／なし）');
+}
+
 async function v15PaifuSnapshot(browser) {
   // PR #69 第2回監査 P2-B：保存の途中で呼び出し元が元のオブジェクトを書き換えても、保存されるのは save を呼んだ時点の内容で、
   // 読込・再検証は必ず成功する。Worker の経路と、Worker なしの分割検証の経路。時点：呼んだ直後・検証の途中・検証の後（書込みの前）
@@ -9252,7 +9362,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage, v15PaifuEpoch, v15PaifuLoadFailure, v15PaifuEpochNoBC, v15PaifuSnapshot };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage, v15PaifuEpoch, v15PaifuLoadFailure, v15PaifuEpochNoBC, v15PaifuEpochFallback, v15PaifuSnapshot };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -9331,6 +9441,7 @@ try {
   await v15PaifuEpoch(browser);
   await v15PaifuLoadFailure(browser);
   await v15PaifuEpochNoBC(browser);
+  await v15PaifuEpochFallback(browser);
   await v15PaifuSnapshot(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);

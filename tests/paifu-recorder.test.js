@@ -424,16 +424,16 @@ test('P2-A 2つのタブ：B で全件削除の後、A・B それぞれの新し
   assert.ok(!store.saved.some((x) => x.id === oldId));
 });
 
-test('P2-A 代替（開始の時点の世代を読めないとき）：知っている世代と同じ・行動がまだないなら結び付け、どちらでもなければ記録しない', async () => {
-  // 行動がまだない間に読めた → 新しい世代に結び付けて保存
+test('P2-A 代替（開始の時点の世代を読めないとき）：開始の前に読んだ世代と同じときだけ結び付け、違えば行動0件でも記録しない（第3回監査）', async () => {
+  // 削除の後に知らない世代のまま始めた：行動がまだない間に読めても、順序を証明できないので記録しない（0件は証明にならない）
   const store = fakeStore();
   const A = tab(store, { noEpochAt: true });
   await store.clearAll();
   const m = createMatch({ length: 1, riichiDeposit: RIICHI_DEPOSIT, agariYame: true });
   A.rec.startMatch({ eligible: true, mode: 'math1', length: 1, seedBase: 960, players: PLAYERS, match: m });
-  await settle(); // 読取りが先に終わる
-  assert.equal(A.rec.status().bound, true);
-  // 削除の後に知らない世代のまま始め、すぐに行動が入る（どちらとも決められない）→ 記録しない
+  await settle(); // 読取りが先に終わる（行動0件）
+  assert.deepEqual([A.rec.status().bound, A.rec.status().state, A.rec.status().reason], [false, 'off', 'epoch-changed']);
+  // 行動が入っても同じ
   const store2 = fakeStore();
   const B = tab(store2, { noEpochAt: true });
   await store2.clearAll();
@@ -442,7 +442,7 @@ test('P2-A 代替（開始の時点の世代を読めないとき）：知って
   assert.deepEqual([B.rec.status().state, B.rec.status().reason], ['off', 'epoch-changed']);
   assert.equal(store2.saved.length, 0, '不完全・帰属不明の牌譜を作らない');
   assert.match(describePaifuStatus(B.rec.status()).text, /記録の開始を確かめる前に/);
-  // 知っている世代が最新なら、行動があっても結び付ける
+  // 知っている世代が最新なら、行動0件でも1件以上でも結び付ける
   const store3 = fakeStore();
   const C = tab(store3, { noEpochAt: true });
   await store3.clearAll();
@@ -450,4 +450,12 @@ test('P2-A 代替（開始の時点の世代を読めないとき）：知って
   await playApp(C.rec, { length: 1, seedBase: 962 });
   await settle();
   assert.equal(C.rec.status().state, 'saved');
+  // 開始の前の世代が分からない：新しい世代に無理に結び付けない
+  const store4 = fakeStore();
+  const D = createPaifuRecorder({ store: store4, appVersion: '0.7.0', epoch: () => ({ epoch: null, error: null }),
+    readEpoch: async () => ({ epoch: store4.epochValue, error: null }), epochAt: null });
+  await playApp(D, { length: 1, seedBase: 963 });
+  await settle();
+  assert.deepEqual([D.status().state, D.status().reason], ['off', 'not-ready']);
+  assert.equal(store4.saved.length, 0);
 });

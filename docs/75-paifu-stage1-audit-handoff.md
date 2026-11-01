@@ -1,9 +1,21 @@
 # 数雀｜牌譜 第1段階：Codex 独立監査の引き継ぎ資料
 
+## 第3回の限定再監査（PR #69 監査 HEAD 89d083a の残りの P2 の修正）
+| 指摘 | 修正 | 確かめてほしいこと | 固定のテスト |
+|---|---|---|---|
+| P2 接続なし・行動0件の旧試合の復活 | `src/ui/paifu-recorder.js` の `bind()`：`actionsBeforeBind === 0` による新しい世代への結び付けを廃止（`actionsBeforeBind` 自体を削除）。代替の経路は `epochPre` と一致するときだけ結び付け、違えば `epoch-changed`、`epochPre` が分からなければ `not-ready` | 接続なしの経路で、削除の前から存在する試合が行動0件でも新しい世代に付け替えられないか。削除の後に始めた試合（接続あり・接続なしで世代を覚えた後）は保存できるか。ゲームが記録の準備を待たないか | 単体 `tests/paifu-epoch-fallback.test.js`（固定反例・16通りの組合せ・削除なし・`epochPre` 不明）、E2E `v15PaifuEpochFallback`（実際の IndexedDB・2つのタブ）、単体 `paifu-recorder`（代替の規則） |
+| E2E の安定化 | `v15PaifuRecording` (5)：リーチ（自動ツモ切り）をせずに止め、「人の操作待ち・結果画面なし」を確かめてから設定を開く。`v15PaifuEpochNoBC`：結果画面は「次へ」で閉じ、押せなければやり直す | アサーションを減らしていないか・固定の sleep に頼っていないか | 複数回の実行 |
+
+再現：
+```
+node --test tests/paifu-epoch-fallback.test.js tests/paifu-recorder.test.js
+node tests/e2e/play.mjs --only v15PaifuEpochFallback,v15PaifuEpochNoBC,v15PaifuRecording
+```
+
 ## 第2回の限定再監査（PR #69 監査 HEAD 0b0705b の新 P2 の修正）
 | 指摘 | 修正 | 確かめてほしいこと | 固定のテスト |
 |---|---|---|---|
-| P2-A BroadcastChannel なしでの全件削除の後の新しい試合 | `src/ui/paifu-storage.js` の開いたままの接続と `epochNow()`（開始の瞬間に同期に作る読み取りのトランザクション）。`src/ui/paifu-recorder.js` の `startMatch` は `epochAt` でちょうど結び付け、接続がなければ非同期に読み、`epochPre` と同じ／行動0なら結び付け・違えば `epoch-changed` で記録から外す。保存は結び付けの後まで待つ | 通知なしで新しい試合が新しい世代に結び付くか。前の試合（中断の保存）が新しい世代に付け替えられないか。結び付けの前の行動が欠けた記録を後から作らないか。ゲームの開始が記録の準備を待たないか | E2E `v15PaifuEpochNoBC`（BroadcastChannel を消した2つのタブ・新しい対局・再戦・前の試合の保存を遅らせる）、単体 `paifu-recorder`（P2-A：タブの模擬・新しい対局・再戦・非同期の規則） |
+| P2-A BroadcastChannel なしでの全件削除の後の新しい試合 | `src/ui/paifu-storage.js` の開いたままの接続と `epochNow()`（開始の瞬間に同期に作る読み取りのトランザクション）。`src/ui/paifu-recorder.js` の `startMatch` は `epochAt` でちょうど結び付け、接続がなければ非同期に読み、`epochPre` と同じなら結び付け・違えば `epoch-changed` で記録から外す（第3回で行動0件の条件を廃止）。保存は結び付けの後まで待つ | 通知なしで新しい試合が新しい世代に結び付くか。前の試合（中断の保存）が新しい世代に付け替えられないか。結び付けの前の行動が欠けた記録を後から作らないか。ゲームの開始が記録の準備を待たないか | E2E `v15PaifuEpochNoBC`（BroadcastChannel を消した2つのタブ・新しい対局・再戦・前の試合の保存を遅らせる）、単体 `paifu-recorder`（P2-A：タブの模擬・新しい対局・再戦・非同期の規則） |
 | P2-B 保存中の記録の変更 | `src/engine/paifu.js` の `takePaifuSnapshot`（同期：安全な JSON の検査＋文字列化）・`encodePaifuSnapshot`（Worker）・`encodePaifuSnapshotAsync`（代替）。`store.save` は最初の await の前にスナップショットを作り、検証・正規化 JSON・SHA-256・書込みはそこから | 元のオブジェクトの変更（保存の開始直後・検証中・検証の後で書込みの前）が保存の内容に入らないか。Worker と代替で同じか。成功の後に読込・再検証が通るか。バイト数の上限・安全な JSON・改ざんの拒否が残るか | E2E `v15PaifuSnapshot`（Worker／代替 × 3つの時点）、単体 `paifu-storage`（P2-B） |
 
 再現：
