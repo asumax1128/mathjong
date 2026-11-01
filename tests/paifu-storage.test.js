@@ -20,7 +20,7 @@ test('保存：作成しただけでは DB を開かない。専用の名前空�
   assert.notEqual(PAIFU_DB_NAME, 'mathjong-paifu');
   assert.equal(PAIFU_DB_VERSION, 2, '2：削除の世代の表（meta）');
   assert.deepEqual(PAIFU_STORAGE_DEFAULTS, { maxRecords: 100, maxBytes: 32 * 1024 * 1024, timeoutMs: 5000 });
-  assert.deepEqual(Object.keys(s).sort(), ['clearAll', 'epoch', 'list', 'loadPrivate', 'remove', 'save', 'verify']);
+  assert.deepEqual(Object.keys(s).sort(), ['clearAll', 'close', 'epoch', 'epochNow', 'list', 'loadPrivate', 'remove', 'save', 'verify', 'warm']);
 });
 
 for (const mode of ['missing', 'getter-security', 'open-security']) {
@@ -123,4 +123,45 @@ test('保存：古い版（1）の DB は世代の表だけを足して使う（
   code(await upgrade(5, ['records', 'index']).list(), 'unsupported-version');
   assert.deepEqual(created, []);
   assert.equal(aborted, 1);
+});
+
+// ---- PR #69 第2回監査 P2-B：保存の開始時のスナップショット ----
+test('P2-B 保存の内容は save を呼んだ時点のスナップショット：呼んだ直後・スナップショットの後・検証の途中に元のオブジェクトを変えても、検証・保存するのは元の内容', async () => {
+  const original = JSON.parse(JSON.stringify(p));
+  for (const when of ['immediately', 'afterSnapshot', 'duringEncode']) {
+    const rec = JSON.parse(JSON.stringify(p)); // 呼び出し元の変更できる記録
+    let seen = null;
+    const s = createPaifuStore({
+      getIndexedDB: () => undefined, // 書込みの前で止まる（保存先なし）
+      hooks: { afterSnapshot: async () => { if (when === 'afterSnapshot') rec.rounds[0].steps[0].digest = '0000000000000000'; } },
+      encode: async (snapshot) => {
+        seen = snapshot;
+        if (when === 'duringEncode') { rec.rounds[0].steps[0].action.tile = 999; rec.status = 'aborted'; }
+        await new Promise((r) => setTimeout(r, 0));
+        const { encodePaifuSnapshotAsync } = await import('../src/engine/paifu.js');
+        return encodePaifuSnapshotAsync(snapshot);
+      },
+    });
+    const pr = s.save(rec, { epoch: 0 });
+    if (when === 'immediately') { rec.rounds[0].steps[0].digest = 'ffffffffffffffff'; rec.final = null; }
+    const r = await pr;
+    assert.equal(r.ok, false);
+    assert.equal(r.error.code, 'unavailable', `${when}：検証は通り（元の内容）、保存先なしで止まる`);
+    assert.deepEqual(JSON.parse(seen), original, `${when}：スナップショットは呼んだ時点の内容`);
+  }
+});
+
+test('P2-B 安全な JSON の検査・バイト上限・改ざんの拒否はスナップショットでも同じ', async () => {
+  const { takePaifuSnapshot, encodePaifuSnapshotAsync, encodePaifuSnapshot, PAIFU_MAX_BYTES } = await import('../src/engine/paifu.js');
+  assert.throws(() => takePaifuSnapshot({ ...p, x: () => 1 }), /plain JSON/);
+  assert.throws(() => takePaifuSnapshot({ ...p, x: Infinity }), /non-finite/);
+  assert.throws(() => takePaifuSnapshot({ ...p, big: 'x'.repeat(PAIFU_MAX_BYTES) }), /byte limit/);
+  const bad = JSON.parse(JSON.stringify(p)); bad.rounds[0].steps[0].digest = '0000000000000000';
+  await assert.rejects(encodePaifuSnapshotAsync(takePaifuSnapshot(bad)), /digest/);
+  assert.throws(() => encodePaifuSnapshot(takePaifuSnapshot(bad)), /digest/);
+  // 不正なスナップショット（JSON でない・危険なキー）
+  assert.throws(() => encodePaifuSnapshot('{'), /invalid JSON/);
+  assert.throws(() => encodePaifuSnapshot(JSON.stringify(p).replace('"format"', '"__proto__":{},"format"')), /unsafe key|keys/);
+  // 呼んだ時点の世代：保存先がなければ null（例外にしない）
+  assert.equal(createPaifuStore({ getIndexedDB: () => undefined }).epochNow(), null);
 });

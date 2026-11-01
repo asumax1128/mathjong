@@ -10,9 +10,9 @@
       "bytes": 109743,
       "how": "sync",
       "ok": true,
-      "saveMs": 80,
-      "maxMainThreadBlockMs": 75,
-      "beats": 20,
+      "saveMs": 82,
+      "maxMainThreadBlockMs": 78,
+      "beats": 17,
       "usingWorker": false
     },
     {
@@ -22,9 +22,9 @@
       "bytes": 109743,
       "how": "worker",
       "ok": true,
-      "saveMs": 77,
-      "maxMainThreadBlockMs": 5,
-      "beats": 37,
+      "saveMs": 81,
+      "maxMainThreadBlockMs": 6,
+      "beats": 38,
       "usingWorker": true
     },
     {
@@ -34,8 +34,8 @@
       "bytes": 109743,
       "how": "chunked",
       "ok": true,
-      "saveMs": 80,
-      "maxMainThreadBlockMs": 20,
+      "saveMs": 75,
+      "maxMainThreadBlockMs": 21,
       "beats": 24,
       "usingWorker": false
     },
@@ -46,8 +46,8 @@
       "bytes": 85896,
       "how": "sync",
       "ok": true,
-      "saveMs": 64,
-      "maxMainThreadBlockMs": 60,
+      "saveMs": 88,
+      "maxMainThreadBlockMs": 84,
       "beats": 20,
       "usingWorker": false
     },
@@ -58,8 +58,8 @@
       "bytes": 85896,
       "how": "worker",
       "ok": true,
-      "saveMs": 74,
-      "maxMainThreadBlockMs": 4,
+      "saveMs": 73,
+      "maxMainThreadBlockMs": 6,
       "beats": 36,
       "usingWorker": true
     },
@@ -70,8 +70,8 @@
       "bytes": 85896,
       "how": "chunked",
       "ok": true,
-      "saveMs": 70,
-      "maxMainThreadBlockMs": 19,
+      "saveMs": 68,
+      "maxMainThreadBlockMs": 21,
       "beats": 24,
       "usingWorker": false
     },
@@ -82,9 +82,9 @@
       "bytes": 109743,
       "how": "sync",
       "ok": true,
-      "saveMs": 557,
-      "maxMainThreadBlockMs": 545,
-      "beats": 21,
+      "saveMs": 629,
+      "maxMainThreadBlockMs": 619,
+      "beats": 22,
       "usingWorker": false
     },
     {
@@ -94,9 +94,9 @@
       "bytes": 109743,
       "how": "worker",
       "ok": true,
-      "saveMs": 112,
-      "maxMainThreadBlockMs": 16,
-      "beats": 43,
+      "saveMs": 136,
+      "maxMainThreadBlockMs": 15,
+      "beats": 46,
       "usingWorker": true
     },
     {
@@ -106,9 +106,9 @@
       "bytes": 109743,
       "how": "chunked",
       "ok": true,
-      "saveMs": 596,
-      "maxMainThreadBlockMs": 36,
-      "beats": 69,
+      "saveMs": 682,
+      "maxMainThreadBlockMs": 64,
+      "beats": 68,
       "usingWorker": false
     },
     {
@@ -118,8 +118,8 @@
       "bytes": 85896,
       "how": "sync",
       "ok": true,
-      "saveMs": 442,
-      "maxMainThreadBlockMs": 431,
+      "saveMs": 518,
+      "maxMainThreadBlockMs": 511,
       "beats": 21,
       "usingWorker": false
     },
@@ -130,9 +130,9 @@
       "bytes": 85896,
       "how": "worker",
       "ok": true,
-      "saveMs": 94,
-      "maxMainThreadBlockMs": 14,
-      "beats": 34,
+      "saveMs": 132,
+      "maxMainThreadBlockMs": 17,
+      "beats": 42,
       "usingWorker": true
     },
     {
@@ -142,9 +142,9 @@
       "bytes": 85896,
       "how": "chunked",
       "ok": true,
-      "saveMs": 590,
-      "maxMainThreadBlockMs": 42,
-      "beats": 64,
+      "saveMs": 637,
+      "maxMainThreadBlockMs": 56,
+      "beats": 62,
       "usingWorker": false
     }
   ]

@@ -7,7 +7,9 @@
 //   トランザクションの中で現在の世代と照合して、違えば stale-epoch で拒否する。複数タブで共有（DB の中）。
 //   全件削除の前に始まった試合の保存要求（初回の保存前・要約の計算中・DB 待ち・保存の後の次の保存）が、
 //   削除の後に牌譜を復活させない（PR #69 監査 P2-2）。
-import { encodePaifuAsync, decodePaifu, PAIFU_MAX_BYTES, PAIFU_SCHEMA_VERSION } from '../engine/paifu.js';
+// ・保存する内容は、save を呼んだ時点（最初の await の前）の記録のスナップショット（変更できない文字列）。検証・正規化 JSON・
+//   SHA-256・IndexedDB への書込みは、すべてこのスナップショットから作る（PR #69 第2回監査 P2-B）。
+import { encodePaifuSnapshotAsync, takePaifuSnapshot, decodePaifu, PAIFU_MAX_BYTES, PAIFU_SCHEMA_VERSION } from '../engine/paifu.js';
 
 // PR #37 の試作（schemaVersion 1・DB名 mathjong-paifu）の開発用データと混ざらないよう、別の名前にする
 export const PAIFU_DB_NAME = 'mathjong-paifu-records';
@@ -74,11 +76,12 @@ function decodeRow(row, meta, id) {
   return p;
 }
 
-// encode：記録 → 検証済みの正規化 JSON（既定は主スレッドで分割して検証する encodePaifuAsync。Worker の版を渡せる）。
+// encode：スナップショット（文字列）→ 検証済みの正規化 JSON（既定は主スレッドで分割して検証する encodePaifuSnapshotAsync。
+// Worker の版を渡せる）。
 // hooks：テスト用（afterEncode・afterDigest：保存の途中の各時点で待てる）
 export function createPaifuStore({ getIndexedDB = () => globalThis.indexedDB,
   maxRecords = PAIFU_STORAGE_DEFAULTS.maxRecords, maxBytes = PAIFU_STORAGE_DEFAULTS.maxBytes,
-  timeoutMs = PAIFU_STORAGE_DEFAULTS.timeoutMs, encode = (p) => encodePaifuAsync(p), hooks = {} } = {}) {
+  timeoutMs = PAIFU_STORAGE_DEFAULTS.timeoutMs, encode = (snapshot) => encodePaifuSnapshotAsync(snapshot), hooks = {} } = {}) {
   // Invalid configuration also becomes a result on use, rather than an import/startup failure.
   const configOK = uint(maxRecords,1) && maxRecords <= 10000 && uint(maxBytes,1)
     && maxBytes <= 256 * 1024 * 1024 && uint(timeoutMs,1) && timeoutMs <= 60000 && typeof getIndexedDB === 'function'
@@ -201,6 +204,35 @@ export function createPaifuStore({ getIndexedDB = () => globalThis.indexedDB,
     check(exactKeys(row, ['id', 'epoch']) && row.id === EPOCH_KEY && uint(row.epoch) && row.epoch <= MAX_EPOCH, 'corrupt');
     return row.epoch;
   };
+  // ---- 試合の開始の時点の世代（PR #69 第2回監査 P2-A）----
+  // 世代を読むための接続を1つ開いたままにし、epochNow() は読取りのトランザクションを「呼ばれたその場で（同期で）」作る。
+  // IndexedDB は同じ表を使うトランザクションを作られた順に実行するので、読んだ値は「呼んだ時点」の世代と一致する
+  // （その前に作られた全件削除＝別のタブを含む、は反映され、その後のものは反映されない）。接続がまだない・切れたときは null。
+  let live = null, opening = null;
+  function ensureLive() {
+    if (live || opening || !configOK) return;
+    opening = open().then(db => {
+      live = db;
+      const drop = () => { if (live === db) live = null; try { db.close(); } catch { /* 無視 */ } };
+      db.onversionchange = drop; db.onclose = () => { if (live === db) live = null; };
+    }, () => {}).finally(() => { opening = null; });
+  }
+  function epochNow() {
+    if (!live) { ensureLive(); return null; }
+    let tx;
+    try { tx = live.transaction(['meta'], 'readonly'); } catch { live = null; ensureLive(); return null; }
+    return new Promise(resolve => {
+      let done = false;
+      const finish = r => { if (!done) { done = true; clearTimeout(timer); resolve(r); } };
+      const timer = setTimeout(() => finish(failure(new StoreError('timeout'))), timeoutMs);
+      try {
+        const q = tx.objectStore('meta').get(EPOCH_KEY);
+        q.onsuccess = () => { try { finish({ ok:true, epoch:epochOf(q.result) }); } catch (e) { finish(failure(e)); } };
+        q.onerror = () => finish(failure(q.error || new StoreError('storage-error')));
+        tx.onabort = () => finish(failure(tx.error || new StoreError('interrupted')));
+      } catch (e) { finish(failure(e)); }
+    });
+  }
   async function readPrivate(id) {
     check(validId(id), 'invalid-argument');
     const { row, meta } = await transact('readonly', (tx, set, stop) => {
@@ -222,18 +254,21 @@ export function createPaifuStore({ getIndexedDB = () => globalThis.indexedDB,
       const expectedToken = options.expectedToken ?? null, epoch = options.epoch;
       check(expectedToken === null || (typeof expectedToken === 'string' && /^[0-9a-f]{32}$/.test(expectedToken)), 'invalid-argument');
       check(uint(epoch) && epoch <= MAX_EPOCH, 'invalid-argument');
-      let json; try { json = await encode(p); } catch (e) {
-        throw new StoreError(e?.path === 'json' && String(e.message).includes('byte limit') ? 'record-too-large' : 'invalid-record');
-      }
+      // スナップショット：最初の await の前（同期）に作る。以後 p は読まない
+      const mapEncodeError = e => new StoreError(e?.path === 'json' && String(e.message).includes('byte limit') ? 'record-too-large' : 'invalid-record');
+      let snap; try { snap = takePaifuSnapshot(p); } catch (e) { throw mapEncodeError(e); }
+      const expectId = typeof p?.id === 'string' ? p.id : null;
+      await hook('afterSnapshot', expectId);
+      let json; try { json = await encode(snap); } catch (e) { throw mapEncodeError(e); }
       check(typeof json === 'string' && json.length <= PAIFU_MAX_BYTES, 'record-too-large');
-      await hook('afterEncode', p.id);
+      await hook('afterEncode', expectId);
       const bytes = sizeOf(json), freshToken = token(), savedAt = Date.now();
       check(uint(savedAt), 'storage-error');
       // Snapshot from the validated JSON BEFORE awaiting. Later caller mutations cannot alter metadata.
       const snapshot = JSON.parse(json), id = snapshot.id;
-      check(id === p.id && snapshot.status === p.status && snapshot.rounds.length === p.rounds.length, 'invalid-record');
+      check(id === expectId, 'invalid-record');
       const base = summary(snapshot, { id, token:freshToken, bytes, savedAt, digest:await digest(json) });
-      await hook('afterDigest', p.id);
+      await hook('afterDigest', id);
       return transact('readwrite', (tx, set, stop) => {
         requests(tx, [['meta','get',EPOCH_KEY],['index','getAll',undefined],['records','count',undefined],['records','get',id]], (epochRow, all, count, old) => {
           // 削除の世代の照合（同じトランザクション）：全件削除の後に、削除の前の試合の記録を書かない
@@ -259,6 +294,11 @@ export function createPaifuStore({ getIndexedDB = () => globalThis.indexedDB,
     epoch: () => safe(() => transact('readonly', (tx, set, stop) => {
       requests(tx, [['meta','get',EPOCH_KEY]], (row) => set({ epoch:epochOf(row) }), stop);
     })),
+    // 呼んだ時点の世代（同期でトランザクションを作る）。準備ができていなければ null（呼び出し側は代わりの方法を使う）
+    epochNow: () => { try { return configOK ? epochNow() : null; } catch { return null; } },
+    // 世代を読むための接続を開いておく（起動時）
+    warm: () => { try { ensureLive(); } catch { /* 無視 */ } },
+    close: () => { try { if (live) live.close(); } catch { /* 無視 */ } live = null; },
     loadPrivate: id => safe(() => readPrivate(id)),
     verify: id => safe(async () => {
       const { metadata } = await readPrivate(id);

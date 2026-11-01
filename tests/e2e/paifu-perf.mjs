@@ -1,7 +1,8 @@
 // 牌譜の保存の前の検証（記録された選択の再生）が主スレッドを止める時間の実測（PR #69 監査の性能ゲート・docs/74）。
 // 数学Ⅰ・Ⅱの8局戦の記録を、Chromium で次の3通りに保存し、保存中の主スレッドの最長の停止（4ms ごとの心拍の最大の間隔）と
 // 保存の所要時間を測る。CPU の速さは通常と6倍の低速（CDP の CPU スロットリング）。
-//   sync：修正前（主スレッドで同期に検証）／worker：修正後（Web Worker で検証）／chunked：Worker が使えないときの代替（主スレッドで分割）
+//   sync：主スレッドで同期に検証（第1回の修正前と同じ）／worker：Web Worker で検証／chunked：Worker が使えないときの代替（主スレッドで分割）
+// どの方法も、保存の開始時に主スレッドでスナップショット（安全な JSON の検査＋文字列化）を作る（PR #69 第2回監査 P2-B）
 // 使い方：node tests/e2e/paifu-perf.mjs [--out docs/validation/paifu-perf.json]
 import { createRequire } from 'node:module';
 import { writeFileSync } from 'node:fs';
@@ -33,12 +34,13 @@ try {
           const st = await import(new URL('src/ui/paifu-storage.js', location.href));
           const sys = await import(new URL('src/ui/paifu-system.js', location.href));
           const rec = pf.decodePaifu(json);
-          const encode = how === 'sync' ? async (p) => pf.encodePaifu(p)
-            : how === 'worker' ? sys.createWorkerEncoder({ url: new URL('src/ui/paifu-worker.js', location.href), fallback: (p) => pf.encodePaifuAsync(p) })
-              : (p) => pf.encodePaifuAsync(p);
+          // encode の入力は保存の開始時のスナップショット（文字列）。sync は修正前と同じ「主スレッドで同期に検証」
+          const encode = how === 'sync' ? async (snap) => pf.encodePaifuSnapshot(snap)
+            : how === 'worker' ? sys.createWorkerEncoder({ url: new URL('src/ui/paifu-worker.js', location.href), fallback: (snap) => pf.encodePaifuSnapshotAsync(snap) })
+              : (snap) => pf.encodePaifuSnapshotAsync(snap);
           const store = st.createPaifuStore({ encode });
           const epoch = (await store.clearAll()).epoch;
-          if (how === 'worker') await encode(rec); // Worker の起動（モジュールの読込）は1回目だけなので先に済ませる
+          if (how === 'worker') await encode(pf.takePaifuSnapshot(rec)); // Worker の起動（モジュールの読込）は1回目だけなので先に済ませる
           // 心拍：4ms ごとのタイマーの最大の間隔＝主スレッドの最長の停止
           let last = performance.now(), maxGap = 0, beats = 0;
           const timer = setInterval(() => { const t = performance.now(); maxGap = Math.max(maxGap, t - last); last = t; beats++; }, 4);

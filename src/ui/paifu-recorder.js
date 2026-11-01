@@ -28,22 +28,40 @@ function randomId() {
 }
 
 // store：createPaifuStore() の戻り値（save だけ使う）。onChange：いまの試合の保存状態が変わったとき（画面の更新用）
-// epoch：() => { epoch: 現在わかっている削除の世代（不明なら null）, error }。onStaleEpoch：保存が stale-epoch で拒否されたとき
+// epoch：() => { epoch: いまわかっている削除の世代（直前に読んだ値。不明なら null）, error }
+// readEpoch：async () => { epoch, error }（DB の現在の世代を読む。BroadcastChannel に依存しない）
+// onStaleEpoch：保存が stale-epoch で拒否されたとき
+//
+// epochAt：() => Promise<{ epoch, error }> | null（呼んだ時点の世代を読む。読取りのトランザクションを同期で作るので、
+//   値は試合の開始の時点の世代と一致する。準備ができていなければ null）
+//
+// 試合の開始時の世代の結び付け（PR #69 第2回監査 P2-A）：試合は直ちに始まり（記録の準備を待たない）、記録は開始と同時に
+// メモリ上で始める。
+// ・通常（epochAt が使える）：開始の時点の世代をそのまま結び付ける（BroadcastChannel に依存しない・正確）。
+//   削除の前に始まった試合は古い世代（保存は拒否される）、削除の後に始まった試合は新しい世代（保存できる）。
+// ・代替（接続の準備前など）：DB の現在の世代を非同期に読み、次のどちらかなら、その世代に結び付けて保存を始める：
+//   ① 読んだ世代が、開始の時点で知っていた世代（直前に読んだ値）と同じ（＝その間に全件削除はない）
+//   ② 違っても、結び付けの前に行動がまだ1つもない（＝開始の前後に削除があっても、記録の欠落も削除の前の行動もない）
+// どちらでもなければ（削除の前に始まった可能性のある試合で、すでに行動がある）その試合は記録しない（epoch-changed）。
+// 削除の前から存在する試合を新しい世代へ付け替えない・後から不完全な牌譜を作らない。結び付けの前の保存要求は結び付けまで待つ。
 export function createPaifuRecorder({ store, appVersion, onChange = () => {}, schedule = (fn) => setTimeout(fn, 0),
   now = () => new Date(), newId = randomId, recorder = engine, epoch: epochSource = () => ({ epoch: 0, error: null }),
-  onStaleEpoch = () => {} } = {}) {
+  readEpoch = null, epochAt = null, onStaleEpoch = () => {} } = {}) {
+  const readNow = readEpoch || (async () => epochSource());
   let cur = null; // いまの試合の session
   const notify = (s) => { if (s === cur) { try { onChange(); } catch { /* 画面の更新の失敗で記録を止めない */ } } };
 
   function newSession() {
     return { rec: null, game: null, state: 'off', reason: null, saveError: null, savedStatus: null, recordError: null,
-      token: null, epoch: null, version: 0, savedVersion: 0, inFlight: false, pending: false, disabled: false };
+      token: null, epoch: null, version: 0, savedVersion: 0, inFlight: false, pending: false, disabled: false,
+      bound: false, epochPre: null, actionsBeforeBind: 0, discarded: false };
   }
   function change(s, next) { s.rec = next; s.version++; }
   // 保存：1つの session の中では直列（1件ずつ）。保存中に変わったら、終わってから最新を保存する
   function save(s) {
-    if (!s.rec || s.disabled) return;
+    if (!s.rec || s.disabled || s.discarded) return;
     s.pending = true;
+    if (!s.bound) return; // 世代に結び付くまで待つ（結び付いたら保存する）
     if (s.inFlight) return;
     s.inFlight = true;
     s.pending = false;
@@ -74,6 +92,23 @@ export function createPaifuRecorder({ store, appVersion, onChange = () => {}, sc
       });
     });
   }
+  // この試合を記録しない（保存もしない）。前の試合（cur でない session）にも使う
+  function discard(s, reason) {
+    s.discarded = true; s.rec = null; s.game = null; s.pending = false; s.state = 'off'; s.reason = reason;
+    notify(s);
+  }
+  // 開始時の世代の結び付け（上の説明）
+  function bind(s, r, exact = false) {
+    if (s.discarded || s.bound) return;
+    if (!r || !Number.isSafeInteger(r.epoch) || r.epoch < 0) { discard(s, r && (r.error || r.ok === false) ? 'storage-unavailable' : 'not-ready'); return; }
+    if (exact || (s.epochPre !== null && r.epoch === s.epochPre) || s.actionsBeforeBind === 0) {
+      s.epoch = r.epoch; s.bound = true;
+      if (s.pending && s.rec) save(s);
+      notify(s);
+      return;
+    }
+    discard(s, 'epoch-changed');
+  }
   // 記録の失敗：それまでの検証済みの部分を中断として保存し、以後は記録しない
   function fail(s, e) {
     s.recordError = e && e.path ? e.path : 'recording-error';
@@ -87,7 +122,7 @@ export function createPaifuRecorder({ store, appVersion, onChange = () => {}, sc
   }
   const guard = (fn) => {
     const s = cur;
-    if (!s || !s.rec || s.rec.status !== 'recording' || s.state === 'error') return;
+    if (!s || !s.rec || s.discarded || s.rec.status !== 'recording' || s.state === 'error') return;
     try { fn(s); } catch (e) { fail(s, e); }
   };
   function leaveSession(s, why) {
@@ -107,17 +142,21 @@ export function createPaifuRecorder({ store, appVersion, onChange = () => {}, sc
       leaveSession(cur, 'reset');
       const s = cur = newSession();
       if (!eligible) { s.reason = reason || 'not-eligible'; notify(s); return; }
-      // 開始時の削除の世代：分からなければ記録しない（未準備の試合を途中から記録しない・削除の後に復活させない）
+      // 開始の時点で知っている世代（同期で読む。読込前・保存できない端末では null）
       let e = null;
       try { e = epochSource(); } catch { e = null; }
-      if (!e || !Number.isSafeInteger(e.epoch) || e.epoch < 0) { s.reason = e && e.error ? 'storage-unavailable' : 'not-ready'; notify(s); return; }
-      s.epoch = e.epoch;
+      s.epochPre = e && Number.isSafeInteger(e.epoch) && e.epoch >= 0 ? e.epoch : null;
       try {
         if (!store || typeof store.save !== 'function') throw new Error('no store');
         change(s, recorder.createPaifu({ id: newId(), createdAt: now().toISOString(), appVersion, mode, length, seedBase, players, match }));
         s.state = 'recording';
-      } catch (e) { s.rec = null; s.state = 'error'; s.reason = 'start-failed'; s.recordError = e && e.path ? e.path : 'start-failed'; }
+      } catch (err) { s.rec = null; s.state = 'error'; s.reason = 'start-failed'; s.recordError = err && err.path ? err.path : 'start-failed'; notify(s); return; }
       notify(s);
+      // 開始の時点の世代を読み、結び付ける（ゲームは待たない）。読取りのトランザクションはここで同期に作る
+      let at = null;
+      try { at = epochAt ? epochAt() : null; } catch { at = null; }
+      if (at && typeof at.then === 'function') at.then((r) => bind(s, r && r.ok === false ? { error: r.error && r.error.code } : r, true), () => bind(s, { error: 'storage-error' }));
+      else Promise.resolve().then(() => readNow()).then((r) => bind(s, r), () => bind(s, { error: 'storage-error' }));
     },
     // 局の開始（Game を作った直後・最初の行動の前）。presetWall（テスト用の山）を使った局は記録をやめる
     roundStarted(g, { presetWall = false } = {}) {
@@ -132,6 +171,7 @@ export function createPaifuRecorder({ store, appVersion, onChange = () => {}, sc
       guard((s) => {
         if (g !== s.game) throw new engine.PaifuError('step.game', 'not the recorded game');
         change(s, recorder.appendStep(s.rec, g, { seat, action, source, eventsBefore }));
+        if (!s.bound) s.actionsBeforeBind++;
       });
     },
     // 局の精算（applyRoundResult の直後）。保存する
@@ -156,7 +196,7 @@ export function createPaifuRecorder({ store, appVersion, onChange = () => {}, sc
       const s = cur || newSession();
       return Object.freeze({ state: s.state, reason: s.reason, saveError: s.saveError, recordError: s.recordError, savedStatus: s.savedStatus,
         recordStatus: s.rec ? s.rec.status : null, rounds: s.rec ? s.rec.rounds.length : 0, dirty: s.version > s.savedVersion,
-        inFlight: s.inFlight, everSaved: s.savedVersion > 0 });
+        inFlight: s.inFlight, everSaved: s.savedVersion > 0, bound: s.bound, epoch: s.epoch });
     },
     // テスト用（ローカルの検証フックからだけ参照する）：いまの記録
     privateRecord: () => (cur ? cur.rec : null),
@@ -175,6 +215,7 @@ export function describePaifuStatus(st, { limits = { maxRecords: 100, maxBytes: 
     if (st.reason === 'not-ready' || st.reason === 'loading') return { kind: 'not-recorded', text: '牌譜：準備ができる前に始まった対局のため、記録していません' };
     if (st.reason === 'storage-unavailable') return { kind: 'not-recorded', text: '牌譜：この端末では保存できないため、記録していません（ブラウザの設定・プライベートモードなど）' };
     if (st.reason === 'unavailable') return { kind: 'not-recorded', text: '牌譜：機能を読み込めなかったため、記録していません（ゲームには影響しません）' };
+    if (st.reason === 'epoch-changed') return { kind: 'not-recorded', text: '牌譜：記録の開始を確かめる前に保存済みの牌譜が削除されたため、この試合は記録していません' };
     return { kind: 'not-recorded', text: null };
   }
   if (st.inFlight) return { kind: 'saving', text: '牌譜：この端末に保存しています…' };

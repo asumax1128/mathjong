@@ -182,7 +182,10 @@ const paifuOptions = () => {
   if (!IS_LOCAL) return {};
   const n = (k) => (params.has(k) && Number.isSafeInteger(Number(params.get(k))) ? Number(params.get(k)) : undefined);
   const limits = Object.fromEntries([['maxRecords', n('paifuMaxRecords')], ['maxBytes', n('paifuMaxBytes')]].filter(([, v]) => v !== undefined));
-  return { limits, useWorker: params.get('paifuWorker') !== '0' };
+  // paifuSaveDelay：保存の書込みの直前に待つ（ミリ秒。保存の途中の別の操作の順序を再現するため）
+  const delay = n('paifuSaveDelay');
+  const storeHooks = delay ? { afterDigest: () => new Promise((r) => setTimeout(r, delay)) } : {};
+  return { limits, useWorker: params.get('paifuWorker') !== '0', storeHooks };
 };
 const paifuLoading = import('./paifu-system.js').then((m) => {
   paifuSys = m.createPaifuSystem({ appVersion: APP_VERSION, onChange: paifuChanged, ...paifuOptions() });
@@ -198,6 +201,10 @@ const paifuLoading = import('./paifu-system.js').then((m) => {
   if (S.screen === 'game') { const r = paifu.status().reason; paifu.skipMatch(r === 'not-ready' || !r ? 'unavailable' : r); }
   if (S.screen === 'title') refreshPaifuInfo();
 });
+// 新しい試合が始まりうる画面を開いたとき・タブに戻ったときに、削除の世代を読み直しておく（BroadcastChannel がなくても、
+// 別のタブの全件削除の後の新しい試合が新しい世代に結び付く。試合の開始時にも DB を読み直す：src/ui/paifu-recorder.js）
+function paifuPrefetch() { if (paifuSys) paifuSys.prefetch(); }
+window.addEventListener('focus', paifuPrefetch);
 S.paifuInfo = null; // タイトル画面の保存件数（{ ok, count, unreadable } または読込中は null）
 S.paifuConfirm = false; // 牌譜の削除の確認（2段階）
 function refreshPaifuInfo() {
@@ -1786,13 +1793,14 @@ app.addEventListener('click', (ev) => {
       break;
     case 'guide': case 'table': case 'settings':
       if (act === 'table' && S.modal !== 'table') { S.hintStats.table++; S.hintsUsed++; }
+      if (act === 'settings') paifuPrefetch(); // 設定の「新しい対局」の前に世代を読み直しておく
       S.modal = act; render(); break;
     case 'close': S.modal = g.pending() ? null : 'result'; render(); break;
     case 'close-result': S.modal = null; render(); break;
     case 'show-result': S.modal = 'result'; render(); break;
     case 'next':
       // 試合が終わっていれば最終結果へ。続くなら次の局（連荘なら同じ親、親交代なら下家が親）
-      if (S.match.over) { S.modal = 'final'; render(); break; }
+      if (S.match.over) { S.modal = 'final'; paifuPrefetch(); render(); break; }
       S.round++;
       startRound();
       break;
@@ -1890,6 +1898,7 @@ app.addEventListener('click', (ev) => {
       roomPracticeContinue(S.beginnerRoom); render(); break;
     case 'choose-opponents':
       // タイトルの「対戦相手を選ぶ」：選択画面へ（それまでの選択は残す）
+      paifuPrefetch();
       S.opp.detail = null;
       S.opp.notice = null;
       S.screen = 'select';

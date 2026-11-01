@@ -360,12 +360,37 @@ export function encodePaifu(p) {
   return s;
 }
 // 非同期版（保存用）：検証を verifyPaifuAsync で行う。結果は encodePaifu と同じ文字列
+// 呼び出しの時点の内容をスナップショットにしてから検証する（途中で元のオブジェクトが変わっても、検証した内容を返す）
 export async function encodePaifuAsync(p, opts = {}) {
+  return encodePaifuSnapshotAsync(takePaifuSnapshot(p), opts);
+}
+// ---- 保存用のスナップショット（PR #69 第2回監査 P2-B）----
+// takePaifuSnapshot：保存の最初（最初の await の前）に、呼び出し元の記録を安全な JSON か検査し、変更できない文字列にする。
+// 以後の検証・正規化 JSON・要約・保存は、この文字列だけから作る（呼び出し元が途中で元のオブジェクトを書き換えても影響しない）。
+export function takePaifuSnapshot(p) {
   jsonCheck(p);
+  const s = JSON.stringify(p);
+  requireThat(typeof s === 'string' && s.length <= PAIFU_MAX_BYTES && new TextEncoder().encode(s).length <= PAIFU_MAX_BYTES, 'json', 'byte limit exceeded');
+  return s;
+}
+// スナップショット（文字列）を読み直して検証し、正規化 JSON を返す（同期：Worker の中で使う）
+export function encodePaifuSnapshot(snapshot) {
+  return encodePaifu(decodeSnapshot(snapshot));
+}
+// 同じことを、一定時間ごとにイベントループへ戻りながら行う（主スレッドの代替。検証は同じ・省略しない）
+export async function encodePaifuSnapshotAsync(snapshot, opts = {}) {
+  const p = decodeSnapshot(snapshot);
   await verifyPaifuAsync(p, opts);
   const s = canonical(p);
   requireThat(new TextEncoder().encode(s).length <= PAIFU_MAX_BYTES, 'json', 'byte limit exceeded');
   return s;
+}
+function decodeSnapshot(snapshot) {
+  requireThat(typeof snapshot === 'string' && snapshot.length <= PAIFU_MAX_BYTES, 'json', 'invalid input/byte limit exceeded');
+  let p;
+  try { p = JSON.parse(snapshot); } catch { throw new PaifuError('json', 'invalid JSON'); }
+  jsonCheck(p);
+  return freeze(p); // この私有のコピーは凍結（検証中に誰も書き換えられない）
 }
 export function decodePaifu(s) {
   requireThat(typeof s === 'string' && s.length <= PAIFU_MAX_BYTES && new TextEncoder().encode(s).length <= PAIFU_MAX_BYTES, 'json', 'invalid input/byte limit exceeded');

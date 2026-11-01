@@ -9130,6 +9130,111 @@ async function v15PaifuLoadFailure(browser) {
   console.log('✓ 牌譜の機能の読込の失敗（取得失敗・構文エラー2種・HTTP 500）でもタイトル・通常対局・初心者の部屋が動く、読込の遅延中に始めた試合は記録しない・読込の後の試合は記録');
 }
 
+
+async function v15PaifuEpochNoBC(browser) {
+  // PR #69 第2回監査 P2-A：BroadcastChannel がない環境で、別のタブの全件削除の後に「新しい対局」「再戦」を、旧試合の保存の失敗より先に行う。
+  // 旧試合の保存は拒否・新試合の保存は成功・削除済みの記録は復活しない（実際の IndexedDB・画面での対局）
+  for (const how of ['reset', 'again']) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    await ctx.addInitScript(() => { try { delete window.BroadcastChannel; } catch { /* 無視 */ } window.BroadcastChannel = undefined; });
+    const a = await ctx.newPage(), errors = watchErrors(a);
+    // 再戦：旧試合の最後の保存を 2 秒遅らせる（その間に別のタブで削除し、保存の失敗より先に再戦する）
+    await a.goto(LOCAL + `?speed=test${how === 'again' ? '&paifuSaveDelay=2000' : ''}`);
+    await a.waitForSelector('.title-screen');
+    const b = await ctx.newPage();
+    await b.goto(LOCAL + '?speed=test');
+    await b.waitForSelector('.title-screen');
+    await pfReady(b);
+    assert.equal(await a.evaluate(() => typeof window.BroadcastChannel), 'undefined', 'BroadcastChannel なし');
+    let oldId;
+    if (how === 'reset') {
+      // 旧試合：4局戦の1局目を精算して保存（世代 E）。まだ途中
+      await pfStart(a, { mode: 'math1', length: 4 });
+      await pfPlayOut(a, { stopOnResult: true });
+      await a.waitForFunction(() => { const s = window.__mathjong.paifu.status(); return s.everSaved && !s.inFlight; });
+      oldId = await a.evaluate(() => window.__mathjong.paifu.privateRecord().id);
+      await b.evaluate(() => window.__mathjong.paifuSys.clearAll()); // 別のタブで全件削除（A に通知は届かない）
+      // A：設定 → 新しい対局（旧試合の中断の保存は、この後に拒否される）
+      // 局の結果を閉じ、結果画面がない（対局中）ことを確かめてから設定を開く（test 速度では次の局の結果がすぐ出ることがある）
+      for (let i = 0; ; i++) {
+        assert.ok(i < 200, '設定を開けない');
+        const modal = await a.evaluate(() => window.__mathjong.S.modal);
+        if (modal === 'result') { await a.locator('.overlay button[data-action="next"]').click(); continue; }
+        if (modal == null) { await a.locator('button[data-action="settings"]').click(); break; }
+        await a.waitForTimeout(10);
+      }
+      await a.locator('button[data-action="reset"]').click();
+    } else {
+      await pfStart(a, { mode: 'math2', length: 1 });
+      await pfPlayOut(a);
+      oldId = await a.evaluate(() => window.__mathjong.paifu.privateRecord().id);
+      assert.equal(await a.evaluate(() => window.__mathjong.paifu.status().inFlight), true, '旧試合の最後の保存は待ち中');
+      await b.evaluate(() => window.__mathjong.paifuSys.clearAll());
+      await a.locator('.final button[data-action="again"]').click(); // 保存の失敗より先に再戦
+    }
+    await a.waitForSelector('.hand .tile');
+    const st0 = await a.evaluate(() => window.__mathjong.paifu.status());
+    assert.equal(st0.state === 'recording' || st0.state === 'saving' || st0.state === 'saved', true, JSON.stringify(st0));
+    await pfPlayOut(a);
+    const snap = await pfSnapshot(a);
+    const ids = snap.records.map((x) => x.id);
+    assert.ok(!ids.includes(oldId), `${how}：旧試合は復活しない`);
+    assert.deepEqual([snap.list.count, snap.records[0].status, snap.records[0].valid, snap.status.state], [1, 'complete', true, 'saved'], `${how}：新試合は保存`);
+    const epochs = await a.evaluate(async () => ({ rec: window.__mathjong.paifu.status().epoch, db: (await window.__mathjong.paifuSys.store.epoch()).epoch }));
+    assert.equal(epochs.rec, epochs.db, '新試合は削除の後の世代');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 牌譜（BroadcastChannel なし・2つのタブ）：別のタブの全件削除の後、旧試合の保存の失敗より先に「新しい対局」「再戦」→ 旧試合は拒否・復活しない、新試合は削除の後の世代で保存');
+}
+
+async function v15PaifuSnapshot(browser) {
+  // PR #69 第2回監査 P2-B：保存の途中で呼び出し元が元のオブジェクトを書き換えても、保存されるのは save を呼んだ時点の内容で、
+  // 読込・再検証は必ず成功する。Worker の経路と、Worker なしの分割検証の経路。時点：呼んだ直後・検証の途中・検証の後（書込みの前）
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 } });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  await page.goto(LOCAL + '?speed=test');
+  await page.waitForSelector('.title-screen');
+  await pfReady(page);
+  const { playRecorded } = await import('../paifu-harness.mjs');
+  const { encodePaifu } = await import('../../src/engine/paifu.js');
+  const json = encodePaifu(playRecorded({ mode: 'math2', length: 8, seedBase: 9393, id: 'snap' }).record);
+  const out = await page.evaluate(async (json) => {
+    const st = await import(new URL('src/ui/paifu-storage.js', location.href));
+    const pf = await import(new URL('src/engine/paifu.js', location.href));
+    const sys = await import(new URL('src/ui/paifu-system.js', location.href));
+    const res = [];
+    for (const path of ['worker', 'chunked']) {
+      for (const when of ['immediately', 'duringVerify', 'afterVerify']) {
+        const rec = JSON.parse(json); // 呼び出し元の変更できる記録
+        const mutate = () => { rec.rounds[0].steps[0].digest = '0000000000000000'; rec.rounds[1].steps.length = 3; rec.status = 'aborted'; rec.final = null; };
+        const fallback = (s) => pf.encodePaifuSnapshotAsync(s, { budgetMs: 1 });
+        const base = path === 'worker' ? sys.createWorkerEncoder({ url: new URL('src/ui/paifu-worker.js', location.href), fallback }) : fallback;
+        // 検証の途中で書き換える：Worker は処理中（postMessage の後）、分割は最初の区切り（イベントループへ戻った）後
+        const encode = when === 'duringVerify' ? (s) => { const p = base(s); setTimeout(mutate, 0); return p; } : base;
+        const store = st.createPaifuStore({ encode, hooks: { afterEncode: async () => { if (when === 'afterVerify') mutate(); } } });
+        const epoch = (await store.clearAll()).epoch;
+        const pr = store.save(rec, { epoch });
+        if (when === 'immediately') mutate();
+        const r = await pr;
+        const back = r.ok ? await store.loadPrivate('snap') : null;
+        res.push({ path, when, ok: r.ok, code: r.ok ? null : r.error.code, loaded: !!(back && back.ok),
+          same: back && back.ok ? pf.canonical(back.record) === pf.canonical(JSON.parse(json)) : false,
+          worker: path === 'worker' && typeof base.usingWorker === 'function' ? base.usingWorker() : false });
+        await store.clearAll();
+      }
+    }
+    return res;
+  }, json);
+  for (const r of out) {
+    assert.deepEqual([r.ok, r.loaded, r.same], [true, true, true], `${r.path}・${r.when}：保存は呼んだ時点の内容・読込と再検証が成功 ${JSON.stringify(r)}`);
+    if (r.path === 'worker') assert.equal(r.worker, true, 'Worker を使った');
+  }
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  console.log('✓ 牌譜：保存の途中（呼んだ直後・検証の途中・検証の後）に元のオブジェクトを書き換えても、Worker・分割検証の両方で保存は呼んだ時点の内容・読込と再検証が成功');
+}
+
 let browser;
 const stats = { rounds: 0, wins: [0, 0, 0, 0], draws: 0, tsumo: 0, ron: 0, ronDeclined: 0, chi: 0, chiPassed: 0, chiOverriddenByRon: 0, discards: 0, yaku: {} };
 const t0 = Date.now();
@@ -9141,7 +9246,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage, v15PaifuEpoch, v15PaifuLoadFailure };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage, v15PaifuEpoch, v15PaifuLoadFailure, v15PaifuEpochNoBC, v15PaifuSnapshot };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -9219,6 +9324,8 @@ try {
   await v15PaifuStorage(browser);
   await v15PaifuEpoch(browser);
   await v15PaifuLoadFailure(browser);
+  await v15PaifuEpochNoBC(browser);
+  await v15PaifuSnapshot(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。

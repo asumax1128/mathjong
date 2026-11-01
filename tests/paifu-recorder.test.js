@@ -26,6 +26,8 @@ function fakeStore(results = []) {
     // 本物と同じ：全件削除で世代を進め、保存はその世代の試合だけを受け付ける
     clearAll: async () => { epoch++; toks.clear(); saved.length = 0; return { ok: true, cleared: true, epoch }; },
     epoch: async () => ({ ok: true, epoch }),
+    // 呼んだ時点の世代（本物はトランザクションを同期で作る＝呼んだ時点の値）
+    epochNow: () => { const e = epoch; return Promise.resolve({ ok: true, epoch: e }); },
     save: async (p, opts) => {
       const r = results[n++];
       if (r === 'throw') throw new Error('boom');
@@ -354,4 +356,98 @@ test('P3-1 表示：記録中・未保存／保存処理中／保存済み／保
   const k = describePaifuStatus(rec.status());
   assert.ok(k.kind === 'recording' || k.kind === 'saved', k.kind);
   assert.equal(rec.status().everSaved, true);
+});
+
+// ---- PR #69 第2回監査 P2-A：BroadcastChannel なし・別のタブで全件削除の後の新しい試合 ----
+// 2つのタブ＝同じ保存先を共有する2つの窓口。各タブが「知っている世代」は通知（BroadcastChannel）が届かないので古いまま
+function tab(store, opts = {}) {
+  let known = store.epochValue; // このタブが最後に読んだ世代（通知が届かない）
+  const rec = createPaifuRecorder({ store, appVersion: '0.7.0', epoch: () => ({ epoch: known, error: null }),
+    readEpoch: async () => ({ epoch: store.epochValue, error: null }), epochAt: opts.noEpochAt ? null : () => store.epochNow(), ...opts });
+  return { rec, setKnown: (e) => { known = e; } };
+}
+for (const how of ['新しい対局', '再戦']) {
+  test(`P2-A ${how}：別のタブで全件削除 → 旧試合の保存の失敗より先に${how} → 旧試合の保存は拒否・新試合の保存は成功・削除済みは復活しない（BroadcastChannel なし）`, async () => {
+    const inner = fakeStore();
+    let gate = null, release = null;
+    // 保存を一時止められる保存先（旧試合の保存が「失敗する前」に新しい試合を始めるため）
+    const store = Object.assign(Object.create(inner), {
+      save: async (p, o) => { if (gate) await gate; return inner.save(p, o); },
+      epochNow: () => inner.epochNow(), clearAll: () => inner.clearAll(), epoch: () => inner.epoch(),
+    });
+    Object.defineProperty(store, 'epochValue', { get: () => inner.epochValue });
+    Object.defineProperty(store, 'saved', { get: () => inner.saved });
+    const A = tab(store);
+    let oldId;
+    if (how === '新しい対局') {
+      await playApp(A.rec, { length: 8, seedBase: 940, stopAfter: 120 }); // 旧試合：1局目を保存済み・まだ途中
+      oldId = A.rec.privateRecord().id;
+      assert.ok(inner.saved.some((x) => x.id === oldId), '旧試合は削除の前に保存済み');
+      gate = new Promise((r) => { release = r; });
+      A.rec.flush(); // 旧試合の途中の保存要求（止まっている）
+    } else {
+      // 再戦：旧試合（1局戦）を最後まで打つ。最後の保存（完了）は止まっている
+      gate = new Promise((r) => { release = r; });
+      await playApp(A.rec, { length: 1, seedBase: 941 });
+      oldId = A.rec.privateRecord().id;
+      assert.equal(A.rec.privateRecord().status, 'complete');
+    }
+    await inner.clearAll(); // 別のタブ（B）で全件削除。A には通知が届かない
+    // 旧試合の保存の失敗（拒否）より先に、新しい試合を始める。AI が先に打つ・すぐに行動が入る
+    const newMatch = playApp(A.rec, { length: 1, seedBase: 942 });
+    release(); gate = null;
+    await newMatch;
+    await settle();
+    assert.ok(!inner.saved.some((x) => x.id === oldId), '旧試合は復活しない（保存は stale-epoch で拒否）');
+    assert.equal(inner.saved.length >= 1, true, '新試合は保存された');
+    assert.equal(inner.saved.at(-1).status, 'complete');
+    assert.equal(A.rec.status().state, 'saved');
+    assert.equal(A.rec.status().epoch, inner.epochValue, '新試合は削除の後の世代');
+  });
+}
+
+test('P2-A 2つのタブ：B で全件削除の後、A・B それぞれの新しい試合は保存でき、A の削除の前の試合（途中）は記録の続きを保存しない', async () => {
+  const store = fakeStore();
+  const A = tab(store), B = tab(store);
+  await playApp(A.rec, { length: 8, seedBase: 950, stopAfter: 120 });
+  const oldId = A.rec.privateRecord().id;
+  await store.clearAll();
+  // A は旧試合を続ける（次の局の精算で保存を試みる → 拒否）
+  // （playApp は新しい試合として始めるので、旧試合の続きの代わりに leave で中断の保存を試みる）
+  A.rec.leave('left-match');
+  await settle();
+  assert.ok(!store.saved.some((x) => x.id === oldId));
+  await playApp(B.rec, { length: 1, seedBase: 951 });
+  await playApp(A.rec, { length: 1, seedBase: 952 });
+  await settle();
+  assert.equal(new Set(store.saved.map((x) => x.id)).size, 2, 'A・B の新しい試合');
+  assert.ok(!store.saved.some((x) => x.id === oldId));
+});
+
+test('P2-A 代替（開始の時点の世代を読めないとき）：知っている世代と同じ・行動がまだないなら結び付け、どちらでもなければ記録しない', async () => {
+  // 行動がまだない間に読めた → 新しい世代に結び付けて保存
+  const store = fakeStore();
+  const A = tab(store, { noEpochAt: true });
+  await store.clearAll();
+  const m = createMatch({ length: 1, riichiDeposit: RIICHI_DEPOSIT, agariYame: true });
+  A.rec.startMatch({ eligible: true, mode: 'math1', length: 1, seedBase: 960, players: PLAYERS, match: m });
+  await settle(); // 読取りが先に終わる
+  assert.equal(A.rec.status().bound, true);
+  // 削除の後に知らない世代のまま始め、すぐに行動が入る（どちらとも決められない）→ 記録しない
+  const store2 = fakeStore();
+  const B = tab(store2, { noEpochAt: true });
+  await store2.clearAll();
+  await playApp(B.rec, { length: 1, seedBase: 961 });
+  await settle();
+  assert.deepEqual([B.rec.status().state, B.rec.status().reason], ['off', 'epoch-changed']);
+  assert.equal(store2.saved.length, 0, '不完全・帰属不明の牌譜を作らない');
+  assert.match(describePaifuStatus(B.rec.status()).text, /記録の開始を確かめる前に/);
+  // 知っている世代が最新なら、行動があっても結び付ける
+  const store3 = fakeStore();
+  const C = tab(store3, { noEpochAt: true });
+  await store3.clearAll();
+  C.setKnown(store3.epochValue);
+  await playApp(C.rec, { length: 1, seedBase: 962 });
+  await settle();
+  assert.equal(C.rec.status().state, 'saved');
 });
