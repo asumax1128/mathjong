@@ -441,7 +441,10 @@ test('P2：silence は止まった context では絞る処理が進まないの�
 test('P2 構造：画面が隠れた・ページを離れたとき drop する（リスナーは1回だけ登録）。P3：設定名は「視覚演出」で選択肢・保存キー・動作は不変', () => {
   const app = readFileSync(new URL('../src/ui/app.js', import.meta.url), 'utf8');
   assert.equal((app.match(/addEventListener\('visibilitychange'/g) || []).length, 1);
-  assert.equal((app.match(/addEventListener\('pagehide'/g) || []).length, 1);
+  // pagehide：音の drop のリスナーは1回だけ（牌譜の保存は別のリスナー1つ。docs/74）
+  assert.equal((app.match(/addEventListener\('pagehide', \(\) => sound\.drop\(\)\)/g) || []).length, 1);
+  assert.equal((app.match(/addEventListener\('pagehide'/g) || []).length, 2);
+  assert.equal((app.match(/addEventListener\('pagehide', \(\) => paifu\.flush\(\)\)/g) || []).length, 1);
   assert.ok(app.includes("document.addEventListener('visibilitychange', () => { if (document.hidden) sound.drop(); })"));
   assert.ok(app.includes("window.addEventListener('pagehide', () => sound.drop())"));
   const m = app.match(/<label class="setting">([^<]*)<select data-action="fx-mode">(.*?)<\/select>/);
