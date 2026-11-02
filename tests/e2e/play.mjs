@@ -9304,6 +9304,311 @@ async function v15PaifuEpochFallback(browser) {
   console.log('✓ 牌譜（第3回監査の固定反例・実際の IndexedDB・2つのタブ）：接続なしで始めた行動0件・1件の試合 → pagehide → 別のタブで全件削除 → 世代の取得の完了で、旧試合は保存されず0件。削除の後の新しい試合は保存（BroadcastChannel あり／なし）');
 }
 
+// ---- 牌譜の振り返り（第2段階・docs/76・docs/77） ----
+// 保存済みの牌譜（node で作った記録をページの IndexedDB へ保存）を、ページの中で独立に再生した期待値と画面を照合する
+async function prSeed(page, cases) {
+  const { playRecorded } = await import('../paifu-harness.mjs');
+  const { encodePaifu } = await import('../../src/engine/paifu.js');
+  const jsons = cases.map((c, i) => encodePaifu(playRecorded({ id: `pr-${i}-${c.mode}-${c.length}`, ...c }).record));
+  return page.evaluate(async (jsons) => {
+    const m = window.__mathjong;
+    const pf = await import(new URL('src/engine/paifu.js', location.href));
+    const st = m.paifuSys.store;
+    const epoch = (await st.epoch()).epoch;
+    const ids = [];
+    for (const j of jsons) { const r = await st.save(pf.decodePaifu(j), { epoch }); if (!r.ok) throw new Error(r.error.code); ids.push(r.metadata.id); }
+    return ids;
+  }, jsons);
+}
+// ページの中の独立の再生（振り返りのモジュールを使わない）：局 ri の各時点の期待値（自分の手牌の文字・各席の河・裏向きの枚数）
+const prExpected = (page, id, ri) => page.evaluate(async ([id, ri]) => {
+  const m = window.__mathjong;
+  const pf = await import(new URL('src/engine/paifu.js', location.href));
+  const rd = await import(new URL('src/ui/render.js', location.href));
+  const r = await m.paifuSys.store.loadPrivate(id);
+  const p = r.record, R = pf.paifuRules(p.settings.mode), rnd = p.rounds[ri];
+  const g = pf.newRoundGame(p, rnd.round, rnd.dealer);
+  const label = (t) => rd.tileLabel(R.types[t]);
+  const snap = () => {
+    const q = g.pending();
+    const drawn = q && q.seat === 0 && q.type === 'turn' && g.drawn !== null && g.drawn !== undefined ? g.typeOf(g.drawn) : null;
+    const types = g.hands[0].map((x) => g.typeOf(x)).sort((a, b) => a - b);
+    if (drawn !== null) types.splice(types.indexOf(drawn), 1);
+    return { hand: [...types, ...(drawn === null ? [] : [drawn])].map(label), rivers: [1, 2, 3, 0].map((s) => g.rivers[s].map((x) => label(g.typeOf(x.id)))),
+      backs: [1, 2, 3].map((s) => g.hands[s].length) };
+  };
+  const out = [snap()];
+  let seen = g.events.length, mine = false;
+  for (const s of rnd.steps) {
+    const a = s.action;
+    if (a.type === 'discard') g.discard(s.seat, a.tile, a.riichi ? { riichi: true } : undefined);
+    else if (a.type === 'tsumo') g.tsumo(s.seat);
+    else if (a.type === 'ankan') g.ankan(s.seat, a.tileType);
+    else g.respond(s.seat, a);
+    if (s.seat === 0) mine = true;
+    const q = g.pending(); // 安定した点（局の終わり・手番・自分の判断）だけを時点にする
+    if ((!q || q.type === 'turn' || q.seat === 0) && (mine || g.events.length > seen)) { out.push(snap()); seen = g.events.length; mine = false; }
+  }
+  return out;
+}, [id, ri]);
+const prDom = (page) => page.evaluate(() => {
+  const q = (sel, root = document) => [...root.querySelectorAll(sel)];
+  const seats = q('.pr-viewer .pr-seat');
+  return { hand: q('.pr-hand-tiles .tile').map((t) => t.getAttribute('aria-label')), rivers: seats.map((s) => q('.pr-river .tile', s).map((t) => t.getAttribute('aria-label'))),
+    backs: seats.slice(0, 3).map((s) => q('.pr-backs .back', s).length), count: document.querySelector('.pr-count') ? document.querySelector('.pr-count').innerText : null,
+    overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, actionBar: !!document.querySelector('footer.bar, .bar button[data-action="tile"], .hand .tile.tap') };
+});
+async function prOpenList(page) {
+  await page.evaluate(() => window.__mathjong.paifuSys.ready);
+  await page.waitForSelector('.title-paifu button[data-action="pr-open"]');
+  await page.locator('button[data-action="pr-open"]').click();
+  await page.waitForSelector('.pr-list-screen');
+}
+const prDebug = (page) => page.evaluate(() => window.__mathjong.reviewUI.debug());
+
+async function v16PaifuReview(browser) {
+  // (1) 画面で対局（数学Ⅰ・1局戦）→ タイトル → 振り返る：一覧の行（日時・モード・局数・相手・順位・最終点・完走）と再生
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage(), errors = watchErrors(page), logs = [];
+    page.on('console', (m) => logs.push(m.text()));
+    await page.goto(LOCAL + '?speed=test');
+    await page.waitForSelector('.title-screen');
+    await pfStart(page, { mode: 'math1', length: 1 });
+    await pfPlayOut(page);
+    const snap = await pfSnapshot(page);
+    assert.equal(snap.records[0].status, 'complete');
+    const url0 = page.url(), local0 = await page.evaluate(() => JSON.stringify(localStorage)), session0 = await page.evaluate(() => JSON.stringify(sessionStorage));
+    await page.locator('.final button[data-action="to-title"]').click();
+    await prOpenList(page);
+    await page.waitForFunction(() => window.__mathjong.reviewUI.debug().details === 1);
+    const row = await page.locator('.pr-entry').innerText();
+    assert.match(row, /数学Ⅰ/); assert.match(row, /1局戦/); assert.match(row, /完走/); assert.match(row, /相手：/);
+    assert.match(row, new RegExp(`${snap.live.scores[0]}点`));
+    const myRank = 1 + snap.live.scores.filter((x) => x > snap.live.scores[0]).length;
+    assert.match(row, new RegExp(`${myRank}位`));
+    await page.locator('.pr-entry').click();
+    await page.waitForSelector('.pr-viewer .pr-count');
+    const id = snap.records[0].id;
+    const exp = await prExpected(page, id, 0);
+    for (let k = 0; k < exp.length; k++) {
+      const d = await prDom(page);
+      assert.equal(d.count, `${k + 1} / ${exp.length}`);
+      assert.deepEqual([d.hand, d.rivers, d.backs], [exp[k].hand, exp[k].rivers, exp[k].backs], `時点 ${k}`);
+      assert.equal(d.overflow, 0, '横スクロールなし');
+      assert.equal(d.actionBar, false, '打牌の操作バー・打牌できる牌を出さない');
+      if (k < exp.length - 1) await page.locator('.pr-nav button[data-action="pr-next"]').click();
+    }
+    assert.ok(await page.locator('.pr-result').isVisible(), '局の最後は精算');
+    assert.match(await page.locator('.pr-result').innerText(), /精算/);
+    assert.equal(await page.locator('.pr-nav button[data-action="pr-next"]').isDisabled(), true);
+    // 前へ・先頭・末尾
+    await page.locator('.pr-nav button[data-action="pr-prev"]').click();
+    assert.equal((await prDom(page)).count, `${exp.length - 1} / ${exp.length}`);
+    await page.locator('.pr-nav button[data-action="pr-first"]').click();
+    assert.deepEqual((await prDom(page)).hand, exp[0].hand);
+    await page.locator('.pr-nav button[data-action="pr-last"]').click();
+    assert.equal((await prDom(page)).count, `${exp.length} / ${exp.length}`);
+    // 境界：URL・localStorage・sessionStorage・アプリの状態・ログに牌譜の本文を出さない。ゲームの状態は変えない
+    const html = await page.content();
+    assert.doesNotMatch(html, /private-full|"steps"|startDigest|seedBase/);
+    assert.equal(page.url(), url0);
+    assert.equal(await page.evaluate(() => JSON.stringify(localStorage)), local0);
+    assert.equal(await page.evaluate(() => JSON.stringify(sessionStorage)), session0);
+    const appState = await page.evaluate(() => { const S = window.__mathjong.S; return JSON.stringify({ ...S, game: null, match: null }); });
+    assert.doesNotMatch(appState, /private-full|startDigest|"steps"/);
+    assert.ok(!logs.some((x) => /private-full|startDigest/.test(x)), 'console');
+    assert.equal(await page.evaluate(() => window.__mathjong.S.screen), 'paifu-review');
+    // 一覧へ・タイトルへ
+    await page.locator('button[data-action="pr-list"]').click();
+    await page.waitForSelector('.pr-list-screen');
+    await page.locator('button[data-action="pr-exit"]').click();
+    await page.waitForSelector('.title-screen');
+    // 振り返りの後も通常対局ができ、記録は保存される（振り返りは保存・削除をしない）
+    await pfStart(page, { mode: 'math2', length: 1 });
+    await pfPlayOut(page);
+    const s2 = await pfSnapshot(page);
+    assert.deepEqual([s2.list.count, s2.records.every((x) => x.valid)], [2, true]);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (2) 数学Ⅰ・Ⅱ × 1/4/8局戦・途中退出：全局の全時点を前後に移動して照合（局の切替・局を跨ぐ次へ）。iPhone 幅 320/375/390/430
+  const widths = [320, 375, 390, 430];
+  const cases = [
+    { mode: 'math1', length: 1, seedBase: 7101 }, { mode: 'math2', length: 1, seedBase: 7102 },
+    { mode: 'math1', length: 4, seedBase: 7103 }, { mode: 'math2', length: 4, seedBase: 7104 },
+    { mode: 'math1', length: 8, seedBase: 7105 }, { mode: 'math2', length: 8, seedBase: 7106 },
+    { mode: 'math2', length: 4, seedBase: 7107, stopAfterSteps: 160 },
+  ];
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  await page.goto(LOCAL + '?speed=test');
+  await page.waitForSelector('.title-screen');
+  await pfReady(page);
+  const ids = await prSeed(page, cases);
+  await page.reload(); await page.waitForSelector('.title-screen'); await pfReady(page); // タイトルの件数を読み直す
+  await prOpenList(page);
+  await page.waitForFunction((n) => window.__mathjong.reviewUI.debug().details === n, cases.length);
+  const seen = { riichi: 0, pon: 0, chi: 0, ankan: 0, furiten: 0, ron: 0, tsumo: 0, draw: 0, pot: 0, aborted: 0 };
+  for (let c = 0; c < cases.length; c++) {
+    const w = widths[c % widths.length];
+    await page.setViewportSize({ width: w, height: 760 });
+    const listOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    assert.equal(listOverflow, 0, `一覧 ${w}px`);
+    const entry = page.locator(`.pr-entry[data-id="${ids[c]}"]`);
+    const text = await entry.innerText();
+    assert.match(text, new RegExp(`${cases[c].mode === 'math1' ? '数学Ⅰ' : '数学Ⅱ'}`));
+    assert.match(text, new RegExp(`${cases[c].length}局戦`));
+    assert.match(text, cases[c].stopAfterSteps ? /中断/ : /完走/);
+    await entry.click();
+    await page.waitForSelector('.pr-viewer .pr-count');
+    const nRounds = await page.locator('.pr-round').count();
+    for (let ri = 0; ri < nRounds; ri++) {
+      if (ri > 0 && ri % 2 === 0) { await page.locator(`.pr-round[data-round="${ri}"]`).click(); } // 局の選択
+      await page.waitForFunction((ri) => { const d = window.__mathjong.reviewUI.debug(); return d.ri === ri && !d.loading; }, ri);
+      const exp = await prExpected(page, ids[c], ri);
+      assert.equal((await prDebug(page)).k, 0);
+      for (let k = 0; k < exp.length; k++) {
+        const d = await prDom(page);
+        assert.deepEqual([d.hand, d.rivers, d.backs], [exp[k].hand, exp[k].rivers, exp[k].backs], `${c} 局${ri} 時点${k}`);
+        assert.equal(d.overflow, 0, `${w}px 局${ri} 時点${k}：横スクロールなし`);
+        const ev = await page.locator('.pr-step').innerText();
+        if (/リーチ/.test(ev)) seen.riichi++;
+        if (/ポン\s*（/.test(ev)) seen.pon++;
+        if (/チー\s*（/.test(ev)) seen.chi++;
+        if (/暗カン/.test(ev)) seen.ankan++;
+        if (await page.locator('.pr-furiten').count()) seen.furiten++;
+        if (!/供託0点/.test(await page.locator('.pr-state').innerText())) seen.pot++;
+        if (k < exp.length - 1) await page.locator('.pr-nav button[data-action="pr-next"]').click();
+      }
+      // 局の最後：精算（または中断の表示）
+      if (await page.locator('.pr-result').count()) {
+        const r = await page.locator('.pr-result').innerText();
+        if (/ロン\s*（/.test(r)) seen.ron++; else if (/ツモ/.test(r)) seen.tsumo++; else if (/流局/.test(r)) seen.draw++;
+        assert.match(r, /局前[\s\S]*増減[\s\S]*局後/);
+      } else { assert.match(await page.locator('.pr-step').innerText(), /中断.*ここまで/); seen.aborted++; }
+      // 前へ戻る（1つ前の時点）→ 次へ（局を跨ぐ）
+      if (exp.length > 1) { await page.locator('.pr-nav button[data-action="pr-prev"]').click(); await page.locator('.pr-nav button[data-action="pr-next"]').click(); }
+      if (ri < nRounds - 1 && (ri + 1) % 2 === 1) {
+        await page.locator('.pr-nav button[data-action="pr-next"]').click(); // 局の最後から次の局の最初へ
+      }
+    }
+    // 局を跨ぐ前へ：2局目以降の最初から前へで前の局の最後
+    if (nRounds > 1) {
+      await page.locator('.pr-round[data-round="1"]').click();
+      await page.waitForFunction(() => { const d = window.__mathjong.reviewUI.debug(); return d.ri === 1 && !d.loading; });
+      await page.locator('.pr-nav button[data-action="pr-prev"]').click();
+      await page.waitForFunction(() => { const d = window.__mathjong.reviewUI.debug(); return d.ri === 0 && !d.loading && d.k === d.frames - 1; });
+    }
+    const navH = await page.locator('.pr-nav button').first().boundingBox();
+    assert.ok(navH.height >= 44, `操作ボタンの高さ ${navH.height}`);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v16-review-${w}.png`, fullPage: true });
+    await page.locator('button[data-action="pr-list"]').click();
+    await page.waitForSelector('.pr-list-screen');
+  }
+  for (const k of ['riichi', 'ron', 'tsumo', 'draw', 'pot', 'aborted']) assert.ok(seen[k] > 0, `${k}: ${JSON.stringify(seen)}`);
+  assert.ok(seen.pon + seen.chi > 0, `鳴き ${JSON.stringify(seen)}`);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  console.log(`✓ 牌譜の振り返り（docs/77）：画面で打った対局の一覧（日時・モード・局数・相手・順位・最終点・完走）と再生、数学Ⅰ・Ⅱ×1/4/8局戦・途中退出の全局の全時点で自分の手牌・河・他家の裏向きの枚数が独立の再生と一致、前後・先頭・末尾・局の選択・局を跨ぐ移動、320/375/390/430px で横スクロールなし、打牌の操作バーなし、本文を DOM・URL・保存・ログ・アプリの状態へ出さない、振り返りの後も通常対局と保存が動く（${JSON.stringify(seen)}）`);
+}
+
+async function v16PaifuReviewErrors(browser) {
+  // 破損・非対応・別のタブでの削除・二度開き・読込中の戻る・機能の読込失敗・IndexedDB が使えない端末
+  const ctx = await newContext(browser, { viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true });
+  const a = await ctx.newPage(), b = await ctx.newPage(), ea = watchErrors(a), eb = watchErrors(b);
+  for (const pg of [a, b]) { await pg.goto(LOCAL + '?speed=test'); await pg.waitForSelector('.title-screen'); await pfReady(pg); }
+  await b.evaluate(() => window.__mathjong.paifuSys.clearAll());
+  const ids = await prSeed(a, [{ mode: 'math1', length: 1, seedBase: 7201 }, { mode: 'math2', length: 1, seedBase: 7202 }, { mode: 'math1', length: 1, seedBase: 7203 }, { mode: 'math1', length: 1, seedBase: 7204 }]);
+  // 破損：本文の1文字を変える（SHA-256 が合わない）。非対応：エンジンの版を変え、要約・SHA-256・バイト数を合わせ直す（検証で版の違いとして拒否）
+  // 読めない行：索引の形式の版が違う（一覧に出さず、件数だけ案内）
+  await a.evaluate(async ([bad, old, unread]) => {
+    const db = await new Promise((res, rej) => { const r = indexedDB.open('mathjong-paifu-records'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+    const get = (store, id) => new Promise((res) => { const q = db.transaction(store).objectStore(store).get(id); q.onsuccess = () => res(q.result); });
+    const put = (store, v) => new Promise((res, rej) => { const tx = db.transaction(store, 'readwrite'); tx.objectStore(store).put(v); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
+    const sha = async (s) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((x) => x.toString(16).padStart(2, '0')).join('');
+    const r1 = await get('records', bad);
+    await put('records', { ...r1, json: r1.json.replace('"appVersion":"0.7.0"', '"appVersion":"0.7.1"') });
+    const r2 = await get('records', old), i2 = await get('index', old);
+    const json = r2.json.replace(/"engineVersion":"[^"]*"/, '"engineVersion":"0.0.0-old"');
+    const bytes = new TextEncoder().encode(json).length, digest = await sha(json);
+    await put('records', { ...r2, json, bytes, digest });
+    await put('index', { ...i2, bytes, digest });
+    const i3 = await get('index', unread);
+    await put('index', { ...i3, storageVersion: 99 });
+    db.close();
+  }, [ids[0], ids[1], ids[2]]);
+  await a.reload(); await a.waitForSelector('.title-screen'); await pfReady(a);
+  await prOpenList(a);
+  await a.waitForFunction(() => window.__mathjong.reviewUI.debug().loading === false);
+  assert.match(await a.locator('.pr-list-screen').innerText(), /読めない記録が1件/);
+  assert.equal(await a.locator('.pr-entry').count(), 3);
+  await a.waitForFunction(() => document.querySelectorAll('.pr-bad').length >= 2);
+  const row = (id) => a.locator(`.pr-entry[data-id="${id}"]`);
+  assert.match(await row(ids[0]).innerText(), /破損/);
+  assert.match(await row(ids[1]).innerText(), /非対応/);
+  await row(ids[0]).click();
+  await a.waitForSelector('.pr-list-screen .pr-error[role="alert"]');
+  assert.match(await a.locator('.pr-error[role="alert"]').innerText(), /壊れている/);
+  await row(ids[1]).click();
+  await a.waitForFunction(() => /別の版/.test((document.querySelector('.pr-error[role="alert"]') || {}).innerText || ''));
+  assert.equal(await a.locator('.pr-viewer').count(), 0, '再生画面へ進まない');
+  // 二度開き：続けて2回押しても1回だけ開く。読込中に「タイトルへ」→ 後から再生画面を描かない
+  const opened = await a.evaluate((id) => { const ui = window.__mathjong.reviewUI; ui.handle('pr-pick', { id }); ui.handle('pr-pick', { id }); return ui.debug(); }, ids[3]);
+  await a.waitForSelector('.pr-viewer .pr-count');
+  assert.equal(opened.view, 'list', '2回目は読込中なので受け付けない');
+  assert.equal(await a.evaluate(() => window.__mathjong.reviewUI.debug().ri), 0);
+  await a.locator('button[data-action="pr-list"]').click();
+  await a.waitForSelector('.pr-list-screen');
+  await a.evaluate((id) => { document.querySelector(`.pr-entry[data-id="${id}"]`).click(); document.querySelector('button[data-action="pr-exit"]').click(); }, ids[3]); // 読込の完了より前に戻る
+  await a.waitForSelector('.title-screen');
+  await a.waitForTimeout(300);
+  assert.equal(await a.evaluate(() => window.__mathjong.S.screen), 'title', '読込中に戻った後に再生画面を描かない');
+  // 別のタブで全件削除 → 一覧から開くと「削除されています」、一覧は0件。振り返りは保存しないので復活しない
+  await prOpenList(a);
+  await a.waitForFunction(() => window.__mathjong.reviewUI.debug().loading === false);
+  await b.evaluate(() => window.__mathjong.paifuSys.clearAll());
+  await row(ids[3]).click();
+  await a.waitForFunction(() => /削除されています/.test((document.querySelector('.pr-error[role="alert"]') || {}).innerText || ''));
+  await a.waitForFunction(() => window.__mathjong.reviewUI.debug().entries === 0);
+  assert.match(await a.locator('.pr-list-screen').innerText(), /保存された牌譜はありません/);
+  assert.equal(await b.evaluate(async () => (await window.__mathjong.paifuSys.store.list()).entries.length), 0, '削除した牌譜は戻らない');
+  assert.deepEqual([...ea, ...eb], []);
+  await ctx.close();
+  // 振り返りの画面の読込失敗：タイトルに文で示し、通常対局はできる
+  {
+    const ctx2 = await newContext(browser, { viewport: { width: 390, height: 844 } });
+    const p = await ctx2.newPage();
+    await p.route('**/src/ui/paifu-review-ui.js', (r) => r.abort());
+    await p.goto(LOCAL + '?speed=test');
+    await p.waitForSelector('.title-screen');
+    await pfReady(p);
+    await prSeed(p, [{ mode: 'math1', length: 1, seedBase: 7301 }]);
+    await p.reload(); await p.waitForSelector('.title-screen'); await pfReady(p);
+    await p.waitForSelector('button[data-action="pr-open"]');
+    await p.evaluate(() => window.__mathjong.paifuSys.ready);
+    await p.locator('button[data-action="pr-open"]').click();
+    await p.waitForSelector('.pr-title-error');
+    assert.equal(await p.evaluate(() => window.__mathjong.S.screen), 'title');
+    await pfStart(p, { mode: 'math1', length: 1 });
+    await pfPlayOut(p);
+    assert.equal((await pfSnapshot(p)).list.count, 2);
+    await ctx2.close();
+  }
+  // IndexedDB が使えない端末：振り返るのボタンは出さず、対局はできる
+  {
+    const ctx3 = await newContext(browser, { viewport: { width: 320, height: 640 } });
+    await ctx3.addInitScript(() => { Object.defineProperty(window, 'indexedDB', { get() { throw new DOMException('denied', 'SecurityError'); } }); });
+    const p = await ctx3.newPage();
+    await p.goto(LOCAL + '?speed=test');
+    await p.waitForSelector('.title-screen');
+    await p.waitForFunction(() => /保存を確認できません|機能を読み込めません/.test(document.querySelector('.title-paifu').innerText));
+    assert.equal(await p.locator('button[data-action="pr-open"]').count(), 0);
+    await ctx3.close();
+  }
+  console.log('✓ 牌譜の振り返り（docs/77）：破損・非対応（版違い）は理由を示して再生しない、読めない行は件数だけ、二度開きは1回、読込中に戻ると後から描かない、別のタブで削除された牌譜は「削除されています」で一覧0件・復活しない、画面の読込失敗でも通常対局と保存が動く、IndexedDB が使えない端末ではボタンを出さない');
+}
+
 async function v15PaifuSnapshot(browser) {
   // PR #69 第2回監査 P2-B：保存の途中で呼び出し元が元のオブジェクトを書き換えても、保存されるのは save を呼んだ時点の内容で、
   // 読込・再検証は必ず成功する。Worker の経路と、Worker なしの分割検証の経路。時点：呼んだ直後・検証の途中・検証の後（書込みの前）
@@ -9362,7 +9667,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage, v15PaifuEpoch, v15PaifuLoadFailure, v15PaifuEpochNoBC, v15PaifuEpochFallback, v15PaifuSnapshot };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage, v15PaifuEpoch, v15PaifuLoadFailure, v15PaifuEpochNoBC, v15PaifuEpochFallback, v15PaifuSnapshot, v16PaifuReview, v16PaifuReviewErrors };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -9443,6 +9748,8 @@ try {
   await v15PaifuEpochNoBC(browser);
   await v15PaifuEpochFallback(browser);
   await v15PaifuSnapshot(browser);
+  await v16PaifuReview(browser);
+  await v16PaifuReviewErrors(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。

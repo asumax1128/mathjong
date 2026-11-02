@@ -68,8 +68,9 @@ function summary(p, common) {
   return { storageVersion:PAIFU_STORAGE_VERSION, ...common, schemaVersion:p.schemaVersion,
     visibility:'private-full', mode:p.settings.mode, length:p.settings.length, status:p.status, rounds:p.rounds.length };
 }
-function decodeRow(row, meta, id) {
-  let p; try { p = decodePaifu(row.json); } catch (e) { throw schemaError(e); }
+// decode：本文（JSON）→ 検証済みの記録（既定は decodePaifu：主スレッドで同期に検証）。振り返りの読込では Worker で同じ検証をする版を渡せる
+async function decodeRow(row, meta, id, decode) {
+  let p; try { p = await decode(row.json); } catch (e) { throw schemaError(e); }
   check(p.id === id, 'corrupt');
   const expected = summary(p, { id, token:meta.token, revision:meta.revision, bytes:meta.bytes, digest:meta.digest, savedAt:meta.savedAt });
   check(JSON.stringify(Object.entries(expected).sort()) === JSON.stringify(Object.entries(meta).sort()), 'corrupt');
@@ -81,11 +82,12 @@ function decodeRow(row, meta, id) {
 // hooks：テスト用（afterEncode・afterDigest：保存の途中の各時点で待てる）
 export function createPaifuStore({ getIndexedDB = () => globalThis.indexedDB,
   maxRecords = PAIFU_STORAGE_DEFAULTS.maxRecords, maxBytes = PAIFU_STORAGE_DEFAULTS.maxBytes,
-  timeoutMs = PAIFU_STORAGE_DEFAULTS.timeoutMs, encode = (snapshot) => encodePaifuSnapshotAsync(snapshot), hooks = {} } = {}) {
+  timeoutMs = PAIFU_STORAGE_DEFAULTS.timeoutMs, encode = (snapshot) => encodePaifuSnapshotAsync(snapshot), hooks = {},
+  decode = (json) => decodePaifu(json) } = {}) {
   // Invalid configuration also becomes a result on use, rather than an import/startup failure.
   const configOK = uint(maxRecords,1) && maxRecords <= 10000 && uint(maxBytes,1)
     && maxBytes <= 256 * 1024 * 1024 && uint(timeoutMs,1) && timeoutMs <= 60000 && typeof getIndexedDB === 'function'
-    && typeof encode === 'function' && hooks && typeof hooks === 'object';
+    && typeof encode === 'function' && typeof decode === 'function' && hooks && typeof hooks === 'object';
   const hook = async (name, ...args) => { if (typeof hooks[name] === 'function') await hooks[name](...args); };
   const safe = async fn => {
     try { check(configOK, 'invalid-argument'); return { ok:true, ...await fn() }; }
@@ -241,7 +243,7 @@ export function createPaifuStore({ getIndexedDB = () => globalThis.indexedDB,
     check(row !== undefined || meta !== undefined, 'not-found');
     pairCheck(row, meta, id);
     check(await digest(row.json) === row.digest, 'corrupt');
-    const record = decodeRow(row, meta, id); // Outside the IDB transaction.
+    const record = await decodeRow(row, meta, id, decode); // Outside the IDB transaction.
     return { record, metadata:Object.freeze(meta) };
   }
 

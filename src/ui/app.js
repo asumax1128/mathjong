@@ -161,6 +161,34 @@ S.beginnerRoom = createRoomState(); // 通常の対戦相手選択・対局と�
 // 読込前・失敗時は、同じ呼び出し口を持つ「何もしない」窓口（paifuPlaceholder）を使う。
 S.paifuLoad = 'loading'; // 'loading' | 'ready' | 'failed'
 let paifuSys = null;
+// 牌譜の振り返り（第2段階・docs/77）：タイトルの「振り返る」で src/ui/paifu-review-ui.js を動的 import する。
+// 記録の本文・再生の状態はそのモジュールの中だけに持ち、S（ゲームの状態）には入れない。読込の失敗はタイトルに文で示す
+let reviewUI = null;
+function openReview() {
+  if (!paifuSys || S.screen !== 'title' || S.reviewOpening) return;
+  S.reviewError = null; S.reviewOpening = true;
+  import('./paifu-review-ui.js').then((m) => {
+    S.reviewOpening = false;
+    if (S.screen !== 'title' || !paifuSys) return;
+    reviewUI = m.createReviewUI({ sys: paifuSys, onChange: () => { if (S.screen === 'paifu-review') render(); } });
+    S.screen = 'paifu-review';
+    reviewUI.open();
+    render();
+    window.scrollTo(0, 0);
+  }).catch(() => {
+    S.reviewOpening = false;
+    S.reviewError = '振り返りの画面を読み込めませんでした。対局はできます。';
+    if (S.screen === 'title') render();
+  });
+}
+function exitReview() {
+  if (reviewUI) reviewUI.close();
+  reviewUI = null;
+  S.screen = 'title';
+  refreshPaifuInfo();
+  render();
+  window.scrollTo(0, 0);
+}
 function paifuPlaceholder() {
   let st = { state: 'off', reason: null };
   const off = (reason) => { st = { state: 'off', reason }; };
@@ -1043,6 +1071,7 @@ function render() {
   if (S.screen === 'select') { app.innerHTML = selectHTML(); return; }
   if (S.screen === 'beginner-room') { app.innerHTML = roomHTML(S.beginnerRoom, rulesForMode('math1')); return; }
   if (S.screen === 'replay-error') { app.innerHTML = replayErrorHTML(); return; }
+  if (S.screen === 'paifu-review') { app.innerHTML = reviewUI ? reviewUI.html() : '<main class="pr-screen"><p class="pr-note">読み込み中…</p></main>'; return; }
   if (!S.game) return;
   // 並び替え中に再描画が必要になったら、並び替えを中止してから描画する（DOM が作り直されるため）
   if (drag && drag.isDragging()) drag.cancel('render');
@@ -1306,8 +1335,11 @@ function titleHTML() {
     <p class="note title-ver">持ち点 各${START_POINTS}点 ／ 画面 v${APP_VERSION}・エンジン v${ENGINE_VERSION}</p>
   </main>`;
 }
-// タイトル画面の牌譜の件数と削除（2段階）。振り返り・戦績の画面は第2・第3段階（別PR）
+// タイトル画面の牌譜の件数と削除（2段階）・振り返り（第2段階）。戦績の画面は第3段階（別PR）
 function paifuTitleHTML() {
+  return paifuInfoHTML() + (S.reviewError ? `<p class="note title-paifu pr-title-error" role="alert">${S.reviewError}</p>` : '');
+}
+function paifuInfoHTML() {
   const i = S.paifuInfo;
   if (!i) return '<p class="note title-paifu" aria-live="polite">牌譜：確認中…</p>';
   if (!i.ok && i.code === 'module') return '<p class="note title-paifu">牌譜：機能を読み込めませんでした（記録・保存はしません）。対局はできます。</p>';
@@ -1315,7 +1347,8 @@ function paifuTitleHTML() {
   const del = !i.count ? '' : S.paifuConfirm
     ? '<span class="paifu-confirm">全部削除しますか？<button data-action="paifu-clear-yes" class="small danger">削除する</button><button data-action="paifu-clear-no" class="small">やめる</button></span>'
     : '<button data-action="paifu-clear" class="small">削除</button>';
-  return `<p class="note title-paifu">牌譜：この端末に${i.count}件（通常対局を自動で記録・このブラウザ内だけに保存し、送信しません）${i.unreadable ? `・読めない記録${i.unreadable}件` : ''} ${del}</p>`;
+  const review = paifuSys && (i.count || i.unreadable) ? `<button data-action="pr-open" class="small pr-open"${S.reviewOpening ? ' disabled' : ''}>振り返る</button>` : '';
+  return `<p class="note title-paifu">牌譜：この端末に${i.count}件（通常対局を自動で記録・このブラウザ内だけに保存し、送信しません）${i.unreadable ? `・読めない記録${i.unreadable}件` : ''} ${review}${del}</p>`;
 }
 
 // ---------- 対戦相手の選択（Ver.0.6） ----------
@@ -1663,7 +1696,11 @@ app.addEventListener('click', (ev) => {
   if (!el) return;
   const act = el.dataset.action;
   const g = S.game;
+  // 振り返りの画面の操作（前後の移動・局の選択・一覧）。ゲームの状態は変えない
+  if (S.screen === 'paifu-review' && reviewUI && act.startsWith('pr-') && act !== 'pr-exit') { reviewUI.handle(act, el.dataset); return; }
   switch (act) {
+    case 'pr-open': openReview(); render(); break;
+    case 'pr-exit': exitReview(); break;
     case 'tile': {
       const id = Number(el.dataset.id);
       if (!humanDiscardFilter()(id)) break; // リーチ中・宣言牌の選択中に選べない牌（描画上もタップ不可）
@@ -2035,7 +2072,7 @@ function goRound(n, dealer = (n - 1) % 4) {
   S.round = n;
   startRound();
 }
-if (IS_LOCAL) window.__mathjong = { S, get rules() { return rules; }, decide, startRound, startMatch, goRound, render, step, drag, fx: { fire: fxFire, clear: fxClear, scan: fxScan, tick: fxTick }, sound, soundScan, voice, get paifu() { return paifu; }, get paifuSys() { return paifuSys; }, paifuLoading };
+if (IS_LOCAL) window.__mathjong = { get reviewUI() { return reviewUI; }, S, get rules() { return rules; }, decide, startRound, startMatch, goRound, render, step, drag, fx: { fire: fxFire, clear: fxClear, scan: fxScan, tick: fxTick }, sound, soundScan, voice, get paifu() { return paifu; }, get paifuSys() { return paifuSys; }, paifuLoading };
 
 // 対局を終了して別の画面へ（AI の進行・ドラッグ・ヒント・演出・音を止める）
 function leaveGame(screen) {
@@ -2108,3 +2145,5 @@ function startMatch({ fromUrl = false, settings = null } = {}) {
 // 再現 URL：その URL のルールの版で再生する（newrules なし＝従来ルール、1＝新ルール初版、2＝現行）
 if (REPLAY.kind !== 'none' && REPLAY.ok) startMatch({ fromUrl: true, settings: RV.chars ? { mode: S.nextMode, length: S.length, chars: RV.chars, seats: RV.chars, ruleset: RV.ruleset } : { mode: S.nextMode, length: S.length, ai: S.ai, ruleset: RV.ruleset } });
 else { if (S.screen === 'title') refreshPaifuInfo(); render(); } // タイトル画面、または再現 URL のエラー画面
+// 振り返りの画面：左右の矢印キーで前後の判断へ（入力欄がないので他の操作と衝突しない）
+document.addEventListener('keydown', (ev) => { if (S.screen === 'paifu-review' && reviewUI && !ev.altKey && !ev.ctrlKey && !ev.metaKey && reviewUI.key(ev.key)) ev.preventDefault(); });
