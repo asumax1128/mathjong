@@ -7411,6 +7411,7 @@ async function v09RulesUnified(browser) {
   for (const [extra, ruleset, note] of [['', 0, '従来ルールの再現'], ['&newrules=1', 1, '新ルール初版の再現'], ['&newrules=2', 2, null]]) {
     await page.goto(`${LOCAL}?${q}${extra}`);
     await page.locator('.hand .tile').first().waitFor();
+    await page.evaluate(() => window.__mathjong.paifuLoading); // 牌譜の機能の動的 import が終わってから次へ移る（読込中の移動で要求が中断されエラーとして数えられないように）
     assert.equal(await page.evaluate(() => window.__mathjong.S.game.ruleset), ruleset, `newrules${extra}`);
     assert.equal(await page.locator('.dora-box').count(), ruleset ? 1 : 0);
     if (note) assert.equal(await page.locator('.bc-rule').innerText(), note); else assert.equal(await page.locator('.bc-rule').count(), 0);
@@ -7424,6 +7425,7 @@ async function v09RulesUnified(browser) {
   for (const extra of ['', '', '&newrules=2', '&newrules=2']) {
     await page.goto(`${LOCAL}?${q}${extra}`);
     await page.locator('.hand .tile').first().waitFor();
+    await page.evaluate(() => window.__mathjong.paifuLoading);
     walls.push(await page.evaluate(() => JSON.stringify([window.__mathjong.S.game.hands, window.__mathjong.S.game.wall])));
   }
   assert.equal(walls[0], walls[1]); assert.equal(walls[2], walls[3]); assert.notEqual(walls[0], walls[2]);
@@ -9559,7 +9561,7 @@ async function v16PaifuReviewErrors(browser) {
   assert.equal(opened.view, 'list', '2回目は読込中なので受け付けない');
   assert.equal(await a.evaluate(() => window.__mathjong.reviewUI.debug().ri), 0);
   await a.locator('button[data-action="pr-list"]').click();
-  await a.waitForSelector('.pr-list-screen');
+  await a.waitForSelector(`.pr-entry[data-id="${ids[3]}"]`); // 一覧の読込が終わってから
   await a.evaluate((id) => { document.querySelector(`.pr-entry[data-id="${id}"]`).click(); document.querySelector('button[data-action="pr-exit"]').click(); }, ids[3]); // 読込の完了より前に戻る
   await a.waitForSelector('.title-screen');
   await a.waitForTimeout(300);
