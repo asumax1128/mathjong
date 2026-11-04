@@ -25,6 +25,8 @@ const LOAD_ERROR = {
   timeout: '読み込みに時間がかかりすぎました。もう一度お試しください。',
   conflict: '読み込みの間にこの牌譜が更新されました（別のタブなど）。もう一度開いてください。',
   gone: 'この牌譜は削除されました（別のタブなど）。一覧へ戻ります。',
+  updated: 'この牌譜は別のタブで更新されました。古い内容は表示しません。一覧から開き直してください。',
+  recreated: 'この牌譜は削除され、同じ番号で別の牌譜が保存されました。古い内容は表示しません。一覧から開き直してください。',
 };
 const loadError = (code) => LOAD_ERROR[code] || '読み込めませんでした。もう一度お試しください。';
 const fmtDate = (t) => {
@@ -34,10 +36,20 @@ const fmtDate = (t) => {
   return `${d.getFullYear()}/${z(d.getMonth() + 1)}/${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}`;
 };
 
+// 一覧の詳細の読込の排他（モジュールで1つ）：画面の作り直し（タイトルへ戻って再び開く）をまたいでも、
+// 詳細の loadPrivate は同時に1件だけ。古い画面の処理は、閉じた後は次の読込を始めない（下の closed）
+let detailTail = Promise.resolve();
+function detailLock(fn) {
+  const run = detailTail.then(fn, fn);
+  detailTail = run.then(() => {}, () => {}); // 失敗しても列は止めない
+  return run;
+}
+
 // sys：createPaifuSystem() の戻り値（store だけ使う）。onChange：再描画の依頼
 export function createReviewUI({ sys, onChange = () => {} }) {
   let gen = 0; // 画面の世代（古い非同期の結果を捨てる）
-  const changed = () => { try { onChange(); } catch { /* 無視 */ } };
+  let closed = false; // close() の後：この画面の処理は何も始めず、結果も反映しない
+  const changed = () => { if (closed) return; try { onChange(); } catch { /* 無視 */ } };
   const st = {
     view: 'list',
     list: { loading: true, error: null, entries: [], unreadable: 0, shown: PAGE, details: new Map(), notice: null },
@@ -47,13 +59,14 @@ export function createReviewUI({ sys, onChange = () => {} }) {
 
   // ---- 一覧 ----
   async function loadList() {
+    if (closed) return;
     const my = ++gen;
     st.view = 'list'; st.viewer = null; st.opening = null;
     st.list = { ...st.list, loading: true, error: null };
     changed();
     let r;
     try { r = await sys.store.list(); } catch { r = { ok: false, error: { code: 'storage-error' } }; }
-    if (my !== gen) return;
+    if (my !== gen || closed) return;
     if (!r.ok) { st.list = { ...st.list, loading: false, error: r.error.code, entries: [] }; changed(); return; }
     const ids = new Set(r.entries.map((e) => `${e.id}:${e.token}`));
     for (const k of [...st.list.details.keys()]) if (!ids.has(k)) st.list.details.delete(k); // 削除・更新された行の要約を捨てる
@@ -65,36 +78,49 @@ export function createReviewUI({ sys, onChange = () => {} }) {
   // 毎回いまの一覧から「表示中で要約のない行」を選ぶので、一覧の読み直し・画面の移動・「さらに表示」の連打でも
   // 並行して読まず、古い要求が新しい一覧の要約を消すこともない（要約は「ID:トークン」ごとで、要求の番号で照合する）
   let pumping = false, reqSeq = 0;
+  const wanted = () => !closed && st.view === 'list' && !st.list.loading && !st.list.error;
+  const nextEntry = () => st.list.entries.slice(0, st.list.shown).find((x) => !st.list.details.has(x.key));
   async function pumpDetails() {
-    if (pumping) return;
+    if (pumping || closed) return;
     pumping = true;
     try {
       for (;;) {
-        if (st.view !== 'list' || st.list.loading || st.list.error) return;
-        const e = st.list.entries.slice(0, st.list.shown).find((x) => !st.list.details.has(x.key));
+        if (!wanted()) return;
+        const e = nextEntry();
         if (!e) return;
         const req = ++reqSeq;
         st.list.details.set(e.key, { loading: true, req });
         changed();
         let r;
-        try { r = await sys.store.loadPrivate(e.id); } catch { r = { ok: false, error: { code: 'storage-error' } }; }
+        try {
+          // 排他の中で、読む直前にもう一度確かめる（閉じた・一覧が読み直されて要らなくなった行は読まない）
+          r = await detailLock(() => {
+            const cur = st.list.details.get(e.key);
+            if (closed || !cur || cur.req !== req) return null;
+            return sys.store.loadPrivate(e.id);
+          });
+        } catch { r = { ok: false, error: { code: 'storage-error' } }; }
+        if (closed) return; // 閉じた画面には反映しない（新しい画面は別のインスタンスで読み直す）
         const cur = st.list.details.get(e.key);
-        if (!cur || cur.req !== req) continue; // 一覧の読み直しで捨てられた行
-        if (r.ok && `${r.metadata.id}:${r.metadata.token}` !== e.key) { st.list.details.set(e.key, { ok: false, code: 'changed' }); loadList(); return; } // 読む間に更新された
-        st.list.details.set(e.key, r.ok ? { ok: true, summary: publicSummary(r.record) } : { ok: false, code: r.error.code });
+        if (!cur || cur.req !== req) continue; // 一覧の読み直しで捨てられた行（新しい要求の loading は消さない）
+        if (r === null) { st.list.details.delete(e.key); continue; }
+        try {
+          if (r.ok && `${r.metadata.id}:${r.metadata.token}` !== e.key) { st.list.details.set(e.key, { ok: false, code: 'changed' }); loadList(); return; } // 読む間に更新された
+          st.list.details.set(e.key, r.ok ? { ok: true, summary: publicSummary(r.record) } : { ok: false, code: r.error.code });
+        } catch { st.list.details.set(e.key, { ok: false, code: 'corrupt' }); }
         changed();
         if (!r.ok && (r.error.code === 'not-found' || r.error.code === 'conflict')) { loadList(); return; } // 読む間に削除・更新された
       }
     } finally {
       pumping = false;
       // 処理中に一覧が読み直された・行が増えたときは、続きを読む（同時に動くのは常に1本）
-      queueMicrotask(() => { if (st.view === 'list' && !st.list.loading && st.list.entries.slice(0, st.list.shown).some((x) => !st.list.details.has(x.key))) pumpDetails(); });
+      queueMicrotask(() => { if (wanted() && nextEntry()) pumpDetails(); });
     }
   }
 
   // ---- 再生 ----
   async function open(id) {
-    if (st.opening) return; // 二度開き：読込中は受け付けない
+    if (st.opening || closed) return; // 二度開き：読込中は受け付けない
     const e = st.list.entries.find((x) => x.id === id);
     if (!e) return;
     const my = ++gen;
@@ -102,7 +128,7 @@ export function createReviewUI({ sys, onChange = () => {} }) {
     changed();
     let r;
     try { r = await sys.store.loadPrivate(id); } catch { r = { ok: false, error: { code: 'storage-error' } }; }
-    if (my !== gen) return;
+    if (my !== gen || closed) return;
     st.opening = null;
     if (!r.ok) {
       st.list.notice = { id, text: loadError(r.error.code) };
@@ -115,7 +141,9 @@ export function createReviewUI({ sys, onChange = () => {} }) {
     try { session = createReviewSession(r.record); } catch { st.list.notice = { id, text: loadError('corrupt') }; changed(); return; }
     if (!session.info.roundList.length) { st.list.notice = { id, text: 'この牌譜には再生できる局がありません（局が始まる前に終了）。' }; changed(); return; }
     st.view = 'viewer';
-    st.viewer = { session, rules: paifuRules(session.info.mode), ri: 0, frames: null, k: 0, loading: true, error: null, id, token: r.metadata.token };
+    // 開いたときの同一性（ID・トークン・版・削除の世代）。局を開くたびに DB の現在の値と比べる
+    st.viewer = { session, rules: paifuRules(session.info.mode), ri: 0, frames: null, k: 0, loading: true, error: null,
+      id, token: r.metadata.token, revision: r.metadata.revision, epoch: r.epoch };
     changed();
     await gotoRound(0, 0, my);
   }
@@ -128,20 +156,24 @@ export function createReviewUI({ sys, onChange = () => {} }) {
     let frames = null;
     try { frames = await v.session.framesAsync(ri, { isCancelled: () => my !== gen || st.viewer !== v }); } catch { frames = null; v.error = '再生できませんでした（記録と再生が一致しません）。'; }
     if (my !== gen || st.viewer !== v) return;
-    // 局を開くたびに、この牌譜がまだ保存されているかを DB で確かめる（BroadcastChannel に依存しない）。削除されていたら一覧へ
-    if (!(await stillSaved(v))) { if (my === gen && st.viewer === v) { st.list.notice = { id: v.id, text: loadError('gone') }; loadList(); } return; }
-    if (my !== gen || st.viewer !== v) return;
+    // 局を開くたびに、開いたときと同じ牌譜がまだ保存されているかを DB で確かめる（BroadcastChannel に依存しない）。
+    // 削除・更新・全件削除の後の同じ ID の作り直しのどれでも、古い記録の局面は表示せず一覧へ戻る
+    const same = await sameRecord(v);
+    if (my !== gen || st.viewer !== v || closed) return;
+    if (same !== 'same' && same !== 'unknown') { st.list.notice = { id: v.id, text: loadError(same) }; loadList(); return; }
     v.loading = false;
     if (frames) { v.frames = frames; v.k = at === 'last' ? frames.length - 1 : Math.max(0, Math.min(at, frames.length - 1)); }
     changed();
   }
-  // 表示中の牌譜が DB にまだあるか（ID とトークン）。読めないとき（DB の一時的な失敗）は表示を続ける
-  async function stillSaved(v) {
-    if (typeof sys.store.stat !== 'function') return true;
+  // 表示中の牌譜が、開いたときと同じ保存のままか。'same'／'gone'（削除）／'updated'（同じ ID の更新）／
+  // 'recreated'（全件削除の後に同じ ID で新しく保存）／'unknown'（DB の一時的な失敗：表示中の局は続ける）
+  async function sameRecord(v) {
+    if (typeof sys.store.stat !== 'function') return 'unknown';
     let r;
-    try { r = await sys.store.stat(v.id); } catch { return true; }
-    // 削除されていたら false。更新（記録途中の続きの保存）は、表示中の検証済みの部分を変えないので表示を続ける
-    return r.ok || r.error.code !== 'not-found';
+    try { r = await sys.store.stat(v.id); } catch { return 'unknown'; }
+    if (!r.ok) return r.error.code === 'not-found' ? 'gone' : 'unknown';
+    if (r.metadata.token === v.token) return 'same'; // トークンは保存ごとに新しい乱数（同じなら同じ保存）
+    return Number.isSafeInteger(v.epoch) && r.epoch !== v.epoch ? 'recreated' : 'updated';
   }
   function move(d) {
     const v = st.viewer;
@@ -313,8 +345,10 @@ export function createReviewUI({ sys, onChange = () => {} }) {
   return Object.freeze({
     open: () => loadList(),
     html: () => (st.view === 'viewer' && st.viewer ? viewerHTML() : listHTML()),
+    closed: () => closed,
     // 操作：処理したら true。'exit' はタイトルへ戻る合図（app.js が画面を切り替える）
     handle(act, data = {}) {
+      if (closed) return false;
       switch (act) {
         case 'pr-pick': open(String(data.id || '')); return true;
         case 'pr-more': st.list.shown += PAGE; changed(); pumpDetails(); return true;
@@ -329,7 +363,7 @@ export function createReviewUI({ sys, onChange = () => {} }) {
     },
     key(k) { if (st.view !== 'viewer') return false; if (k === 'ArrowLeft') { move(-1); return true; } if (k === 'ArrowRight') { move(1); return true; } return false; },
     // 画面を離れる：進行中の読込の結果を捨て、記録への参照を手放す
-    close() { gen++; st.viewer = null; st.opening = null; st.view = 'list'; },
+    close() { closed = true; gen++; st.viewer = null; st.opening = null; st.view = 'closed'; },
     // テスト用（ローカルの検証だけ）：表示中の状態の公開してよい要約
     debug: () => ({ view: st.view, ri: st.viewer ? st.viewer.ri : null, k: st.viewer ? st.viewer.k : null, frames: st.viewer && st.viewer.frames ? st.viewer.frames.length : null,
       loading: st.viewer ? st.viewer.loading : st.list.loading, entries: st.list.entries.length, details: [...st.list.details.values()].filter((d) => d.ok).length }),

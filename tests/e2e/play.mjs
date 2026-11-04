@@ -9741,6 +9741,93 @@ async function v16PaifuReviewAudit(browser) {
   console.log(`✓ PR #71 監査の固定反例：読込の途中（本文の後・検証の後）に別のタブで全件削除 → 削除済みを再生しない（Worker・分割・BroadcastChannel なし）・再生中の削除は局の切替で一覧へ、中断の局の最後は自分の打牌・手牌8枚・河の 60°（他家の判断待ちを出さない）、精算の後の持ち点 95/134/100/71・供託0、数学Ⅰにツモ残なし・数学Ⅱは4席、操作 44px 以上で重ならない（320〜430px）、一覧の詳細は1本の列（同時1件）で離脱・連打の後も全${rows.length}行が出る（画面で ${seqMs}ms、直列 ${seq}ms・並行 ${par}ms）`);
 }
 
+// ---- PR #71 Codex 限定再監査（HEAD 9783bf6）の固定反例 ----
+async function v16PaifuReviewAudit2(browser) {
+  const { playRecorded } = await import('../paifu-harness.mjs');
+  const { encodePaifu } = await import('../../src/engine/paifu.js');
+  // P2：タブ A で数学Ⅰ・4局戦を開いている間に、タブ B が同じ ID に数学Ⅱの有効な牌譜を保存（CAS の更新／全件削除の後の作り直し）
+  // → A で別の局を選んでも、古い数学Ⅰの局面を出さない（BroadcastChannel あり・なし）
+  for (const bc of [true, false]) for (const how of ['cas', 'recreate']) {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 } });
+    if (!bc) await ctx.addInitScript(() => { try { delete window.BroadcastChannel; } catch { /* 無視 */ } window.BroadcastChannel = undefined; });
+    const a = await ctx.newPage(), b = await ctx.newPage(), ea = watchErrors(a), eb = watchErrors(b);
+    for (const pg of [a, b]) { await pg.goto(LOCAL + '?speed=test'); await pg.waitForSelector('.title-screen'); await pfReady(pg); }
+    await b.evaluate(() => window.__mathjong.paifuSys.clearAll());
+    const id = `same-${how}-${bc ? 'bc' : 'nobc'}`;
+    await prSeed(a, [{ mode: 'math1', length: 4, seedBase: 7601, id }]);
+    const json2 = encodePaifu(playRecorded({ mode: 'math2', length: 1, seedBase: 7602, id }).record);
+    await a.reload(); await a.waitForSelector('.title-screen'); await pfReady(a);
+    await prOpenList(a);
+    await a.locator(`.pr-entry[data-id="${id}"]`).click();
+    await a.waitForSelector('.pr-viewer .pr-count');
+    assert.match(await a.locator('.pr-viewer h1').innerText(), /数学Ⅰ・4局戦/);
+    // B：同じ ID に数学Ⅱを保存
+    const saved = await b.evaluate(async ([id, json, how]) => {
+      const m = window.__mathjong, st = m.paifuSys.store;
+      const pf = await import(new URL('src/engine/paifu.js', location.href));
+      if (how === 'recreate') await m.paifuSys.clearAll();
+      const cur = await st.stat(id);
+      const epoch = (await st.epoch()).epoch;
+      const r = await st.save(pf.decodePaifu(json), { epoch, expectedToken: cur.ok ? cur.metadata.token : null });
+      return { ok: r.ok, code: r.ok ? null : r.error.code, updated: cur.ok };
+    }, [id, json2, how]);
+    assert.deepEqual([saved.ok, saved.updated], [true, how === 'cas'], `${how}：B の保存（CAS の更新／作り直し）`);
+    // A：別の局を選ぶ → 古い数学Ⅰの局面を出さず一覧へ（理由を区別して案内）
+    await a.locator('.pr-round[data-round="1"]').click();
+    await a.waitForSelector('.pr-list-screen');
+    const notice = await a.locator('.pr-error[role="alert"]').innerText();
+    assert.match(notice, how === 'cas' ? /別のタブで更新されました/ : /同じ番号で別の牌譜/, `${bc ? 'BC あり' : 'BC なし'}・${how}`);
+    assert.equal(await a.locator('.pr-viewer').count(), 0, '古い局面を出さない');
+    // 開き直すと新しい内容（数学Ⅱ・1局戦）
+    await a.locator(`.pr-entry[data-id="${id}"]`).click();
+    await a.waitForSelector('.pr-viewer .pr-count');
+    assert.match(await a.locator('.pr-viewer h1').innerText(), /数学Ⅱ・1局戦/);
+    assert.deepEqual([...ea, ...eb], []);
+    await ctx.close();
+  }
+  // P3：10件を保存 → 一覧の最初の詳細の読込を止める → タイトルへ → 一覧を再び開く → 古い読込を再開
+  // → 古い画面は残り9件を読まない・新しい一覧は全部出る・同時の読込は最大1件・重複は古い1件だけ
+  const ctx = await newContext(browser, { viewport: { width: 375, height: 667 } });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  await page.goto(LOCAL + '?speed=test');
+  await page.waitForSelector('.title-screen');
+  await pfReady(page);
+  await page.evaluate(() => window.__mathjong.paifuSys.clearAll());
+  const ids = await prSeed(page, Array.from({ length: 10 }, (_, i) => ({ mode: i % 2 ? 'math2' : 'math1', length: 1, seedBase: 7700 + i, id: `q-${i}` })));
+  await page.reload(); await page.waitForSelector('.title-screen'); await pfReady(page);
+  await page.evaluate(() => {
+    window.__load = { active: 0, max: 0, reads: [] };
+    window.__held = new Promise((r) => { window.__release = r; });
+    let first = true;
+    window.__mathjongHold = {
+      afterRead: async (id) => { const L = window.__load; L.active++; L.max = Math.max(L.max, L.active); L.reads.push(id); if (first) { first = false; await window.__held; } },
+      afterDecode: () => { window.__load.active--; },
+    };
+  });
+  await prOpenList(page);
+  await page.waitForFunction(() => window.__load.reads.length === 1); // 最初の詳細の読込が止まっている
+  await page.locator('button[data-action="pr-exit"]').click(); await page.waitForSelector('.title-screen');
+  await prOpenList(page); // 新しい画面（別のインスタンス）
+  await page.waitForTimeout(200);
+  assert.equal(await page.evaluate(() => window.__load.reads.length), 1, '古い読込が終わるまで、新しい画面の読込は始まらない（排他）');
+  await page.evaluate(() => window.__release());
+  await page.waitForFunction((n) => window.__mathjong.reviewUI.debug().details === n, ids.length, { timeout: 60000 });
+  const load = await page.evaluate(() => window.__load);
+  assert.equal(load.max, 1, `同時の読込は最大1件（${load.max}）`);
+  assert.equal(load.reads.length, ids.length + 1, `古い画面は残りを読まない（読込 ${load.reads.length} 回＝古い1件＋新しい${ids.length}件）`);
+  assert.equal(new Set(load.reads.slice(1)).size, ids.length, '新しい画面は各行を1回だけ読む');
+  const rows = await page.locator('.pr-entry').allInnerTexts();
+  for (const r of rows) { assert.match(r, /相手：/); assert.doesNotMatch(r, /確認中/); }
+  // 失敗しても列は止まらない：読込を1回失敗させる → 残りは読める
+  await page.evaluate(() => { let once = true; window.__mathjongHold = { afterRead: () => { if (once) { once = false; throw new Error('boom'); } } }; });
+  await page.locator('button[data-action="pr-exit"]').click(); await page.waitForSelector('.title-screen');
+  await prOpenList(page);
+  await page.waitForFunction((n) => { const d = window.__mathjong.reviewUI.debug(); return d.details === n - 1 && document.querySelectorAll('.pr-bad').length === 1; }, ids.length, { timeout: 60000 });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  console.log('✓ PR #71 限定再監査の固定反例：閲覧中に同じ ID が CAS で更新・全件削除の後に作り直されたら、別の局を選んでも古い局面を出さず理由を区別して一覧へ（BroadcastChannel あり・なし）・開き直すと新しい内容、一覧の詳細の古い読込を止めてタイトル→再入場→再開しても古い画面は続きを読まず、同時の読込は最大1件・新しい一覧は全10行、読込の失敗で列が止まらない');
+}
+
 async function v15PaifuSnapshot(browser) {
   // PR #69 第2回監査 P2-B：保存の途中で呼び出し元が元のオブジェクトを書き換えても、保存されるのは save を呼んだ時点の内容で、
   // 読込・再検証は必ず成功する。Worker の経路と、Worker なしの分割検証の経路。時点：呼んだ直後・検証の途中・検証の後（書込みの前）
@@ -9799,7 +9886,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage, v15PaifuEpoch, v15PaifuLoadFailure, v15PaifuEpochNoBC, v15PaifuEpochFallback, v15PaifuSnapshot, v16PaifuReview, v16PaifuReviewErrors, v16PaifuReviewAudit };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage, v15PaifuEpoch, v15PaifuLoadFailure, v15PaifuEpochNoBC, v15PaifuEpochFallback, v15PaifuSnapshot, v16PaifuReview, v16PaifuReviewErrors, v16PaifuReviewAudit, v16PaifuReviewAudit2 };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -9883,6 +9970,7 @@ try {
   await v16PaifuReview(browser);
   await v16PaifuReviewErrors(browser);
   await v16PaifuReviewAudit(browser);
+  await v16PaifuReviewAudit2(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。

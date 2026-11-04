@@ -254,7 +254,7 @@ export function createPaifuStore({ getIndexedDB = () => globalThis.indexedDB,
     });
     check(now.m !== undefined, 'not-found');
     check(now.epoch === epochAtRead && now.m.token === meta.token && now.m.revision === meta.revision && now.m.digest === meta.digest, 'conflict');
-    return { record, metadata:Object.freeze(meta) };
+    return { record, metadata:Object.freeze(meta), epoch:epochAtRead };
   }
 
   return Object.freeze({
@@ -315,10 +315,11 @@ export function createPaifuStore({ getIndexedDB = () => globalThis.indexedDB,
     // 索引の1行だけ（本文は読まない）：表示中の牌譜がまだ保存されているかの確認用。なければ not-found
     stat: id => safe(async () => {
       check(validId(id), 'invalid-argument');
-      const { m } = await transact('readonly', (tx, set, stop) => { requests(tx, [['index','get',id]], (m) => set({ m }), stop); });
+      // 索引の行と削除の世代を同じトランザクションで（開いたときの値と比べて、更新・全件削除の後の作り直しを区別する）
+      const { m, epoch } = await transact('readonly', (tx, set, stop) => { requests(tx, [['index','get',id],['meta','get',EPOCH_KEY]], (m, e) => set({ m, epoch:epochOf(e) }), stop); });
       check(m !== undefined, 'not-found');
       indexCheck(m);
-      return { metadata:Object.freeze(m) };
+      return { metadata:Object.freeze(m), epoch };
     }),
     verify: id => safe(async () => {
       const { metadata } = await readPrivate(id);
