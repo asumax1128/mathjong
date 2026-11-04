@@ -20,7 +20,7 @@ test('保存：作成しただけでは DB を開かない。専用の名前空�
   assert.notEqual(PAIFU_DB_NAME, 'mathjong-paifu');
   assert.equal(PAIFU_DB_VERSION, 2, '2：削除の世代の表（meta）');
   assert.deepEqual(PAIFU_STORAGE_DEFAULTS, { maxRecords: 100, maxBytes: 32 * 1024 * 1024, timeoutMs: 5000 });
-  assert.deepEqual(Object.keys(s).sort(), ['clearAll', 'close', 'epoch', 'epochNow', 'list', 'loadPrivate', 'remove', 'save', 'verify', 'warm']);
+  assert.deepEqual(Object.keys(s).sort(), ['clearAll', 'close', 'epoch', 'epochNow', 'list', 'loadPrivate', 'remove', 'save', 'stat', 'verify', 'warm']);
 });
 
 for (const mode of ['missing', 'getter-security', 'open-security']) {

@@ -9,7 +9,8 @@ import { playRecorded } from './paifu-harness.mjs';
 import { replayPaifuRound, decodePaifu, encodePaifu, verifyPaifu, newRoundGame } from '../src/engine/paifu.js';
 import { applyAction } from '../src/engine/ai.js';
 import { createReviewSession, publicSummary, entryFromIndex, humanSeatOf, projectForTest } from '../src/ui/paifu-review.js';
-import { potTotal } from '../src/engine/match.js';
+import { potTotal, applyRoundResult } from '../src/engine/match.js';
+import { MAX_ROUND } from '../src/ui/params.js';
 
 // 様々な局面を含む記録（数学Ⅰ・Ⅱ × 1/4/8局戦、途中退出）
 const CASES = [];
@@ -31,6 +32,8 @@ function visibleSteps(p, ri, me) {
     const q = g.pending();
     if ((!q || q.type === 'turn' || q.seat === me) && (mine || g.events.length > seen)) { out.push(i + 1); seen = g.events.length; mine = false; }
   });
+  // 未精算の局：最後の行動の後を終わりの時点にする（他家の判断待ちで終わっていても、すでに公開された出来事まで）
+  if (r.settlement === null && (mine || g.events.length > seen)) out.push(r.steps.length);
   return out;
 }
 const sortN = (a) => a.slice().sort((x, y) => x - y);
@@ -64,10 +67,20 @@ test('各時点の表示は、独立に再生した同じ時点の Game.viewFor(
         assert.deepEqual([f.wallCount, f.dealer, f.riichi], [v.wallCount, v.dealer, v.riichi]);
         if (mode === 'math2') assert.deepEqual(f.normalDraws, v.normalDraws);
         // 表示の値は、その時点の Game だけから作った値と同じ（後の情報を含まない）。結果は局の終わりだけ
-        const { result, index, mine, events, ...rest } = f;
-        const { result: r0, index: i0, mine: m0, events: e0, ...fresh } = proj;
+        const lastK = k === fs.length - 1, settled = p.rounds[ri].settlement !== null;
+        const { result, index, mine, events, cut, pending, scores, pot, ...rest } = f;
+        const { result: r0, index: i0, mine: m0, events: e0, cut: c0, pending: p0, scores: s0, pot: t0, ...fresh } = proj;
         assert.deepEqual(rest, fresh, `局 ${ri} 時点 ${k}`);
-        assert.equal(result !== null, k === fs.length - 1 && p.rounds[ri].settlement !== null, '結果は精算した局の最後の時点だけ');
+        assert.equal(result !== null, lastK && settled, '結果は精算した局の最後の時点だけ');
+        assert.equal(cut, lastK && !settled, '未精算の局の最後だけ cut');
+        assert.deepEqual(pending, cut ? null : p0, '判断者（cut の時点は出さない）');
+        if (lastK && settled) {
+          // 精算した局の最後：席・供託は精算の後（独立の applyRoundResult と一致）
+          const g = replayPaifuRound(p, ri);
+          const after = applyRoundResult(p.rounds[ri].matchBefore, g.result, { round: p.rounds[ri].round, maxRound: MAX_ROUND, riichi: g.riichi });
+          assert.deepEqual([scores, pot], [after.scores, potTotal(after)], `局 ${ri} の精算の後の持ち点・供託`);
+          assert.deepEqual([result.scoresAfter, result.potAfter], [after.scores, potTotal(after)]);
+        } else assert.deepEqual([scores, pot], [s0, t0], '局の途中は精算の前（宣言料を引いた値）');
         frames++;
       });
     }
@@ -107,7 +120,7 @@ test('他家の手牌・山・王牌の未公開の牌を入れ替えても表�
 
 test('値の形：牌の id・山・記録・他家の手牌の中身を含まない（キーの許可リスト）。凍結されている', () => {
   const allowed = new Set(['index', 'mine', 'events', 'pending', 'hand', 'drawn', 'handCounts', 'melds', 'rivers', 'riichi', 'dealer', 'wallCount', 'dora',
-    'normalDraws', 'scores', 'pot', 'self', 'result']);
+    'normalDraws', 'scores', 'pot', 'self', 'result', 'cut']);
   const p = RECORDS.find((x) => x.length === 8).record;
   const s = createReviewSession(p);
   for (let ri = 0; ri < p.rounds.length; ri++) {
@@ -134,9 +147,9 @@ test('他家の見送り・未確定の鳴き・他家の判断待ちは時点�
       const fs = s.frames(ri);
       hidden += p.rounds[ri].steps.length - (visibleSteps(p, ri, me).length - 1);
       // 時点は安定した点だけ：局の終わり以外は、誰かの手番か自分の判断（他家の判断待ちで止まらない）
-      fs.forEach((f, k) => { if (!(k === fs.length - 1 && p.rounds[ri].settlement !== null)) assert.ok(f.pending, `局 ${ri} 時点 ${k}：判断者なし`); });
+      fs.forEach((f, k) => { if (k !== fs.length - 1) assert.ok(f.pending, `局 ${ri} 時点 ${k}：判断者なし`); });
       // 打牌の後は、同じ時点の中で次の出来事（ツモ・鳴き・和了・流局）まで進んでいる（自分の判断待ちを除く）
-      for (const f of fs) { const last = f.events.at(-1); if (last && last.type === 'discard' && !(f.pending && f.pending.type === 'claim')) assert.fail(`打牌で止まった時点 ${JSON.stringify(f.events)}`); }
+      for (const f of fs) { const last = f.events.at(-1); if (!f.cut && last && last.type === 'discard' && !(f.pending && f.pending.type === 'claim')) assert.fail(`打牌で止まった時点 ${JSON.stringify(f.events)}`); }
       myPass += fs.filter((f) => f.mine && f.mine.type === 'pass').length;
       // 他家の判断待ち（鳴き・ロン）は表示しない
       for (const f of fs) if (f.pending) assert.ok(f.pending.type === 'turn' || f.pending.seat === me);
@@ -186,6 +199,64 @@ test('中断・記録中の牌譜：実在する検証済みの局・判断ま�
     assert.equal(fs.length, visibleSteps(p, last, 0).length);
   }
   assert.equal(publicSummary(ABORTED).termination, 'left-match');
+});
+
+// 中断した局の最後の時点：記録の最後の行動の後の公開情報（独立の再生の viewFor）と一致・判断者なし・結果なし・精算の前の持ち点
+function checkTerminal(p, label) {
+  const me = humanSeatOf(p), ri = p.rounds.length - 1, r = p.rounds[ri];
+  const fs = createReviewSession(p).frames(ri);
+  const f = fs.at(-1);
+  const g = newRoundGame(p, r.round, r.dealer);
+  for (const st of r.steps) applyAction(g, st.seat, st.action);
+  const v = g.viewFor(me);
+  assert.deepEqual(sortN([...f.hand, ...(f.drawn === null ? [] : [f.drawn])]), sortN(v.hand.map((x) => x.type)), `${label}：自分の最後の手牌`);
+  assert.deepEqual(f.rivers.map((x) => x.map((y) => y.tile)), v.rivers, `${label}：河`);
+  assert.deepEqual(f.melds.map((ms) => ms.map((m) => m.tiles)), v.melds.map((ms) => ms.map((m) => m.tiles)), `${label}：公開面子`);
+  assert.deepEqual(f.handCounts, v.handCounts);
+  assert.deepEqual([f.cut, f.pending, f.result], [true, null, null], `${label}：判断者・結果なし`);
+  const D = r.matchBefore.riichiDeposit;
+  assert.deepEqual(f.scores, r.matchBefore.scores.map((x, i) => x - (g.riichi[i] ? D : 0)), `${label}：精算の前の持ち点`);
+  return { f, g, fs };
+}
+test('Codex 固定反例（P2-1）：他家の判断待ちで終わった中断の局でも、最後の自分の打牌・手牌・河を記録どおりに出す', () => {
+  // 数学Ⅰ seedBase=19041・14行動：最後は自分が 60° を打牌し、他家の判断待ちで終了 → 手牌8枚・河の最後に 60°
+  const a = decodePaifu(encodePaifu(playRecorded({ mode: 'math1', length: 4, seedBase: 19041, stopAfterSteps: 14, id: 'cx-19041' }).record));
+  const last = a.rounds.at(-1).steps.at(-1);
+  assert.deepEqual([last.seat, last.action.type, last.action.tile], [0, 'discard', 51], '最後は自分の打牌（ID51）');
+  const { f, g } = checkTerminal(a, '数学Ⅰ 19041');
+  const R = g.rules;
+  assert.equal(f.hand.length + (f.drawn === null ? 0 : 1), 8, '手牌8枚');
+  assert.equal(R.types[f.rivers[0].at(-1).tile].deg, 60, '河の最後は 60°');
+  assert.equal(f.mine && f.mine.type, 'discard', '自分の打牌を出す');
+  assert.ok(g.pending() && g.pending().seat !== 0 && g.pending().type === 'claim', '（前提）他家の判断待ちで終わっている');
+  // 数学Ⅱ seedBase=19541・37行動
+  const b = decodePaifu(encodePaifu(playRecorded({ mode: 'math2', length: 4, seedBase: 19541, stopAfterSteps: 37, id: 'cx-19541' }).record));
+  checkTerminal(b, '数学Ⅱ 19541');
+});
+test('中断の局の最後の公開情報（行動数を1〜180で総当たり・数学Ⅰ・Ⅱ）：判断待ちで終わっても終わらなくても、最後の時点は1つで記録どおり', () => {
+  let claimEnds = 0, n = 0;
+  for (const [mode, seedBase] of [['math1', 19041], ['math2', 19541], ['math1', 4242]]) {
+    for (let k = 1; k <= 180; k += 1) {
+      const res = playRecorded({ mode, length: 4, seedBase, stopAfterSteps: k, id: `sw-${mode}-${k}` });
+      if (res.record.status !== 'aborted') continue;
+      const p = decodePaifu(encodePaifu(res.record));
+      const { g, fs } = checkTerminal(p, `${mode} ${seedBase} ${k}`);
+      const q = g.pending();
+      if (q && q.type === 'claim' && q.seat !== 0) claimEnds++;
+      assert.equal(fs.length, visibleSteps(p, p.rounds.length - 1, 0).length);
+      n++;
+    }
+  }
+  assert.ok(n > 300 && claimEnds > 10, `中断 ${n}・他家の判断待ちで終わり ${claimEnds}`);
+});
+test('Codex 固定反例（P2-2）：精算した局の最後は、席の持ち点・供託が精算の後（数学Ⅰ・1局戦・seedBase=19041）', () => {
+  const p = decodePaifu(encodePaifu(playRecorded({ mode: 'math1', length: 1, seedBase: 19041, id: 'cx-19041-1' }).record));
+  const f = createReviewSession(p).frames(0).at(-1);
+  assert.deepEqual([f.scores, f.pot], [[95, 134, 100, 71], 0]);
+  assert.deepEqual([f.result.scoresAfter, f.result.potAfter], [[95, 134, 100, 71], 0]);
+  // 1つ前の時点は精算の前（宣言料を引いた持ち点・供託）
+  const fs = createReviewSession(p).frames(0);
+  if (fs.length > 1) assert.equal(fs.at(-2).scores.reduce((a, b) => a + b, 0) + fs.at(-2).pot, 400);
 });
 
 test('一覧の要約：索引だけの行・検証済みの記録から公開してよい項目（相手・順位・最終点）', () => {

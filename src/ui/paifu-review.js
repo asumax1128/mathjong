@@ -110,6 +110,7 @@ function project(g, ctx, { index, mine = null, events = [] }) {
     // 自分だけの情報（実際の対局でも自分には見える）：フリテンの理由・リーチの待ち
     self: { closed: g.isClosed(me), furiten: furiten ? furiten.reasons.slice() : [], waits: g.riichiWaits[me] ? g.riichiWaits[me].slice() : null },
     result: null,
+    cut: false, // 未精算の局の最後の時点（記録はここで終わり。次の判断者は出さない）
   };
 }
 
@@ -163,10 +164,20 @@ function* roundFrames(p, ri, me) {
     }
     if ((i + 1) % 16 === 0) yield;
   }
-  // 記録が他家の判断待ちの途中で終わった（中断・記録途中）：その後ろの出来事は時点にしない（他家が鳴けたことを示さない）
   if (r.settlement !== null) {
+    // 精算した局の最後の時点：結果と、精算の後の持ち点・供託（席の表示・上の供託・精算表を同じ状態にする）
     const last = frames.at(-1);
-    frames[frames.length - 1] = freeze({ ...last, result: roundResult(g, r, ctx) });
+    const result = roundResult(g, r, ctx);
+    frames[frames.length - 1] = freeze({ ...last, result, scores: result.scoresAfter.slice(), pot: result.potAfter });
+  } else {
+    // 未精算の局（中断・記録途中）：記録の最後の行動までの公開情報を必ず1つの終わりの時点にする。
+    // 他家の鳴き・ロンの判断待ちで終わっていても、すでに公開された出来事（自分の打牌など）・自分の手牌・河を記録どおりに出す。
+    // その時点に次の判断者は出さない（cut）。持ち点・供託は精算の前のまま。架空の精算は作らない。
+    // 終わりの時点は「最後の行動の後に1つ」なので、他家の隠れた判断があってもなくても、時点の数は同じ
+    const tail = g.events.length > seen || mine;
+    const last = tail ? project(g, ctx, { index: frames.length, mine, events: g.events.slice(seen).map((e) => publicEvent(g, e)) }) : { ...frames.at(-1) };
+    const end = freeze({ ...last, pending: null, cut: true });
+    if (tail) frames.push(end); else frames[frames.length - 1] = end;
   }
   return frames;
 }

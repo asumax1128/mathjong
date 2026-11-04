@@ -23,6 +23,8 @@ const LOAD_ERROR = {
   'unsupported-version': 'この牌譜は別の版の形式のため、この版では再生できません。',
   unavailable: 'この端末では牌譜を読み込めません（ブラウザの設定・プライベートモードなど）。',
   timeout: '読み込みに時間がかかりすぎました。もう一度お試しください。',
+  conflict: '読み込みの間にこの牌譜が更新されました（別のタブなど）。もう一度開いてください。',
+  gone: 'この牌譜は削除されました（別のタブなど）。一覧へ戻ります。',
 };
 const loadError = (code) => LOAD_ERROR[code] || '読み込めませんでした。もう一度お試しください。';
 const fmtDate = (t) => {
@@ -57,20 +59,36 @@ export function createReviewUI({ sys, onChange = () => {} }) {
     for (const k of [...st.list.details.keys()]) if (!ids.has(k)) st.list.details.delete(k); // 削除・更新された行の要約を捨てる
     st.list = { ...st.list, loading: false, entries: r.entries.map((e) => ({ ...entryFromIndex(e), key: `${e.id}:${e.token}` })), unreadable: r.unreadable };
     changed();
-    fillDetails(my);
+    pumpDetails();
   }
-  // 表示中の行の要約を1件ずつ作る（検証は Worker。記録は要約の後に手放す）
-  async function fillDetails(my) {
-    for (const e of st.list.entries.slice(0, st.list.shown)) {
-      if (my !== gen || st.view !== 'list') return;
-      if (st.list.details.has(e.key)) continue;
-      st.list.details.set(e.key, { loading: true });
-      let r;
-      try { r = await sys.store.loadPrivate(e.id); } catch { r = { ok: false, error: { code: 'storage-error' } }; }
-      if (my !== gen) { st.list.details.delete(e.key); return; }
-      if (r.ok && `${r.metadata.id}:${r.metadata.token}` !== e.key) { st.list.details.delete(e.key); continue; } // 読む間に更新された（次の一覧で読む）
-      st.list.details.set(e.key, r.ok ? { ok: true, summary: publicSummary(r.record) } : { ok: false, code: r.error.code });
-      changed();
+  // 表示中の行の要約を作る：1本の処理の列（同時に1件だけ読み込み・検証する。検証は Worker。記録は要約の後に手放す）。
+  // 毎回いまの一覧から「表示中で要約のない行」を選ぶので、一覧の読み直し・画面の移動・「さらに表示」の連打でも
+  // 並行して読まず、古い要求が新しい一覧の要約を消すこともない（要約は「ID:トークン」ごとで、要求の番号で照合する）
+  let pumping = false, reqSeq = 0;
+  async function pumpDetails() {
+    if (pumping) return;
+    pumping = true;
+    try {
+      for (;;) {
+        if (st.view !== 'list' || st.list.loading || st.list.error) return;
+        const e = st.list.entries.slice(0, st.list.shown).find((x) => !st.list.details.has(x.key));
+        if (!e) return;
+        const req = ++reqSeq;
+        st.list.details.set(e.key, { loading: true, req });
+        changed();
+        let r;
+        try { r = await sys.store.loadPrivate(e.id); } catch { r = { ok: false, error: { code: 'storage-error' } }; }
+        const cur = st.list.details.get(e.key);
+        if (!cur || cur.req !== req) continue; // 一覧の読み直しで捨てられた行
+        if (r.ok && `${r.metadata.id}:${r.metadata.token}` !== e.key) { st.list.details.set(e.key, { ok: false, code: 'changed' }); loadList(); return; } // 読む間に更新された
+        st.list.details.set(e.key, r.ok ? { ok: true, summary: publicSummary(r.record) } : { ok: false, code: r.error.code });
+        changed();
+        if (!r.ok && (r.error.code === 'not-found' || r.error.code === 'conflict')) { loadList(); return; } // 読む間に削除・更新された
+      }
+    } finally {
+      pumping = false;
+      // 処理中に一覧が読み直された・行が増えたときは、続きを読む（同時に動くのは常に1本）
+      queueMicrotask(() => { if (st.view === 'list' && !st.list.loading && st.list.entries.slice(0, st.list.shown).some((x) => !st.list.details.has(x.key))) pumpDetails(); });
     }
   }
 
@@ -89,7 +107,7 @@ export function createReviewUI({ sys, onChange = () => {} }) {
     if (!r.ok) {
       st.list.notice = { id, text: loadError(r.error.code) };
       st.list.details.set(e.key, { ok: false, code: r.error.code });
-      if (r.error.code === 'not-found') { loadList(); return; }
+      if (r.error.code === 'not-found' || r.error.code === 'conflict') { loadList(); return; }
       changed();
       return;
     }
@@ -97,7 +115,7 @@ export function createReviewUI({ sys, onChange = () => {} }) {
     try { session = createReviewSession(r.record); } catch { st.list.notice = { id, text: loadError('corrupt') }; changed(); return; }
     if (!session.info.roundList.length) { st.list.notice = { id, text: 'この牌譜には再生できる局がありません（局が始まる前に終了）。' }; changed(); return; }
     st.view = 'viewer';
-    st.viewer = { session, rules: paifuRules(session.info.mode), ri: 0, frames: null, k: 0, loading: true, error: null };
+    st.viewer = { session, rules: paifuRules(session.info.mode), ri: 0, frames: null, k: 0, loading: true, error: null, id, token: r.metadata.token };
     changed();
     await gotoRound(0, 0, my);
   }
@@ -110,9 +128,20 @@ export function createReviewUI({ sys, onChange = () => {} }) {
     let frames = null;
     try { frames = await v.session.framesAsync(ri, { isCancelled: () => my !== gen || st.viewer !== v }); } catch { frames = null; v.error = '再生できませんでした（記録と再生が一致しません）。'; }
     if (my !== gen || st.viewer !== v) return;
+    // 局を開くたびに、この牌譜がまだ保存されているかを DB で確かめる（BroadcastChannel に依存しない）。削除されていたら一覧へ
+    if (!(await stillSaved(v))) { if (my === gen && st.viewer === v) { st.list.notice = { id: v.id, text: loadError('gone') }; loadList(); } return; }
+    if (my !== gen || st.viewer !== v) return;
     v.loading = false;
     if (frames) { v.frames = frames; v.k = at === 'last' ? frames.length - 1 : Math.max(0, Math.min(at, frames.length - 1)); }
     changed();
+  }
+  // 表示中の牌譜が DB にまだあるか（ID とトークン）。読めないとき（DB の一時的な失敗）は表示を続ける
+  async function stillSaved(v) {
+    if (typeof sys.store.stat !== 'function') return true;
+    let r;
+    try { r = await sys.store.stat(v.id); } catch { return true; }
+    // 削除されていたら false。更新（記録途中の続きの保存）は、表示中の検証済みの部分を変えないので表示を続ける
+    return r.ok || r.error.code !== 'not-found';
   }
   function move(d) {
     const v = st.viewer;
@@ -200,7 +229,8 @@ export function createReviewUI({ sys, onChange = () => {} }) {
   function seatHTML(f, seat) {
     const info = st.viewer.session.info;
     const me = seat === info.me;
-    const draws = f.normalDraws ? `<span class="pr-draws" title="数学Ⅱ：通常ツモの残り（各24回）">ツモ残${Math.max(0, 24 - f.normalDraws[seat])}</span>` : '';
+    // 数学Ⅱだけ：通常ツモの上限（各24回）の残り。数学Ⅰには上限がないので出さない
+    const draws = info.mode === 'math2' && f.normalDraws ? `<span class="pr-draws" title="数学Ⅱ：通常ツモの残り（各24回）">ツモ残${Math.max(0, 24 - f.normalDraws[seat])}</span>` : '';
     return `<section class="pr-seat${me ? ' me' : ''}${f.pending && f.pending.type === 'turn' && f.pending.seat === seat ? ' active' : ''}" aria-label="${me ? 'あなた' : seatName(seat)}">
       <div class="pr-tag"><span class="pr-pos">${me ? '自分' : SEAT_POS[relSeat(seat, info.me)]}</span><span class="pr-name">${me ? 'あなた' : esc(info.players[seat].name)}</span>
         <span class="pr-pts">${f.scores[seat]}<small>点</small></span>${f.dealer === seat ? '<span class="oya">親</span>' : ''}${f.riichi[seat] ? '<span class="pr-rb">リーチ</span>' : ''}${draws}
@@ -287,7 +317,7 @@ export function createReviewUI({ sys, onChange = () => {} }) {
     handle(act, data = {}) {
       switch (act) {
         case 'pr-pick': open(String(data.id || '')); return true;
-        case 'pr-more': st.list.shown += PAGE; changed(); fillDetails(gen); return true;
+        case 'pr-more': st.list.shown += PAGE; changed(); pumpDetails(); return true;
         case 'pr-list': loadList(); return true;
         case 'pr-round': { const n = Number(data.round); if (st.viewer && Number.isSafeInteger(n) && n >= 0 && n < st.viewer.session.info.roundList.length && n !== st.viewer.ri) gotoRound(n, 0); return true; }
         case 'pr-prev': move(-1); return true;

@@ -237,13 +237,23 @@ export function createPaifuStore({ getIndexedDB = () => globalThis.indexedDB,
   }
   async function readPrivate(id) {
     check(validId(id), 'invalid-argument');
-    const { row, meta } = await transact('readonly', (tx, set, stop) => {
-      requests(tx, [['records','get',id],['index','get',id]], (row, meta) => set({ row, meta }), stop);
+    const { row, meta, epochAtRead } = await transact('readonly', (tx, set, stop) => {
+      requests(tx, [['records','get',id],['index','get',id],['meta','get',EPOCH_KEY]], (row, meta, e) => set({ row, meta, epochAtRead:epochOf(e) }), stop);
     });
     check(row !== undefined || meta !== undefined, 'not-found');
     pairCheck(row, meta, id);
     check(await digest(row.json) === row.digest, 'corrupt');
+    await hook('afterRead', id);
     const record = await decodeRow(row, meta, id, decode); // Outside the IDB transaction.
+    await hook('afterDecode', id);
+    // 検証（Worker・分割の代替）の後に、同じ行がまだ保存されているかを DB で確かめ直す（PR #71 監査 P2-3）：
+    // 読込・検証の間に全件削除・個別削除・更新されていたら、その記録は返さない（削除の後に表示・復活させない）。
+    // BroadcastChannel に依存しない。索引の行の ID・トークン・版・digest と、削除の世代が読込の時点と同じであること
+    const now = await transact('readonly', (tx, set, stop) => {
+      requests(tx, [['index','get',id],['meta','get',EPOCH_KEY]], (m, e) => set({ m, epoch:epochOf(e) }), stop);
+    });
+    check(now.m !== undefined, 'not-found');
+    check(now.epoch === epochAtRead && now.m.token === meta.token && now.m.revision === meta.revision && now.m.digest === meta.digest, 'conflict');
     return { record, metadata:Object.freeze(meta) };
   }
 
@@ -302,6 +312,14 @@ export function createPaifuStore({ getIndexedDB = () => globalThis.indexedDB,
     warm: () => { try { ensureLive(); } catch { /* 無視 */ } },
     close: () => { try { if (live) live.close(); } catch { /* 無視 */ } live = null; },
     loadPrivate: id => safe(() => readPrivate(id)),
+    // 索引の1行だけ（本文は読まない）：表示中の牌譜がまだ保存されているかの確認用。なければ not-found
+    stat: id => safe(async () => {
+      check(validId(id), 'invalid-argument');
+      const { m } = await transact('readonly', (tx, set, stop) => { requests(tx, [['index','get',id]], (m) => set({ m }), stop); });
+      check(m !== undefined, 'not-found');
+      indexCheck(m);
+      return { metadata:Object.freeze(m) };
+    }),
     verify: id => safe(async () => {
       const { metadata } = await readPrivate(id);
       return { valid:true, metadata }; // No wall/hands/payload in this result.

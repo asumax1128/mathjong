@@ -212,7 +212,9 @@ const paifuOptions = () => {
   const limits = Object.fromEntries([['maxRecords', n('paifuMaxRecords')], ['maxBytes', n('paifuMaxBytes')]].filter(([, v]) => v !== undefined));
   // paifuSaveDelay：保存の書込みの直前に待つ（ミリ秒。保存の途中の別の操作の順序を再現するため）
   const delay = n('paifuSaveDelay');
-  const storeHooks = delay ? { afterDigest: () => new Promise((r) => setTimeout(r, delay)) } : {};
+  // 読込の途中で止める（ローカルの検証だけ）：window.__mathjongHold.afterRead／afterDecode が Promise を返せば、それを待つ
+  const held = (name) => async (...a) => { const h = window.__mathjongHold && window.__mathjongHold[name]; if (typeof h === 'function') await h(...a); };
+  const storeHooks = { ...(delay ? { afterDigest: () => new Promise((r) => setTimeout(r, delay)) } : {}), afterRead: held('afterRead'), afterDecode: held('afterDecode') };
   return { limits, useWorker: params.get('paifuWorker') !== '0', storeHooks };
 };
 const paifuLoading = import('./paifu-system.js').then((m) => {
