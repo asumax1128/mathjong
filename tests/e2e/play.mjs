@@ -9307,6 +9307,11 @@ async function v15PaifuEpochFallback(browser) {
 }
 
 // ---- 牌譜の振り返り（第2段階・docs/76・docs/77） ----
+// 再読み込み：読込中の画像（タイトルの絵）があると要求が中断され、エラーとして数えられるので、画像の読込を待ってから
+async function prReload(page) {
+  await page.waitForFunction(() => [...document.images].every((i) => i.complete));
+  await page.reload();
+}
 // 保存済みの牌譜（node で作った記録をページの IndexedDB へ保存）を、ページの中で独立に再生した期待値と画面を照合する
 async function prSeed(page, cases) {
   const { playRecorded } = await import('../paifu-harness.mjs');
@@ -9450,7 +9455,7 @@ async function v16PaifuReview(browser) {
   await page.waitForSelector('.title-screen');
   await pfReady(page);
   const ids = await prSeed(page, cases);
-  await page.reload(); await page.waitForSelector('.title-screen'); await pfReady(page); // タイトルの件数を読み直す
+  await prReload(page); await page.waitForSelector('.title-screen'); await pfReady(page); // タイトルの件数を読み直す
   await prOpenList(page);
   await page.waitForFunction((n) => window.__mathjong.reviewUI.debug().details === n, cases.length);
   const seen = { riichi: 0, pon: 0, chi: 0, ankan: 0, furiten: 0, ron: 0, tsumo: 0, draw: 0, pot: 0, aborted: 0 };
@@ -9542,7 +9547,7 @@ async function v16PaifuReviewErrors(browser) {
     await put('index', { ...i3, storageVersion: 99 });
     db.close();
   }, [ids[0], ids[1], ids[2]]);
-  await a.reload(); await a.waitForSelector('.title-screen'); await pfReady(a);
+  await prReload(a); await a.waitForSelector('.title-screen'); await pfReady(a);
   await prOpenList(a);
   await a.waitForFunction(() => window.__mathjong.reviewUI.debug().loading === false);
   assert.match(await a.locator('.pr-list-screen').innerText(), /読めない記録が1件/);
@@ -9588,7 +9593,7 @@ async function v16PaifuReviewErrors(browser) {
     await p.waitForSelector('.title-screen');
     await pfReady(p);
     await prSeed(p, [{ mode: 'math1', length: 1, seedBase: 7301 }]);
-    await p.reload(); await p.waitForSelector('.title-screen'); await pfReady(p);
+    await prReload(p); await p.waitForSelector('.title-screen'); await pfReady(p);
     await p.waitForSelector('button[data-action="pr-open"]');
     await p.evaluate(() => window.__mathjong.paifuSys.ready);
     await p.locator('button[data-action="pr-open"]').click();
@@ -9623,7 +9628,7 @@ async function v16PaifuReviewAudit(browser) {
     for (const pg of [a, b]) { await pg.goto(LOCAL + `?speed=test${worker ? '' : '&paifuWorker=0'}`); await pg.waitForSelector('.title-screen'); await pfReady(pg); }
     await b.evaluate(() => window.__mathjong.paifuSys.clearAll());
     const [id] = await prSeed(a, [{ mode: 'math1', length: 1, seedBase: 7401 }]);
-    await a.reload(); await a.waitForSelector('.title-screen'); await pfReady(a);
+    await prReload(a); await a.waitForSelector('.title-screen'); await pfReady(a);
     await prOpenList(a);
     await a.waitForFunction(() => window.__mathjong.reviewUI.debug().details === 1);
     // 次の読込を止める
@@ -9640,7 +9645,7 @@ async function v16PaifuReviewAudit(browser) {
     if (at === 'afterDecode') {
       const [id2] = await prSeed(a, [{ mode: 'math1', length: 4, seedBase: 7402, id: 'del-view' }]);
       await a.locator('button[data-action="pr-exit"]').click(); await a.waitForSelector('.title-screen');
-      await a.reload(); await a.waitForSelector('.title-screen'); await pfReady(a);
+      await prReload(a); await a.waitForSelector('.title-screen'); await pfReady(a);
       await prOpenList(a);
       await a.locator(`.pr-entry[data-id="${id2}"]`).click();
       await a.waitForSelector('.pr-viewer .pr-count');
@@ -9667,7 +9672,7 @@ async function v16PaifuReviewAudit(browser) {
   const ids = await prSeed(page, cases);
   // 一覧の詳細の読込を数える（同時に動く数・所要時間）
   await page.evaluate(() => { window.__load = { active: 0, max: 0, n: 0 }; window.__mathjongHold = { afterRead: () => { const L = window.__load; L.active++; L.n++; L.max = Math.max(L.max, L.active); }, afterDecode: () => { window.__load.active--; } }; });
-  await page.reload(); await page.waitForSelector('.title-screen'); await pfReady(page);
+  await prReload(page); await page.waitForSelector('.title-screen'); await pfReady(page);
   await page.evaluate(() => { window.__load = { active: 0, max: 0, n: 0 }; window.__mathjongHold = { afterRead: () => { const L = window.__load; L.active++; L.n++; L.max = Math.max(L.max, L.active); }, afterDecode: () => { window.__load.active--; } }; });
   await prOpenList(page);
   await page.waitForFunction(() => window.__mathjong.reviewUI.debug().details === 3);
@@ -9756,7 +9761,7 @@ async function v16PaifuReviewAudit2(browser) {
     const id = `same-${how}-${bc ? 'bc' : 'nobc'}`;
     await prSeed(a, [{ mode: 'math1', length: 4, seedBase: 7601, id }]);
     const json2 = encodePaifu(playRecorded({ mode: 'math2', length: 1, seedBase: 7602, id }).record);
-    await a.reload(); await a.waitForSelector('.title-screen'); await pfReady(a);
+    await prReload(a); await a.waitForSelector('.title-screen'); await pfReady(a);
     await prOpenList(a);
     await a.locator(`.pr-entry[data-id="${id}"]`).click();
     await a.waitForSelector('.pr-viewer .pr-count');
@@ -9794,7 +9799,7 @@ async function v16PaifuReviewAudit2(browser) {
   await pfReady(page);
   await page.evaluate(() => window.__mathjong.paifuSys.clearAll());
   const ids = await prSeed(page, Array.from({ length: 10 }, (_, i) => ({ mode: i % 2 ? 'math2' : 'math1', length: 1, seedBase: 7700 + i, id: `q-${i}` })));
-  await page.reload(); await page.waitForSelector('.title-screen'); await pfReady(page);
+  await prReload(page); await page.waitForSelector('.title-screen'); await pfReady(page);
   await page.evaluate(() => {
     window.__load = { active: 0, max: 0, reads: [] };
     window.__held = new Promise((r) => { window.__release = r; });
