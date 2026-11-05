@@ -68,8 +68,9 @@ function summary(p, common) {
   return { storageVersion:PAIFU_STORAGE_VERSION, ...common, schemaVersion:p.schemaVersion,
     visibility:'private-full', mode:p.settings.mode, length:p.settings.length, status:p.status, rounds:p.rounds.length };
 }
-function decodeRow(row, meta, id) {
-  let p; try { p = decodePaifu(row.json); } catch (e) { throw schemaError(e); }
+// decode：本文（JSON）→ 検証済みの記録（既定は decodePaifu：主スレッドで同期に検証）。振り返りの読込では Worker で同じ検証をする版を渡せる
+async function decodeRow(row, meta, id, decode) {
+  let p; try { p = await decode(row.json); } catch (e) { throw schemaError(e); }
   check(p.id === id, 'corrupt');
   const expected = summary(p, { id, token:meta.token, revision:meta.revision, bytes:meta.bytes, digest:meta.digest, savedAt:meta.savedAt });
   check(JSON.stringify(Object.entries(expected).sort()) === JSON.stringify(Object.entries(meta).sort()), 'corrupt');
@@ -81,11 +82,12 @@ function decodeRow(row, meta, id) {
 // hooks：テスト用（afterEncode・afterDigest：保存の途中の各時点で待てる）
 export function createPaifuStore({ getIndexedDB = () => globalThis.indexedDB,
   maxRecords = PAIFU_STORAGE_DEFAULTS.maxRecords, maxBytes = PAIFU_STORAGE_DEFAULTS.maxBytes,
-  timeoutMs = PAIFU_STORAGE_DEFAULTS.timeoutMs, encode = (snapshot) => encodePaifuSnapshotAsync(snapshot), hooks = {} } = {}) {
+  timeoutMs = PAIFU_STORAGE_DEFAULTS.timeoutMs, encode = (snapshot) => encodePaifuSnapshotAsync(snapshot), hooks = {},
+  decode = (json) => decodePaifu(json) } = {}) {
   // Invalid configuration also becomes a result on use, rather than an import/startup failure.
   const configOK = uint(maxRecords,1) && maxRecords <= 10000 && uint(maxBytes,1)
     && maxBytes <= 256 * 1024 * 1024 && uint(timeoutMs,1) && timeoutMs <= 60000 && typeof getIndexedDB === 'function'
-    && typeof encode === 'function' && hooks && typeof hooks === 'object';
+    && typeof encode === 'function' && typeof decode === 'function' && hooks && typeof hooks === 'object';
   const hook = async (name, ...args) => { if (typeof hooks[name] === 'function') await hooks[name](...args); };
   const safe = async fn => {
     try { check(configOK, 'invalid-argument'); return { ok:true, ...await fn() }; }
@@ -235,14 +237,24 @@ export function createPaifuStore({ getIndexedDB = () => globalThis.indexedDB,
   }
   async function readPrivate(id) {
     check(validId(id), 'invalid-argument');
-    const { row, meta } = await transact('readonly', (tx, set, stop) => {
-      requests(tx, [['records','get',id],['index','get',id]], (row, meta) => set({ row, meta }), stop);
+    const { row, meta, epochAtRead } = await transact('readonly', (tx, set, stop) => {
+      requests(tx, [['records','get',id],['index','get',id],['meta','get',EPOCH_KEY]], (row, meta, e) => set({ row, meta, epochAtRead:epochOf(e) }), stop);
     });
     check(row !== undefined || meta !== undefined, 'not-found');
     pairCheck(row, meta, id);
     check(await digest(row.json) === row.digest, 'corrupt');
-    const record = decodeRow(row, meta, id); // Outside the IDB transaction.
-    return { record, metadata:Object.freeze(meta) };
+    await hook('afterRead', id);
+    const record = await decodeRow(row, meta, id, decode); // Outside the IDB transaction.
+    await hook('afterDecode', id);
+    // 検証（Worker・分割の代替）の後に、同じ行がまだ保存されているかを DB で確かめ直す（PR #71 監査 P2-3）：
+    // 読込・検証の間に全件削除・個別削除・更新されていたら、その記録は返さない（削除の後に表示・復活させない）。
+    // BroadcastChannel に依存しない。索引の行の ID・トークン・版・digest と、削除の世代が読込の時点と同じであること
+    const now = await transact('readonly', (tx, set, stop) => {
+      requests(tx, [['index','get',id],['meta','get',EPOCH_KEY]], (m, e) => set({ m, epoch:epochOf(e) }), stop);
+    });
+    check(now.m !== undefined, 'not-found');
+    check(now.epoch === epochAtRead && now.m.token === meta.token && now.m.revision === meta.revision && now.m.digest === meta.digest, 'conflict');
+    return { record, metadata:Object.freeze(meta), epoch:epochAtRead };
   }
 
   return Object.freeze({
@@ -300,6 +312,15 @@ export function createPaifuStore({ getIndexedDB = () => globalThis.indexedDB,
     warm: () => { try { ensureLive(); } catch { /* 無視 */ } },
     close: () => { try { if (live) live.close(); } catch { /* 無視 */ } live = null; },
     loadPrivate: id => safe(() => readPrivate(id)),
+    // 索引の1行だけ（本文は読まない）：表示中の牌譜がまだ保存されているかの確認用。なければ not-found
+    stat: id => safe(async () => {
+      check(validId(id), 'invalid-argument');
+      // 索引の行と削除の世代を同じトランザクションで（開いたときの値と比べて、更新・全件削除の後の作り直しを区別する）
+      const { m, epoch } = await transact('readonly', (tx, set, stop) => { requests(tx, [['index','get',id],['meta','get',EPOCH_KEY]], (m, e) => set({ m, epoch:epochOf(e) }), stop); });
+      check(m !== undefined, 'not-found');
+      indexCheck(m);
+      return { metadata:Object.freeze(m), epoch };
+    }),
     verify: id => safe(async () => {
       const { metadata } = await readPrivate(id);
       return { valid:true, metadata }; // No wall/hands/payload in this result.

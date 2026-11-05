@@ -11,6 +11,7 @@ import { encodePaifuSnapshotAsync } from '../engine/paifu.js';
 
 const CHANNEL = 'mathjong-paifu';
 const uint = (n) => Number.isSafeInteger(n) && n >= 0;
+function deepFreeze(x) { if (x && typeof x === 'object' && !Object.isFrozen(x)) { Object.values(x).forEach(deepFreeze); Object.freeze(x); } return x; }
 
 // Worker で encode する関数（入力は保存の開始時のスナップショット＝文字列）。失敗（作れない・エラー・時間切れ）したら、
 // 以後は主スレッドの分割検証（fallback・同じスナップショット）を使う
@@ -59,7 +60,10 @@ export function createPaifuSystem({ appVersion, onChange = () => {}, limits = {}
   workerUrl = new URL('./paifu-worker.js', import.meta.url), store: injectedStore = null, storeHooks = {} } = {}) {
   const fallback = (snapshot) => encodePaifuSnapshotAsync(snapshot); // 主スレッド：一定時間ごとにイベントループへ戻りながら検証
   const encode = useWorker && typeof Worker === 'function' ? createWorkerEncoder({ url: workerUrl, fallback }) : fallback;
-  const store = injectedStore || createPaifuStore({ encode, ...limits, hooks: storeHooks });
+  // 読込（振り返り）：本文の検証も Worker（使えなければ主スレッドで分割）で行う。検証は省略しない（docs/77）。
+  // 結果は検証済みの正規化 JSON を読み直して凍結した記録（主スレッドで同期の再検証をしない＝画面を止めない）
+  const decode = async (json) => deepFreeze(JSON.parse(await encode(json)));
+  const store = injectedStore || createPaifuStore({ encode, decode, ...limits, hooks: storeHooks });
   let epoch = null, epochError = null;
   const learn = (n) => { if (uint(n) && (epoch === null || n > epoch)) epoch = n; };
   let bc = null;
