@@ -1,0 +1,45 @@
+name: Research beginner loss diagnostics (no deploy)
+# 研究専用（docs/69）：行動別診断ツールの再現性テストと小規模の実行。公開・デプロイはしない
+on:
+  pull_request:
+    paths:
+      - 'tools/research-beginner-loss-diagnostics.mjs'
+      - 'tests/research-beginner-loss-diagnostics.test.js'
+      - '.github/workflows/research-beginner-loss-diagnostics.yml'
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: 'サンプル数の倍率（docs/69 の本実行は 10）'
+        default: '1'
+permissions:
+  contents: read
+jobs:
+  diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Unit and reproducibility tests
+        run: node --test tests/research-beginner-loss-diagnostics.test.js
+      - name: Run twice with the same seed and compare (reproducibility)
+        run: |
+          mkdir -p /tmp/diag
+          S="${{ github.event.inputs.scale || '0.5' }}"
+          node tools/research-beginner-loss-diagnostics.mjs --scale "$S" --out /tmp/diag/a.json
+          node tools/research-beginner-loss-diagnostics.mjs --scale "$S" --out /tmp/diag/b.json
+          strip() { node -e "const d=require('$1');delete d.seconds;console.log(require('crypto').createHash('sha256').update(JSON.stringify(d)).digest('hex'))"; }
+          a=$(strip /tmp/diag/a.json); b=$(strip /tmp/diag/b.json)
+          echo "a=$a"; echo "b=$b"; test "$a" = "$b"
+      - name: Public AI coefficients unchanged versus main
+        run: |
+          git fetch --depth=1 origin main
+          git diff --exit-code origin/main -- src/engine
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: beginner-loss-diagnostics
+          path: /tmp/diag
+          if-no-files-found: ignore
