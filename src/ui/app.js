@@ -134,6 +134,9 @@ S.autoPass = { count: 0, failed: 0, noticePending: false, noticeKind: null, noti
 // リーチ後のオートツモ切り（src/ui/auto-tsumogiri.js）。on：設定（局ごと・既定 OFF・保存しない）。key：予約した自動操作の局面（stateKey）。
 // count：自動で捨てた回数、stopped：和了できるので止まった回数（確認用。判断には使わない）
 S.autoTsumo = { on: false, key: null, count: 0, stopped: 0 };
+// 自動整列（手牌の下のトグル）：ON の間、手牌が変わるたびに既存の整列（defaultOrder）をかける。保存しない。
+// 対局開始（startMatch）・タイトルや相手選択へ戻る（leaveGame）で OFF。局が変わっても ON のまま。key＝最後に整列した手牌の牌 ID の集合
+S.autoSort = { on: false, key: null };
 // 人間の入力の処理回数（多重処理の検出用。accepted=打牌などが成立、ignored=手番外の入力）
 S.input = { accepted: 0, ignored: 0, failed: 0 };
 // AI の判断回数（難易度ごと）。表示・判断には使わない（E2E で採用された難易度の確認に使う）
@@ -799,8 +802,24 @@ function currentDrawn() {
 }
 function currentOrder() {
   const g = S.game;
-  S.handOrder = reconcileOrder(S.handOrder, g.hands[HUMAN], (id) => g.typeOf(id), currentDrawn());
+  const hand = g.hands[HUMAN];
+  if (S.autoSort.on) {
+    // 手牌の牌 ID の集合が変わった（配牌・ツモ・打牌・チー・ポン・暗カン・次局）ときだけ整列する。
+    // 長押しの手動並べ替えは集合を変えないので、次に手牌が変わるまでそのまま（自動整列は OFF にならない）
+    const key = hand.slice().sort((a, b) => a - b).join(',');
+    if (key !== S.autoSort.key) {
+      S.autoSort.key = key;
+      S.handOrder = defaultOrder(hand, (id) => g.typeOf(id), currentDrawn());
+      return S.handOrder;
+    }
+  }
+  S.handOrder = reconcileOrder(S.handOrder, hand, (id) => g.typeOf(id), currentDrawn());
   return S.handOrder;
+}
+// 自動整列のトグルボタン（チー自動・ポン自動と同じ表記・色）
+function autoSortToggleHTML() {
+  const on = S.autoSort.on;
+  return `<button data-action="autosort" class="small ap-toggle ${on ? 'on' : 'off'}" aria-pressed="${on}" aria-label="自動整列 ${on ? 'ON' : 'OFF'}"><span class="apt-name">自動整列</span><span class="apt-state">${on ? 'ON' : 'OFF'}</span></button>`;
 }
 
 // ---- 自分のリーチの待ち・フリテン（ruleset 2）：手牌の上の短い1行。自分だけの情報（他家・AI には渡さない） ----
@@ -921,7 +940,7 @@ function handHTML() {
   // 手牌（左）と公開面子（右）は同じ列。面子は手牌より少し小さく、手牌のタップの大きさは変えない。
   const melds = g.melds[HUMAN].length ? `<div class="melds mine" aria-label="自分の公開面子">${meldsHTML(HUMAN, 'm')}</div>` : '';
   return `${selfInfoHTML()}<div class="hand-row${melds ? ' has-melds' : ''}"><div class="hand">${body}</div>${melds}</div>
-    <div class="hand-help"><span class="hh-tools">${autoPassToggleHTML('chi')}${autoPassToggleHTML('pon')}<button data-action="autosort" class="small">自動整列</button><button data-action="hint" class="small hint-btn" aria-pressed="${!!S.hintOpen}">ヒント</button></span><span class="hh-menu"><button data-action="guide" class="small">ガイド</button><button data-action="settings" class="small" aria-label="設定">⚙</button></span></div>`;
+    <div class="hand-help"><span class="hh-tools">${autoPassToggleHTML('chi')}${autoPassToggleHTML('pon')}${autoSortToggleHTML()}<button data-action="hint" class="small hint-btn" aria-pressed="${!!S.hintOpen}">ヒント</button></span><span class="hh-menu"><button data-action="guide" class="small">ガイド</button><button data-action="settings" class="small" aria-label="設定">⚙</button></span></div>`;
 }
 
 // チー・ポンの自動パスの切替（対戦画面。Ver.0.5-A で設定画面から移動）。ON/OFF を色と文字で示す。
@@ -1483,7 +1502,7 @@ function rulesHTML() {
   const ex30 = angleText(rules.typeByKey.get('a:30'));
   const common = `
     ${S.game && S.game.furitenRule ? '' : '<li>フリテンは未実装。流局は山が尽きたとき。</li>'}
-    <li><b>手牌の並び替え</b>：牌を長押し（約0.35秒）して左右に動かし、指を離した位置に入れます。手牌の外で離すと取り消し。表示の順番だけが変わり、ゲームには影響しません。「自動整列」で種類順に戻ります。新しいツモ牌は右端に入ります。</li>`;
+    <li><b>手牌の並び替え</b>：牌を長押し（約0.35秒）して左右に動かし、指を離した位置に入れます。手牌の外で離すと取り消し。表示の順番だけが変わり、ゲームには影響しません。「自動整列」を押すと種類順に整列し、ONの間は手牌が変わるたびに自動で整列します（もう一度押すとOFF）。OFFのときは、新しいツモ牌は右端に入ります。</li>`;
   const body = c.rules.koutsu ? `
     <li><b>モード</b>：${modeLabel(rules)}（${c.angleUnit === 'rad' ? '弧度法・0〜2π の17種類' : '度数法・0°〜180° の9種類'}・関数牌 各${rules.types.find((t) => t.kind === 'func').copies}枚・計${rules.deckSize}枚）。モードは設定で選び、新しい対局から切り替わります。</li>
     <li><b>面子</b>は2種類：<b>数式面子</b>＝関数牌＋角度牌＋結果牌で正しい等式（例：sin ${ex30} = 1/2）、<b>刻子</b>＝同じ牌3枚（例：sin・sin・sin、1/2・1/2・1/2）。</li>
@@ -1774,9 +1793,14 @@ app.addEventListener('click', (ev) => {
       break;
     }
     case 'autosort': {
-      // 表示順だけを従来の種類順へ戻す（ツモ牌は右端）。エンジンの手牌は変えない。
+      // トグル。ON にした瞬間に、いまの手牌を1回整列する（表示順だけ：種類順・ツモ牌は右端。エンジンの手牌は変えない）。
+      // ON の間は currentOrder() が手牌の変化ごとに整列する。OFF にしても並びはそのまま（以後は自動で整列しない）
       const gg = S.game;
-      S.handOrder = defaultOrder(gg.hands[HUMAN], (id) => gg.typeOf(id), currentDrawn());
+      S.autoSort.on = !S.autoSort.on;
+      if (S.autoSort.on) {
+        S.autoSort.key = gg.hands[HUMAN].slice().sort((a, b) => a - b).join(',');
+        S.handOrder = defaultOrder(gg.hands[HUMAN], (id) => gg.typeOf(id), currentDrawn());
+      } else S.autoSort.key = null;
       render();
       break;
     }
@@ -2090,6 +2114,7 @@ function leaveGame(screen) {
   S.game = null;
   S.autoTsumo.on = false; // タイトル・相手選択へ戻ったら OFF
   S.autoTsumo.key = null;
+  S.autoSort = { on: false, key: null }; // 自動整列もタイトル・相手選択へ戻ったら OFF
   S.publicAiHistory = newPublicHistory();
   S.screen = screen;
   S.paifuConfirm = false;
@@ -2114,6 +2139,7 @@ function startMatch({ fromUrl = false, settings = null } = {}) {
   const ruleset = LEGACY ? 0 : [0, 1, 2].includes(cfg.ruleset) ? cfg.ruleset : CURRENT_RULESET;
   S.matchSettings = { mode: cfg.mode, length: cfg.length, chars: chars.slice(), seats: seats.slice(), ruleset, newRules: ruleset >= 1, exam: !!cfg.exam };
   S.examRecorded = false; // 卒業試験（初心者の部屋）の結果を記録したか（試合ごとに1回）
+  S.autoSort = { on: false, key: null }; // 自動整列は新しい対局・再戦のたびに OFF から
   PLAYERS = playersFor(seats); // 試合開始時にキャラクター3人と座席を確定
   S.aiDecisionsBySeat = [{}, {}, {}, {}];
   S.publicAiHistory = newPublicHistory();
