@@ -9833,6 +9833,179 @@ async function v16PaifuReviewAudit2(browser) {
   console.log('✓ PR #71 限定再監査の固定反例：閲覧中に同じ ID が CAS で更新・全件削除の後に作り直されたら、別の局を選んでも古い局面を出さず理由を区別して一覧へ（BroadcastChannel あり・なし）・開き直すと新しい内容、一覧の詳細の古い読込を止めてタイトル→再入場→再開しても古い画面は続きを読まず、同時の読込は最大1件・新しい一覧は全10行、読込の失敗で列が止まらない');
 }
 
+// ---- 自動整列のトグル（手牌の下の「自動整列」ボタンを ON/OFF の状態を持つ切替にする）----
+// 手牌の表示順（画面の状態）だけを検証する。整列の並び順の基準（defaultOrder）は従来のまま
+const asState = (page) => page.evaluate(() => {
+  const { S } = window.__mathjong, g = S.game;
+  const order = [...document.querySelectorAll('.hand .tile[data-id]')].map((e) => Number(e.dataset.id));
+  const p = g.pending();
+  const drawn = p && p.seat === 0 && p.type === 'turn' && g.drawn !== null && g.drawn !== undefined ? g.drawn : null;
+  const rest = order.filter((id) => id !== drawn);
+  const sortedRest = rest.every((id, i) => i === 0 || g.typeOf(rest[i - 1]) < g.typeOf(id) || (g.typeOf(rest[i - 1]) === g.typeOf(id) && rest[i - 1] < id));
+  const btn = document.querySelector('.hand-help button[data-action="autosort"]');
+  return { order, drawn, sortedRest, drawnLast: drawn === null || order.at(-1) === drawn, melds: g.melds[0].length, hand: g.hands[0].length,
+    label: btn ? btn.innerText.replace(/\s+/g, ' ').trim() : null, pressed: btn ? btn.getAttribute('aria-pressed') : null, cls: btn ? btn.className : '', on: S.autoSort.on,
+    modal: S.modal, my: p && p.seat === 0 ? p.type : null, canTsumo: !!(p && p.seat === 0 && p.canTsumo), ron: !!(p && p.seat === 0 && p.type === 'claim' && p.ron),
+    pon: !!(p && p.seat === 0 && p.type === 'claim' && p.pon), chi: p && p.seat === 0 && p.type === 'claim' ? p.chi.length : 0, ended: !p };
+});
+// 自分の手番（または局の結果・最終結果）まで進める。宣言は take＝ポン・チーできるなら取る／それ以外は見送る（ロンは取る）
+async function asToMyTurn(page, { take = false, beforeTake = null, autoNext = true } = {}) {
+  for (let i = 0; i < 6000; i++) {
+    const s = await asState(page);
+    if (s.modal === 'final') return 'final';
+    if (s.modal === 'result') {
+      if (!autoNext) return 'result';
+      await page.locator('.overlay button[data-action="next"]').click(); // 局が終わったら次局へ（その手番まで進める）
+      await page.waitForFunction(() => !window.__mathjong.S.modal || window.__mathjong.S.modal === 'final');
+      continue;
+    }
+    if (s.my === 'turn') return 'turn';
+    if (s.my === 'claim') {
+      if (s.ron) { await page.locator('.bar button[data-action="ron"]').click(); continue; }
+      if (take && (s.pon || s.chi)) {
+        if (beforeTake) await beforeTake(s);
+        const act = s.pon ? 'pon' : 'chi';
+        await page.locator(`.bar button[data-action="${act}"]`).first().click();
+        return `took-${act}`;
+      }
+      await page.locator('.bar button[data-action="pass"]').click();
+      continue;
+    }
+    await page.waitForTimeout(10);
+  }
+  throw new Error('asToMyTurn: too many steps');
+}
+// 自分の手番で、いちばん左の牌を捨てる（ツモ和了できるなら和了）。2回タップで打牌
+async function asDiscardLeft(page) {
+  const s = await asState(page);
+  if (s.canTsumo) { await page.locator('.bar button[data-action="tsumo"]').click(); return 'tsumo'; }
+  const t = page.locator(`.hand .tile[data-id="${s.order[0]}"]`);
+  await t.click(); await t.click();
+  return 'discard';
+}
+
+async function v17AutoSortToggle(browser) {
+  const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage(), errors = watchErrors(page);
+  const cdp = await ctx.newCDPSession(page);
+  const URL4 = `${LOCAL}?seed=21&round=1&dealer=0&hand=0&renchan=0&len=8&mode=math1&newrules=2&speed=test`; // 8局戦（途中で局が終わっても試合が続く）
+  await page.goto(URL4);
+  await page.waitForSelector('.hand .tile[data-id]');
+  // ---- 1. 対局開始直後は OFF 表示で、ツモしても自動整列しない ----
+  let s = await asState(page);
+  assert.deepEqual([s.on, s.label, s.pressed, /\boff\b/.test(s.cls)], [false, '自動整列 OFF', 'false', true], '開始直後は OFF');
+  let unsorted = 0;
+  for (let k = 0; k < 5; k++) {
+    assert.equal(await asToMyTurn(page), 'turn');
+    s = await asState(page);
+    assert.ok(s.drawnLast, 'OFF：ツモ牌は右端');
+    if (!s.sortedRest) unsorted++;
+    assert.equal(s.on, false);
+    assert.equal(await asDiscardLeft(page), 'discard');
+  }
+  assert.ok(unsorted > 0, `OFF の間はツモしても整列しない（整列していない手番 ${unsorted}/5）`);
+  // ---- 2. 1回押して ON → 即整列。その後ボタンを押さずに、2ターン以上ツモ後に自動で整列 ----
+  assert.equal(await asToMyTurn(page), 'turn');
+  const before = await asState(page);
+  await page.locator('.hand-help button[data-action="autosort"]').tap();
+  s = await asState(page);
+  assert.deepEqual([s.on, s.label, s.pressed, /\bon\b/.test(s.cls)], [true, '自動整列 ON', 'true', true], 'ON 表示');
+  assert.ok(s.sortedRest && s.drawnLast, 'ON にした瞬間に整列');
+  assert.deepEqual([...s.order].sort((a, b) => a - b), [...before.order].sort((a, b) => a - b), '牌の集合は同じ（表示順だけ）');
+  assert.equal(await asDiscardLeft(page), 'discard');
+  for (let k = 0; k < 4; k++) {
+    assert.equal(await asToMyTurn(page), 'turn');
+    s = await asState(page);
+    assert.ok(s.on && s.sortedRest && s.drawnLast, `ON：ツモ後に自動で整列（${k + 1}回目）`);
+    if (k === 2) {
+      // ---- 手動の長押しドラッグ：自動整列は OFF にならず、並びは次に手牌が変わるまでそのまま。変わったら再び整列 ----
+      const moved = await dragToIndex(page, cdp, s.order[0], 5);
+      const m = await asState(page);
+      assert.deepEqual(m.order, moved, '手動の並べ替えは反映される');
+      assert.ok(m.on && m.label === '自動整列 ON', '手動の並べ替えでは OFF にならない');
+      assert.ok(!m.sortedRest, '手動の並びは次の手牌の変化までそのまま');
+    }
+    assert.equal(await asDiscardLeft(page), 'discard');
+    if (k === 2) { assert.equal(await asToMyTurn(page), 'turn'); s = await asState(page); assert.ok(s.sortedRest && s.drawnLast, '手動の後も、次の手牌の変化で再び整列'); assert.equal(await asDiscardLeft(page), 'discard'); }
+  }
+  // ---- 3. もう一度押して OFF → その後のツモでは自動整列しない ----
+  assert.equal(await asToMyTurn(page), 'turn');
+  await page.locator('.hand-help button[data-action="autosort"]').tap();
+  s = await asState(page);
+  assert.deepEqual([s.on, s.label, s.pressed], [false, '自動整列 OFF', 'false'], 'OFF に戻る');
+  let unsorted2 = 0;
+  for (let k = 0; k < 6; k++) {
+    assert.equal(await asDiscardLeft(page), 'discard');
+    assert.equal(await asToMyTurn(page), 'turn');
+    s = await asState(page);
+    if (!s.sortedRest) unsorted2++;
+    assert.equal(s.on, false);
+  }
+  assert.ok(unsorted2 > 0, `OFF に戻した後は整列しない（整列していない手番 ${unsorted2}/6）`);
+  // ---- 6. ON の間にポン／チーしても手牌が整列する（手動で崩してから鳴く）。 4. ON のまま次局へ進んでも ON が維持され、配牌が整列 ----
+  await page.locator('.hand-help button[data-action="autosort"]').tap();
+  assert.equal((await asState(page)).on, true);
+  let took = 0, rounds = 0;
+  for (let guard = 0; guard < 400 && (took < 1 || rounds < 2); guard++) {
+    const r = await asToMyTurn(page, { autoNext: false, take: took < 1, beforeTake: async () => {
+      // 宣言の判断中に表示順を崩す（手動並べ替えの代わり。手牌の集合は変えない）
+      await page.evaluate(() => { const m = window.__mathjong; m.S.handOrder = m.S.game.hands[0].slice().reverse(); m.render(); });
+      const m = await asState(page);
+      assert.ok(!m.sortedRest, '（前提）崩してある');
+    } });
+    if (r === 'took-pon' || r === 'took-chi') {
+      // 鳴いた直後：自分は打牌の番（ツモ牌なし）。手牌が整列している
+      await page.waitForFunction(() => { const p = window.__mathjong.S.game.pending(); return p && p.seat === 0 && p.type === 'turn'; });
+      s = await asState(page);
+      assert.ok(s.on && s.sortedRest, `ON の間は${r === 'took-pon' ? 'ポン' : 'チー'}の後も整列`);
+      assert.equal(s.melds >= 1, true);
+      took++;
+      assert.equal(await asDiscardLeft(page), 'discard');
+      continue;
+    }
+    if (r === 'result') {
+      await page.locator('.overlay button[data-action="next"]').click();
+      await page.waitForFunction(() => !window.__mathjong.S.modal);
+      s = await asState(page);
+      assert.ok(s.on && s.label === '自動整列 ON', '次局へ進んでも ON が維持される');
+      assert.ok(s.sortedRest, '次局の配牌が整列している');
+      rounds++;
+      continue;
+    }
+    if (r === 'final') break;
+    s = await asState(page);
+    assert.ok(s.on && s.sortedRest && s.drawnLast, 'ON：局が変わっても毎ツモ整列');
+    await asDiscardLeft(page);
+  }
+  assert.ok(took >= 1, `ポン／チーを ${took} 回確認`);
+  assert.ok(rounds >= 1, `次局へ ${rounds} 回進んだ`);
+  assert.deepEqual(errors, []);
+  // ---- 5. タイトルへ戻って新しい対局を始めると OFF に戻っている（設定の「新しい対局」でも） ----
+  await page.evaluate(() => window.__mathjong.S.modal && (window.__mathjong.S.modal = null));
+  await page.evaluate(() => { window.__mathjong.S.modal = null; window.__mathjong.render(); });
+  assert.equal((await asState(page)).on, true, '（前提）ON のまま');
+  await page.locator('button[data-action="settings"]').tap();
+  await page.locator('button[data-action="ask-title"]').tap();
+  await page.locator('button[data-action="to-title"]').tap();
+  await page.waitForSelector('.title-screen');
+  assert.equal(await page.evaluate(() => window.__mathjong.S.autoSort.on), false, 'タイトルへ戻ると OFF');
+  await pfStart(page, { mode: 'math1', length: 1 });
+  s = await asState(page);
+  assert.deepEqual([s.on, s.label], [false, '自動整列 OFF'], '新しい対局は OFF から');
+  await page.locator('.hand-help button[data-action="autosort"]').tap();
+  assert.equal((await asState(page)).label, '自動整列 ON');
+  await page.locator('button[data-action="settings"]').tap();
+  await page.locator('button[data-action="reset"]').tap();
+  await page.waitForSelector('.hand .tile[data-id]');
+  s = await asState(page);
+  assert.deepEqual([s.on, s.label], [false, '自動整列 OFF'], '設定の「新しい対局」でも OFF から');
+  // localStorage には保存しない
+  assert.ok(!(await page.evaluate(() => Object.keys(localStorage).some((k) => /sort/i.test(k)))), '自動整列の状態は保存しない');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+  console.log(`✓ 自動整列のトグル：開始時 OFF（ツモしても整列しない）・1回押して ON（即整列・以後ツモごとに自動）・手動の長押しでは OFF にならず次の手牌の変化で再整列・もう一度押して OFF・ポン／チー後も整列（${took}回）・次局へ進んでも ON 維持（${rounds}局）・タイトルへ戻る／新しい対局で OFF・保存しない`);
+}
+
 async function v15PaifuSnapshot(browser) {
   // PR #69 第2回監査 P2-B：保存の途中で呼び出し元が元のオブジェクトを書き換えても、保存されるのは save を呼んだ時点の内容で、
   // 読込・再検証は必ず成功する。Worker の経路と、Worker なしの分割検証の経路。時点：呼んだ直後・検証の途中・検証の後（書込みの前）
@@ -9891,7 +10064,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage, v15PaifuEpoch, v15PaifuLoadFailure, v15PaifuEpochNoBC, v15PaifuEpochFallback, v15PaifuSnapshot, v16PaifuReview, v16PaifuReviewErrors, v16PaifuReviewAudit, v16PaifuReviewAudit2 };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage, v15PaifuEpoch, v15PaifuLoadFailure, v15PaifuEpochNoBC, v15PaifuEpochFallback, v15PaifuSnapshot, v16PaifuReview, v16PaifuReviewErrors, v16PaifuReviewAudit, v16PaifuReviewAudit2, v17AutoSortToggle };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -9976,6 +10149,7 @@ try {
   await v16PaifuReviewErrors(browser);
   await v16PaifuReviewAudit(browser);
   await v16PaifuReviewAudit2(browser);
+  await v17AutoSortToggle(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。
