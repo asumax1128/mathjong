@@ -23,7 +23,7 @@ permissions:
   contents: read
 jobs:
   unit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +62,7 @@ jobs:
       - run: npm test
   ui:
     # 新ルール⑤の卓UI（ドラ表示・暗カン・嶺上・24回・ルール選択・8画面）と新ルールの通しプレイ。デプロイしない
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
