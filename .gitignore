@@ -1,0 +1,3 @@
+firebase/emulator.rules.json
+*-debug.log
+node_modules/

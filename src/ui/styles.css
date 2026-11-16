@@ -1290,3 +1290,30 @@ table.values td.undef { color: #999; font-size: 12px; }
 .pr-nav button { min-height: 48px; border-radius: 10px; border: 1px solid var(--felt-line); background: var(--felt-2); color: var(--ink); font-size: 15px; }
 .pr-nav button:disabled { opacity: .4; }
 @media (min-width: 700px) { .pr-nav { max-width: 640px; margin: 0 auto; border-radius: 10px 10px 0 0; } }
+
+/* ---- オンライン対戦（段階1：ロビーまで・docs/79）。画面は src/ui/online-ui.js ---- */
+.title-screen .online-open { min-height: 48px; background: var(--felt-2); border: 1px solid var(--accent); color: var(--ink); font-weight: 700; }
+.ol-title-error { color: #ffb4a8; margin: 0; }
+.online-screen { max-width: 520px; margin: 0 auto; padding: 16px 16px 32px; display: flex; flex-direction: column; gap: 12px; }
+.online-screen .ol-title { margin: 4px 0; font-size: 1.25rem; color: var(--gold); }
+.online-screen .ol-note { margin: 0; color: var(--ink-dim); }
+.online-screen .ol-error { margin: 0; padding: 8px 10px; border-radius: 8px; background: rgba(192, 57, 43, 0.22); border: 1px solid rgba(255, 140, 120, 0.6); color: #ffd9d2; }
+.online-screen .ol-box { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; background: var(--panel); border: 1px solid var(--felt-line); }
+.online-screen .ol-box h3 { margin: 0; font-size: 1rem; }
+.online-screen .ol-field { display: flex; flex-direction: column; gap: 4px; }
+.online-screen .ol-field input { font: inherit; font-size: 1.05rem; padding: 10px; border-radius: 8px; border: 1px solid var(--felt-line); background: #0e271e; color: var(--ink); min-width: 0; }
+.online-screen #ol-code { letter-spacing: 0.2em; text-transform: uppercase; }
+.online-screen .ol-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.online-screen .ol-actions > button { flex: 1 1 140px; min-height: 44px; }
+.online-screen .ol-settings { display: flex; flex-direction: column; gap: 8px; }
+.online-screen .ol-code-line { margin: 0; font-size: 1rem; }
+.online-screen .ol-code { font-size: 1.6rem; letter-spacing: 0.18em; color: var(--accent); font-family: ui-monospace, Menlo, Consolas, monospace; }
+.online-screen .ol-seats { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.online-screen .ol-seat { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--felt-line); min-width: 0; }
+.online-screen .ol-seat.me { border-color: var(--gold); }
+.online-screen .ol-seat.cpu .ol-name { color: var(--ink-dim); }
+.online-screen .ol-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.online-screen .ol-tag { padding: 1px 6px; border-radius: 999px; background: rgba(214, 178, 94, 0.2); color: var(--gold); font-size: 0.75rem; white-space: nowrap; }
+.online-screen .ol-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #6b7d73; }
+.online-screen .ol-dot.on { background: #58d68d; }
+.online-screen .ol-dot.cpu { background: transparent; border: 1px dashed var(--ink-dim); }
