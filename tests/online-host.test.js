@@ -154,7 +154,7 @@ test('再質問の時間切れは見送り：席1のポンが成立する', () =
   assert.equal(st.game.events.at(-1).type, 'pon');
   assert.equal(st.game.events.at(-1).seat, 1);
   assert.notEqual(st.game.result && st.game.result.type, 'win', 'ロンは成立しない');
-  assert.ok(st.log.some((x) => x.seat === 2 && x.action.type === 'pass'), '席2は見送り');
+  assert.ok(st.log.some((x) => x.s === 2 && x.a.type === 'pass'), '席2は見送り');
   assert.equal(st.timeouts[2], 1);
   assert.equal(st.window.kind, 'turn');
   assert.deepEqual(st.window.seats, [1]);
@@ -184,19 +184,20 @@ test('制限時間：手番45秒はツモ切り・宣言15秒は見送り・結�
     clock.fireNext();
   }
   assert.equal(st.phase, 'result');
-  assert.ok(st.timeouts[0] + st.timeouts[2] >= 3);
+  // 段階3：時間切れが3回続いた席は離席になり、代打ち（中級の既定キャラクター）が打つ
+  assert.ok(st.away[0] || st.away[2], '時間切れ3回で離席');
+  for (const s of [0, 2]) if (st.away[s]) assert.ok(st.timeouts[s] >= 3);
   assert.equal(st.window.kind, 'next');
   assert.equal(st.window.deadline - clock.now(), LIMITS.nextMs);
+  for (const s of st.window.seats) assert.equal(st.away[s], false, '離席中の席は次局の待ちに入れない');
   const round = st.round;
   clock.fireNext(); // 20秒で次局
-  assert.equal(st.round, round + 1);
-  assert.equal(st.phase, 'play');
-  // 人間の操作で連続回数は0に戻る
-  const seat = st.window.kind === 'turn' ? st.window.seats[0] : null;
-  if (seat !== null && seats[seat].kind === 'human') {
-    runner.receiveNow(seat, { k: 'discard', tile: st.game.drawn, sid: st.window.sid });
-    assert.equal(st.timeouts[seat], 0);
-  }
+  assert.ok(st.round >= round + 1);
+  // 本人の「対局に戻る」で離席が解け、連続回数は0に戻る
+  const awaySeat = st.away[0] ? 0 : 2;
+  assert.equal(runner.receiveNow(awaySeat, { k: 'back' }), 'ok');
+  assert.equal(st.away[awaySeat], false);
+  assert.equal(st.timeouts[awaySeat], 0);
   assert.ok(claimTimeouts >= 0);
 });
 
@@ -208,7 +209,7 @@ test('行動の検証：古い局面・他人の席・不正な牌は適用し�
   const st = runner.state;
   const sid = st.window.sid;
   const n = st.game.events.length;
-  assert.equal(runner.receiveNow(0, { k: 'discard', tile: st.game.drawn, sid: sid - 1 }), undefined);
+  assert.equal(runner.receiveNow(0, { k: 'discard', tile: st.game.drawn, sid: sid - 1 }), 'stale');
   assert.equal(st.game.events.length, n, '古い sid は捨てる');
   runner.receiveNow(1, { k: 'discard', tile: st.game.hands[1][0], sid });
   assert.equal(st.game.events.length, n, '他人の手番には適用しない');

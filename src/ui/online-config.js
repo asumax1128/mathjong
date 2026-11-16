@@ -23,6 +23,8 @@ export const ROOM_TTL_MS = 12 * 60 * 60 * 1000; // 部屋の期限（12時間）
 export const SEATS = 4;
 export const NAME_MAX = 10;
 export const NAME_KEY = 'mj-online-name';
+// 段階3：入っている部屋のコード（同じ端末で入り直すと自分の席に戻る・docs/79「8.2」）
+export const ROOM_KEY = 'mj-online-room';
 // 部屋コード：6文字。読み違えやすい I・O・0・1 を除いた32文字
 export const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const CODE_LEN = 6;

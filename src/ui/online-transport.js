@@ -6,6 +6,8 @@
 //   transaction(path, fn)     … fn(現在値) が undefined なら中止。{ committed, value }
 //   onValue(path, cb)         … 値が変わるたびに cb(値)。戻り値で購読をやめる
 //   onDisconnectSet(path, v)  … 接続が切れたら v を書く（presence）。cancelOnDisconnect(path) で取り消す
+//   onDisconnectUpdate(path, obj) … 接続が切れたら path の下の複数の子を書く（ホストの一時停止）
+//   TS                        … サーバー時刻の置き換え値（{'.sv':'timestamp'}。書き込み時にサーバー時刻になる）
 //   close()
 // path は games/mathjong からの相対（例：'rooms/ABC234/meta'）。
 //
@@ -14,6 +16,17 @@
 import { ROOT_PATH, FIREBASE_SDK_BASE, FB_CONFIG, EMU } from './online-config.js';
 
 const clone = (v) => (v === undefined || v === null ? null : JSON.parse(JSON.stringify(v)));
+export const SERVER_TS = Object.freeze({ '.sv': 'timestamp' });
+// 偽バス：サーバー時刻の置き換え値を、書き込みの時刻に置き換える
+const resolveTs = (v, now) => {
+  if (v && typeof v === 'object') {
+    if (v['.sv'] === 'timestamp') return now;
+    const o = Array.isArray(v) ? [] : {};
+    for (const [k, x] of Object.entries(v)) o[k] = resolveTs(x, now);
+    return o;
+  }
+  return v;
+};
 const split = (p) => String(p).split('/').filter(Boolean);
 
 // ---- メモリ上の偽バス ----
@@ -30,7 +43,7 @@ export function createMemoryBus({ now = () => Date.now() } = {}) {
   };
   const writeRaw = (path, value) => {
     const ks = split(path);
-    const v = clone(value);
+    const v = clone(resolveTs(value, now()));
     if (!ks.length) { tree = v; return; }
     if (tree === null || typeof tree !== 'object') tree = {};
     const stack = [];
@@ -65,7 +78,7 @@ export function createMemoryBus({ now = () => Date.now() } = {}) {
     drop(uid) {
       const ops = disconnectOps.get(uid);
       disconnectOps.delete(uid);
-      if (ops) for (const [p, v] of ops) writeRaw(p, v);
+      if (ops) for (const [p, v] of ops) { if (p.startsWith('update:')) { for (const [k, x] of Object.entries(v)) writeRaw(`${p.slice(7)}/${k}`, x); } else writeRaw(p, v); }
       for (const l of [...listeners]) if (l.uid === uid) listeners.delete(l);
       notify();
     },
@@ -76,6 +89,7 @@ export function createMemoryBus({ now = () => Date.now() } = {}) {
         uid,
         kind: 'memory',
         now,
+        TS: SERVER_TS,
         async get(path) { guard(); return read(path); },
         async set(path, v) { guard(); write(path, v); },
         async update(path, obj) {
@@ -104,7 +118,12 @@ export function createMemoryBus({ now = () => Date.now() } = {}) {
           if (!disconnectOps.has(uid)) disconnectOps.set(uid, new Map());
           disconnectOps.get(uid).set(path, clone(v));
         },
-        async cancelOnDisconnect(path) { const m = disconnectOps.get(uid); if (m) m.delete(path); },
+        async onDisconnectUpdate(path, obj) {
+          guard();
+          if (!disconnectOps.has(uid)) disconnectOps.set(uid, new Map());
+          disconnectOps.get(uid).set(`update:${path}`, clone(obj));
+        },
+        async cancelOnDisconnect(path) { const m = disconnectOps.get(uid); if (m) { m.delete(path); m.delete(`update:${path}`); } },
         close() {
           closed = true;
           for (const l of [...listeners]) if (l.uid === uid) listeners.delete(l);
@@ -161,6 +180,7 @@ export async function createFirebaseTransport({ emulator = false, load = loadFir
     uid,
     kind: emulator ? 'emulator' : 'firebase',
     now: () => Date.now() + offset,
+    TS: SERVER_TS,
     async get(path) { return (await D.get(r(path))).val(); },
     set: (path, v) => D.set(r(path), v),
     update: (path, obj) => D.update(r(path), obj),
@@ -175,6 +195,7 @@ export async function createFirebaseTransport({ emulator = false, load = loadFir
       return () => { subs.delete(un); un(); };
     },
     onDisconnectSet: (path, v) => D.onDisconnect(r(path)).set(v),
+    onDisconnectUpdate: (path, obj) => D.onDisconnect(r(path)).update(obj),
     cancelOnDisconnect: (path) => D.onDisconnect(r(path)).cancel(),
     close() {
       if (closed) return;

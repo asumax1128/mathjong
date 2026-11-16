@@ -236,10 +236,9 @@ try {
   // ニックネームは端末に保存：再読込後は名前の入力を飛ばす
   await B.page.reload();
   await B.page.click('[data-action="online-open"]');
-  await waitScreen(B.page, 'menu');
-  assert.equal(await B.page.textContent('.ol-myname'), 'ビー');
-  await join(B.page, code); // 同じ端末（同じ uid）は自分の席に戻る
+  // 段階3：同じ端末（同じ uid）は、入っていた部屋の自分の席へ自動で戻る（名前の入力も飛ばす）
   await waitScreen(B.page, 'lobby');
+  assert.equal(await B.page.evaluate(() => localStorage.getItem('mj-online-name')), 'ビー');
   assert.equal(await B.page.getAttribute('.ol-seat.me', 'data-seat'), '1');
   ok('ニックネームは端末に保存・同じ端末は自分の席に戻る');
 

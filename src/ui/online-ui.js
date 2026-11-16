@@ -2,15 +2,20 @@
 // Firebase SDK はこの画面に入ったときだけ読み込む（online-transport.js）。読込・接続に失敗しても、この画面に文で示すだけで、
 // オフラインの通常対局・初心者の部屋・牌譜には影響しない（app.js の状態 S には触れない）。
 // 画面：接続中 → （停止中／読込失敗）→ ニックネーム（初回）→ メニュー（作る／入る）→ ロビー → 開始済み（段階1の終点）
-import { NAME_KEY, NAME_MAX, ONLINE_PUBLIC, MODES, LENGTHS, modeLabel, normalizeName } from './online-config.js';
+import { NAME_KEY, NAME_MAX, ROOM_KEY, ONLINE_PUBLIC, MODES, LENGTHS, modeLabel, normalizeName, normalizeCode } from './online-config.js';
 import { createFirebaseTransport } from './online-transport.js';
-import { isEnabled, createRoom, joinRoom, changeSettings, startMatch, leaveRoom, enterPresence, watchRoom, setCpu, CPU_AUTO } from './online-lobby.js';
+import { isEnabled, createRoom, joinRoom, changeSettings, startMatch, leaveRoom, enterPresence, watchRoom, setCpu, CPU_AUTO, reopenLobby } from './online-lobby.js';
 import { OPPONENTS } from './opponents.js';
-import { createHostSession, createGuestSession } from './online-session.js';
+import { createHostSession, createGuestSession, loadResume, hostWaitState, HOST_GRACE_MS, AWAY_AFTER_MS } from './online-session.js';
 import * as proto from './online-protocol.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const LEN_LABEL = { 1: '1局戦', 4: '4局戦', 8: '8局戦' };
+const CLOSED_TEXT = {
+  'host-left': '部屋が閉じられました（ホストが退出しました）。',
+  'host-timeout': 'ホストが90秒以内に戻らなかったため、試合は途中で終了しました（結果は確定しません）。',
+  'rematch-out': '再戦は「もう一戦」を押した人だけで始まりました。この部屋からは抜けました。',
+};
 
 function errorText(e, appVersion) {
   const code = e && e.code;
@@ -36,8 +41,10 @@ export function createOnlineUI({ appVersion, emulator = false, store, root, rere
     name: normalizeName(store.get(NAME_KEY, '')),
     error: null, errorKind: null, busy: false,
     mode: 'math1', length: 4, codeDraft: '',
-    view: null, code: null,
+    view: null, code: null, closedReason: null,
   };
+  const graceMs = hostOptions.graceMs ?? HOST_GRACE_MS; // ホストの復帰の猶予（試験用に短くできる）
+  let isHostSession = false;
   let t = null;
   let unwatch = null;
   let session = null; // 対局中のつなぎ（ホスト：createHostSession／ゲスト：createGuestSession）
@@ -56,19 +63,65 @@ export function createOnlineUI({ appVersion, emulator = false, store, root, rere
     if (!(await isEnabled(t))) { st.screen = 'disabled'; redraw(); return; }
     st.screen = st.name ? 'menu' : 'name';
     redraw();
+    if (st.name) await resume();
+  }
+
+  // 段階3：同じ端末で入り直す（docs/79「8.2」「8.3」）。前に入っていた部屋に自分の席があれば戻る。
+  // ホストは記録の再生で試合を続きから（猶予の90秒を過ぎていれば途中終了）。ゲストは最新の配信から描き直す
+  async function resume() {
+    const code = normalizeCode(store.get(ROOM_KEY, ''));
+    if (!code || !alive) return;
+    st.busy = true; redraw();
+    try {
+      const r = await joinRoom(t, { code, name: st.name, appVersion });
+      const meta = r.meta;
+      if (meta.status === 'lobby' || meta.hostUid !== t.uid) { st.busy = false; enterLobby(code); return; }
+      // ホスト：続きから
+      const wait = hostWaitState(meta, t.now(), graceMs);
+      if (wait && wait.expired) {
+        await t.remove(`rooms/${code}`).catch(() => {});
+        store.set(ROOM_KEY, '');
+        st.busy = false; st.code = null; st.closedReason = 'host-timeout'; st.screen = 'closed'; redraw();
+        return;
+      }
+      const data = await loadResume(t, code);
+      st.busy = false;
+      if (!data) { enterLobby(code); return; }
+      st.code = code;
+      enterLobby(code);
+      beginHostGame({ mode: meta.mode, length: meta.length, seats: data.seats, seedBase: data.seedBase, startDealer: data.startDealer }, data);
+    } catch {
+      store.set(ROOM_KEY, '');
+      st.busy = false;
+    }
+    redraw();
   }
 
   function setError(e) { st.error = errorText(e, appVersion); st.errorKind = e && e.code; }
 
   function enterLobby(code) {
-    st.code = code; st.view = null; st.screen = 'lobby'; st.error = null;
+    st.code = code; st.view = null; st.screen = 'lobby'; st.error = null; st.closedReason = null;
+    store.set(ROOM_KEY, code);
     if (unwatch) unwatch();
     unwatch = watchRoom(t, code, (v) => {
       st.view = v;
-      if (v.closed) { stopWatch(); endGame(); st.screen = 'closed'; }
-      else if (v.removed && st.screen === 'lobby') { stopWatch(); st.screen = 'closed'; }
+      if (v.closed) { stopWatch(); const wasGame = st.screen === 'game'; endGame(); store.set(ROOM_KEY, ''); st.closedReason = wasGame && st.closedReason === 'host-wait' ? 'host-timeout' : 'host-left'; st.screen = 'closed'; }
+      else if (v.meta.status === 'lobby' && st.screen === 'game') {
+        // 再戦：ホストが部屋をロビーへ戻した。もう一戦を押していれば（席があれば）ロビーへ、なければ部屋から抜ける
+        endGame();
+        if (v.removed) { stopWatch(); store.set(ROOM_KEY, ''); st.closedReason = 'rematch-out'; st.screen = 'closed'; }
+        else st.screen = 'lobby';
+      }
+      else if (v.removed && st.screen === 'lobby') { stopWatch(); store.set(ROOM_KEY, ''); st.screen = 'closed'; }
       else if (v.meta.status !== 'lobby' && st.screen === 'lobby' && !v.isHost) beginGuestGame(v);
-      else if (v.meta.status !== 'lobby' && st.screen === 'lobby' && v.isHost && !st.busy) st.screen = 'started';
+      else if (v.meta.status !== 'lobby' && st.screen === 'lobby' && v.isHost && !st.busy && !session) st.screen = 'started';
+      // ホストの切断（ゲストの画面）：paused の間は「ホストの復帰を待っています（残り時間）」。猶予を過ぎたら途中終了
+      if (st.screen === 'game' && !isHostSession && game && game.setHostWait) {
+        const w = hostWaitState(v.meta, t.now(), graceMs);
+        if (w) st.closedReason = 'host-wait';
+        else if (st.closedReason === 'host-wait') st.closedReason = null;
+        game.setHostWait(w ? { deadline: w.deadline } : null);
+      }
       redraw();
     });
     enterPresence(t, code).catch(() => {});
@@ -76,15 +129,17 @@ export function createOnlineUI({ appVersion, emulator = false, store, root, rere
   function stopWatch() { if (unwatch) { unwatch(); unwatch = null; } }
 
   // ---- 対局（段階2）：ホストは進行役を動かし、ゲストは配信を受ける。画面は app.js の卓（RemoteTable）----
-  function beginHostGame(r) {
+  // restore：ホストの再読み込みからの復帰（loadResume の値）。記録の再生で続きから
+  function beginHostGame(r, restore = null) {
     if (!game) { st.screen = 'started'; return; }
     const mySeat = r.seats.findIndex((x) => x.kind === 'human' && x.uid === t.uid);
     const rules = game.rulesFor(r.mode);
     st.screen = 'game';
-    game.enter({ proto, mode: r.mode, length: r.length, mySeat, send: (a) => session && session.send(a), leave: leaveGame, now: () => t.now() });
+    isHostSession = true;
+    game.enter({ proto, mode: r.mode, length: r.length, mySeat, send: (a) => session && session.send(a), leave: leaveGame, now: () => t.now(), rematch: hostRematch, isHost: true });
     session = createHostSession(t, st.code, {
-      rules, mode: r.mode, length: r.length, seats: r.seats, seedBase: r.seedBase, startDealer: r.startDealer, mySeat,
-      cpuDelay: { turn: hostOptions.cpuDelayMs ?? 600 }, onView: (pub, priv) => game.update(pub, priv),
+      rules, mode: r.mode, length: r.length, seats: r.seats, seedBase: r.seedBase, startDealer: r.startDealer, mySeat, restore,
+      cpuDelay: { turn: hostOptions.cpuDelayMs ?? 600 }, awayMs: hostOptions.awayMs ?? AWAY_AFTER_MS, onView: (pub, priv) => game.update(pub, priv),
     });
     session.start();
   }
@@ -92,15 +147,30 @@ export function createOnlineUI({ appVersion, emulator = false, store, root, rere
     if (!game || v.mySeat === null) { st.screen = 'started'; return; }
     const mySeat = v.mySeat;
     st.screen = 'game';
-    game.enter({ proto, mode: v.meta.mode, length: v.meta.length, mySeat, send: (a) => session && session.send(a), leave: leaveGame, now: () => t.now() });
+    isHostSession = false;
+    game.enter({ proto, mode: v.meta.mode, length: v.meta.length, mySeat, send: (a) => session && session.send(a), leave: leaveGame, now: () => t.now(), rematch: () => session && session.send({ type: 'ready' }), isHost: false });
     session = createGuestSession(t, st.code, mySeat, { onView: (pub, priv) => game.update(pub, priv) });
+    const w = hostWaitState(v.meta, t.now(), graceMs);
+    if (w && game.setHostWait) game.setHostWait({ deadline: w.deadline });
   }
   function endGame() {
     if (session) { session.stop(); session = null; }
+    isHostSession = false;
     if (game && st.screen === 'game') game.leave();
   }
-  // 対局中の「部屋を出る」：ホストは部屋を閉じる（ホストの移譲はしない）。ゲストは抜ける（席の扱いは段階3）
+  // 再戦（ホスト）：もう一戦を押した人とホストだけでロビーへ戻す（matchNo を進める）。押さなかった人は部屋から外れる
+  function hostRematch() {
+    if (!session || !session.runner) return;
+    const rs = session.runner.state;
+    const seats = rs.rematch ? [...rs.rematch] : [];
+    const uids = seats.map((s) => (st.view && st.view.seats[s] ? st.view.seats[s].uid : null)).filter(Boolean);
+    endGame();
+    st.screen = 'lobby';
+    run(() => reopenLobby(t, st.code, uids));
+  }
+  // 対局中の「部屋を出る」：ホストは部屋を閉じる（ホストの引き継ぎはしない・U3）。ゲストは離席（代打ち）にしてから抜ける（試合は続く）
   function leaveGame() {
+    if (session && !isHostSession) Promise.resolve(session.send({ type: 'away' })).catch(() => {});
     endGame();
     st.screen = 'menu';
     leave().finally(redraw);
@@ -116,6 +186,7 @@ export function createOnlineUI({ appVersion, emulator = false, store, root, rere
 
   async function leave() {
     const code = st.code;
+    store.set(ROOM_KEY, '');
     stopWatch();
     st.code = null; st.view = null;
     if (code && t) await leaveRoom(t, code).catch(() => {});
@@ -143,7 +214,7 @@ export function createOnlineUI({ appVersion, emulator = false, store, root, rere
       }
       case 'ol-start': run(async () => { const r = await startMatch(t, st.code); beginHostGame(r); }); break;
       case 'ol-leave': run(async () => { await leave(); st.screen = 'menu'; }); break;
-      case 'ol-menu': st.screen = 'menu'; st.error = null; redraw(); break;
+      case 'ol-menu': st.screen = 'menu'; st.error = null; st.closedReason = null; redraw(); break;
       default: break;
     }
   }
@@ -198,7 +269,7 @@ export function createOnlineUI({ appVersion, emulator = false, store, root, rere
         ${errHTML()}<button data-action="ol-back">タイトルへ戻る</button>`);
       case 'lobby': return frame(lobbyHTML());
       case 'started': return frame(startedHTML());
-      case 'closed': return frame('<p class="ol-note ol-closed">部屋が閉じられました（ホストが退出しました）。</p><button data-action="ol-menu" class="primary">メニューへ</button>');
+      case 'closed': return frame(`<p class="ol-note ol-closed" data-reason="${esc(st.closedReason || 'host-left')}">${esc(CLOSED_TEXT[st.closedReason] || CLOSED_TEXT['host-left'])}</p><button data-action="ol-menu" class="primary">メニューへ</button>`);
       default: return frame('');
     }
   }

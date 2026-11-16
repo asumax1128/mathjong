@@ -1325,3 +1325,11 @@ table.values td.undef { color: #999; font-size: 12px; }
 .ol-timer .ol-left { color: var(--accent); font-variant-numeric: tabular-nums; }
 .ol-timer .ol-notice { color: #ffd9a8; overflow: hidden; text-overflow: ellipsis; }
 .online-screen .ol-cpu { margin-left: auto; min-width: 0; max-width: 60%; font: inherit; padding: 4px 6px; border-radius: 6px; background: #0e271e; color: var(--ink); border: 1px solid var(--felt-line); }
+
+/* ---- オンライン対戦 段階3：代打ち中の戻るボタン（帯の中）・ホストの復帰待ち／途中終了・再戦 ---- */
+.ol-timer .ol-back { pointer-events: auto; margin-left: 4px; }
+.ol-host-wait h2, .ol-host-ended h2 { margin-top: 0; }
+.ol-host-count { font-size: 1.1rem; }
+.ol-host-left { font-size: 1.6rem; color: var(--gold); font-variant-numeric: tabular-nums; }
+.ol-ref { margin: 4px 0 8px; padding-left: 1.2em; }
+.ol-rematch-note { margin: 8px 0 0; }
