@@ -42,6 +42,8 @@ module.exports = {
         expiresAt: { '.validate': `newData.isNumber() && newData.val() <= newData.parent().child('createdAt').val() + ${TTL}` },
         startedAt: { '.validate': 'newData.isNumber()' },
         matchNo: { '.validate': 'newData.isNumber() && newData.val() >= 0' },
+        // 段階2：空席の CPU の選択（'auto' か名簿の ID を「,」でつないだもの）
+        cpus: { '.validate': "newData.isString() && newData.val().matches(/^[a-z,]{0,64}$/)" },
         $other: no,
       },
       seats: {
@@ -53,10 +55,14 @@ module.exports = {
               || (!data.exists() && newData.child('uid').val() === auth.uid && ${META}.child('status').val() === 'lobby' && !${IS_MEMBER})
               || (data.child('uid').val() === auth.uid && newData.exists() && newData.child('uid').val() === auth.uid)
               || (data.child('uid').val() === auth.uid && !newData.exists() && ${META}.child('status').val() === 'lobby'))`,
-          '.validate': "newData.hasChildren(['uid', 'name', 'kind', 'joinedAt'])",
+          // 人間の席は uid を持ち、CPU の席（段階2・ホストだけが書く）は uid を持たず cpuId を持つ
+          '.validate': `newData.hasChildren(['name', 'kind', 'joinedAt'])
+            && ((newData.child('kind').val() === 'human' && newData.hasChild('uid') && !newData.hasChild('cpuId'))
+              || (newData.child('kind').val() === 'cpu' && newData.hasChild('cpuId') && !newData.hasChild('uid')))`,
           uid: { '.validate': 'newData.isString()' },
           name: { '.validate': 'newData.isString() && newData.val().length >= 1 && newData.val().length <= 10' },
-          kind: { '.validate': "newData.val() === 'human'" },
+          kind: { '.validate': "newData.val() === 'human' || newData.val() === 'cpu'" },
+          cpuId: { '.validate': "newData.isString() && newData.val().matches(/^[a-z]{2,16}$/)" },
           joinedAt: { '.validate': 'newData.isNumber()' },
           $other: no,
         },

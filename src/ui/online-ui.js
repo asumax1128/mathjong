@@ -4,7 +4,10 @@
 // 画面：接続中 → （停止中／読込失敗）→ ニックネーム（初回）→ メニュー（作る／入る）→ ロビー → 開始済み（段階1の終点）
 import { NAME_KEY, NAME_MAX, ONLINE_PUBLIC, MODES, LENGTHS, modeLabel, normalizeName } from './online-config.js';
 import { createFirebaseTransport } from './online-transport.js';
-import { isEnabled, createRoom, joinRoom, changeSettings, startMatch, leaveRoom, enterPresence, watchRoom } from './online-lobby.js';
+import { isEnabled, createRoom, joinRoom, changeSettings, startMatch, leaveRoom, enterPresence, watchRoom, setCpu, CPU_AUTO } from './online-lobby.js';
+import { OPPONENTS } from './opponents.js';
+import { createHostSession, createGuestSession } from './online-session.js';
+import * as proto from './online-protocol.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const LEN_LABEL = { 1: '1局戦', 4: '4局戦', 8: '8局戦' };
@@ -26,7 +29,8 @@ function errorText(e, appVersion) {
 }
 
 // store：{ get(k, d), set(k, v) }（app.js の localStorage の窓口）。root：#app。rerender：app.js の render。onExit：タイトルへ戻る
-export function createOnlineUI({ appVersion, emulator = false, store, root, rerender, onExit, connect = createFirebaseTransport }) {
+// game：app.js の対局画面の窓口（enter・update・leave・rulesFor）。hostOptions：進行役の設定（CPU の待ち時間など）
+export function createOnlineUI({ appVersion, emulator = false, store, root, rerender, onExit, connect = createFirebaseTransport, game = null, hostOptions = {} }) {
   const st = {
     screen: 'connecting', // connecting | load-failed | disabled | name | menu | lobby | started | closed
     name: normalizeName(store.get(NAME_KEY, '')),
@@ -36,6 +40,7 @@ export function createOnlineUI({ appVersion, emulator = false, store, root, rere
   };
   let t = null;
   let unwatch = null;
+  let session = null; // 対局中のつなぎ（ホスト：createHostSession／ゲスト：createGuestSession）
   let alive = true;
   const redraw = () => { if (alive) rerender(); };
 
@@ -60,14 +65,47 @@ export function createOnlineUI({ appVersion, emulator = false, store, root, rere
     if (unwatch) unwatch();
     unwatch = watchRoom(t, code, (v) => {
       st.view = v;
-      if (v.closed) { stopWatch(); st.screen = 'closed'; }
+      if (v.closed) { stopWatch(); endGame(); st.screen = 'closed'; }
       else if (v.removed && st.screen === 'lobby') { stopWatch(); st.screen = 'closed'; }
-      else if (v.meta.status !== 'lobby') st.screen = 'started';
+      else if (v.meta.status !== 'lobby' && st.screen === 'lobby' && !v.isHost) beginGuestGame(v);
+      else if (v.meta.status !== 'lobby' && st.screen === 'lobby' && v.isHost && !st.busy) st.screen = 'started';
       redraw();
     });
     enterPresence(t, code).catch(() => {});
   }
   function stopWatch() { if (unwatch) { unwatch(); unwatch = null; } }
+
+  // ---- 対局（段階2）：ホストは進行役を動かし、ゲストは配信を受ける。画面は app.js の卓（RemoteTable）----
+  function beginHostGame(r) {
+    if (!game) { st.screen = 'started'; return; }
+    const mySeat = r.seats.findIndex((x) => x.kind === 'human' && x.uid === t.uid);
+    const rules = game.rulesFor(r.mode);
+    st.screen = 'game';
+    game.enter({ proto, mode: r.mode, length: r.length, mySeat, send: (a) => session && session.send(a), leave: leaveGame, now: () => t.now() });
+    session = createHostSession(t, st.code, {
+      rules, mode: r.mode, length: r.length, seats: r.seats, seedBase: r.seedBase, startDealer: r.startDealer, mySeat,
+      cpuDelay: { turn: hostOptions.cpuDelayMs ?? 600 }, onView: (pub, priv) => game.update(pub, priv),
+    });
+    session.start();
+  }
+  function beginGuestGame(v) {
+    if (!game || v.mySeat === null) { st.screen = 'started'; return; }
+    const mySeat = v.mySeat;
+    st.screen = 'game';
+    game.enter({ proto, mode: v.meta.mode, length: v.meta.length, mySeat, send: (a) => session && session.send(a), leave: leaveGame, now: () => t.now() });
+    session = createGuestSession(t, st.code, mySeat, { onView: (pub, priv) => game.update(pub, priv) });
+  }
+  function endGame() {
+    if (session) { session.stop(); session = null; }
+    if (game && st.screen === 'game') game.leave();
+  }
+  // 対局中の「部屋を出る」：ホストは部屋を閉じる（ホストの移譲はしない）。ゲストは抜ける（席の扱いは段階3）
+  function leaveGame() {
+    endGame();
+    st.screen = 'menu';
+    leave().finally(redraw);
+    redraw();
+  }
 
   async function run(fn) {
     if (st.busy) return;
@@ -103,14 +141,18 @@ export function createOnlineUI({ appVersion, emulator = false, store, root, rere
         run(async () => { const r = await joinRoom(t, { code: st.codeDraft, name: st.name, appVersion }); enterLobby(r.code); });
         break;
       }
-      case 'ol-start': run(() => startMatch(t, st.code)); break;
+      case 'ol-start': run(async () => { const r = await startMatch(t, st.code); beginHostGame(r); }); break;
       case 'ol-leave': run(async () => { await leave(); st.screen = 'menu'; }); break;
       case 'ol-menu': st.screen = 'menu'; st.error = null; redraw(); break;
       default: break;
     }
   }
   // ラジオ（作成時の設定・ロビーのホストの設定）
-  function change(act, value) {
+  function change(act, value, data = {}) {
+    if (act === 'ol-cpu') {
+      if (st.screen === 'lobby' && st.view && st.view.isHost) run(() => setCpu(t, st.code, Number(data.slot), value));
+      return;
+    }
     if (act !== 'ol-mode' && act !== 'ol-length') return;
     const patch = act === 'ol-mode' ? { mode: MODES.includes(value) ? value : 'math1' } : { length: LENGTHS.includes(Number(value)) ? Number(value) : 4 };
     if (st.screen === 'lobby' && st.view && st.view.isHost) run(() => changeSettings(t, st.code, patch));
@@ -124,6 +166,7 @@ export function createOnlineUI({ appVersion, emulator = false, store, root, rere
   }
 
   function close() {
+    endGame();
     alive = false;
     const tt = t;
     leave().finally(() => { if (tt) tt.close(); });
@@ -162,7 +205,18 @@ export function createOnlineUI({ appVersion, emulator = false, store, root, rere
   function seatsHTML(v) {
     return `<ol class="ol-seats">${v.seats.map((s) => (s.kind === 'human'
       ? `<li class="ol-seat human${s.me ? ' me' : ''}" data-seat="${s.seat}"><span class="ol-dot ${s.online ? 'on' : 'off'}" aria-label="${s.online ? '接続中' : '未接続'}"></span><span class="ol-name">${esc(s.name)}</span>${s.host ? '<small class="ol-tag">ホスト</small>' : ''}${s.me ? '<small class="ol-tag">あなた</small>' : ''}</li>`
-      : `<li class="ol-seat cpu" data-seat="${s.seat}"><span class="ol-dot cpu"></span><span class="ol-name">CPU（予定）</span></li>`)).join('')}</ol>`;
+      : `<li class="ol-seat cpu" data-seat="${s.seat}"><span class="ol-dot cpu"></span>${cpuLabelHTML(v, s)}</li>`)).join('')}</ol>`;
+  }
+  // 空席の CPU：ホストは12人から選ぶ（既定は自動）。ゲストには選択を表示だけ。開始後は決まった名前
+  function cpuLabelHTML(v, s) {
+    if (s.cpuId) return `<span class="ol-name">${esc(s.name)}</span><small class="ol-tag">CPU</small>`;
+    const pickName = (id) => (id === CPU_AUTO ? '自動' : (OPPONENTS.find((o) => o.id === id) || {}).name || id);
+    if (v.isHost && v.meta.status === 'lobby') {
+      const opts = [`<option value="${CPU_AUTO}"${s.pick === CPU_AUTO ? ' selected' : ''}>自動（おまかせ）</option>`,
+        ...OPPONENTS.map((o) => `<option value="${o.id}"${s.pick === o.id ? ' selected' : ''}>${esc(o.name)}（${esc(o.levelLabel)}）</option>`)].join('');
+      return `<span class="ol-name">CPU（予定）</span><select class="ol-cpu" data-action="ol-cpu" data-slot="${s.slot}" aria-label="空席${s.seat + 1}の CPU"${st.busy ? ' disabled' : ''}>${opts}</select>`;
+    }
+    return `<span class="ol-name">CPU（予定）：${esc(pickName(s.pick || CPU_AUTO))}</span>`;
   }
   function lobbyHTML() {
     const v = st.view;

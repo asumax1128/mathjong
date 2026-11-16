@@ -1,5 +1,5 @@
-name: Online stage 1 (lobby) checks (emulator only, no deploy)
-# オンライン対戦 段階1（ロビーまで・docs/79）。Auth・Database エミュレータ（demo- プロジェクト）だけを使い、本番の Firebase には接続しない。
+name: Online stage 1-2 (lobby, match) checks (emulator only, no deploy)
+# オンライン対戦 段階1（ロビーまで）・段階2（2人で1局通し）・docs/79・docs/80・docs/81。Auth・Database エミュレータ（demo- プロジェクト）だけを使い、本番の Firebase には接続しない。
 on:
   pull_request:
     paths:
@@ -11,7 +11,9 @@ on:
       - 'scripts/prepare-mathjong-rules.cjs'
       - 'scripts/build-emulator-rules.cjs'
       - 'tests/online-*'
-      - 'tests/e2e/online-lobby.mjs'
+      - 'tests/e2e/online-*.mjs'
+      - 'src/ui/opponents.js'
+      - 'src/engine/**'
       - '.github/workflows/online-lobby.yml'
   workflow_dispatch:
 permissions:
@@ -28,9 +30,10 @@ jobs:
       - name: Syntax checks
         run: |
           for f in src/ui/online-config.js src/ui/online-transport.js src/ui/online-lobby.js src/ui/online-ui.js src/ui/app.js \
+                   src/ui/online-protocol.js src/ui/online-host.js src/ui/online-session.js tests/online-sim.js tests/e2e/online-match.mjs \
                    firebase/mathjong-rules.cjs scripts/prepare-mathjong-rules.cjs scripts/build-emulator-rules.cjs \
                    tests/online-rules-emulator.mjs tests/online-lobby-emulator.mjs tests/e2e/online-lobby.mjs; do node --check "$f"; done
-      - name: Unit tests (all, including the memory-bus lobby tests and the rules prepare script)
+      - name: Unit tests (all, including the memory-bus lobby/host/match tests and the rules prepare script)
         run: npm test
   emulator:
     runs-on: ubuntu-24.04
@@ -51,11 +54,11 @@ jobs:
           npx playwright install --with-deps chromium
       - name: Build emulator rules (games/mathjong fragment only)
         run: node scripts/build-emulator-rules.cjs
-      - name: Rules tests, lobby integration (SDK) and multi-context browser E2E on the emulators
+      - name: Rules tests, lobby integration (SDK) and multi-context browser E2E (lobby, 1-round match) on the emulators
         run: |
           mkdir -p "$RUNNER_TEMP/online-shots"
           "$RUNNER_TEMP/firebase-cli/node_modules/.bin/firebase" emulators:exec --only auth,database --project demo-mathjong --config firebase.emulator.json \
-            "node tests/online-rules-emulator.mjs && node tests/online-lobby-emulator.mjs && node tests/e2e/online-lobby.mjs --shots $RUNNER_TEMP/online-shots"
+            "node tests/online-rules-emulator.mjs && node tests/online-lobby-emulator.mjs && node tests/e2e/online-lobby.mjs --shots $RUNNER_TEMP/online-shots && node tests/e2e/online-match.mjs --shots $RUNNER_TEMP/online-shots"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

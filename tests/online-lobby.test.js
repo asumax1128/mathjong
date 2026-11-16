@@ -2,7 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMemoryBus } from '../src/ui/online-transport.js';
-import { createRoom, joinRoom, changeSettings, startMatch, leaveRoom, enterPresence, watchRoom, isEnabled, LobbyError, viewOf } from '../src/ui/online-lobby.js';
+import { createRoom, joinRoom, changeSettings, startMatch, leaveRoom, enterPresence, watchRoom, isEnabled, LobbyError, viewOf, setCpu, planSeats, parseCpus, CPU_IDS } from '../src/ui/online-lobby.js';
+import { createRng } from '../src/engine/rng.js';
 import { generateCode, normalizeCode, normalizeName, CODE_RE, CODE_ALPHABET, ROOM_TTL_MS, RULESET } from '../src/ui/online-config.js';
 
 const V = '0.7.0';
@@ -97,8 +98,9 @@ test('参加：版の違い・期限切れ（期限切れは丸ごと消える�
   await rejects(joinRoom(ts[2], { code, name: 'C', appVersion: V }), 'started');
   // 開始後でも、同じ uid（同じ端末）は自分の席に戻れる
   const back = await joinRoom(ts[1], { code, name: 'B2', appVersion: V });
-  assert.deepEqual([back.seat, back.rejoined], [1, true]);
-  assert.equal(bus.read(`rooms/${code}/seats/1/name`), 'B2');
+  assert.equal(back.rejoined, true);
+  assert.equal(bus.read(`rooms/${code}/seats/${back.seat}/uid`), 'u1', '開始で決め直した席に戻る');
+  assert.equal(bus.read(`rooms/${code}/seats/${back.seat}/name`), 'B2');
   advance(ROOM_TTL_MS + 1);
   await rejects(joinRoom(ts[2], { code, name: 'C', appVersion: V }), 'expired');
   await tick();
@@ -189,4 +191,60 @@ test('viewOf：meta が無ければ closed・期限切れの印', () => {
   const v = viewOf('u', 'ABCDEF', { hostUid: 'u', status: 'lobby', expiresAt: 10 }, { 0: { uid: 'u', name: 'a', kind: 'human' } }, {}, 11);
   assert.equal(v.expired, true);
   assert.equal(v.mySeat, 0);
+});
+
+test('段階2：空席の CPU の選択（ホストだけ・既定は自動・同じ人を2枠に選べない）', async () => {
+  const { ts, bus } = setup(2);
+  const { code } = await createRoom(ts[0], { name: 'ホスト', appVersion: V });
+  await joinRoom(ts[1], { code, name: 'B', appVersion: V });
+  let v;
+  watchRoom(ts[0], code, (x) => { v = x; });
+  await tick();
+  assert.deepEqual(v.seats.filter((s) => s.kind === 'cpu').map((s) => [s.slot, s.pick]), [[0, 'auto'], [1, 'auto']]);
+  await rejects(setCpu(ts[1], code, 0, 'kanata'), 'not-host');
+  await rejects(setCpu(ts[0], code, 0, 'nobody'), 'bad-settings');
+  await setCpu(ts[0], code, 0, 'kanata');
+  await setCpu(ts[0], code, 1, 'kanata'); // 同じ人：後から選んだ枠を優先し、前の枠は自動へ
+  assert.deepEqual(parseCpus(bus.read(`rooms/${code}/meta/cpus`)), ['auto', 'kanata', 'auto']);
+  await tick();
+  assert.deepEqual(v.seats.filter((s) => s.kind === 'cpu').map((s) => s.pick), ['auto', 'kanata']);
+});
+
+test('段階2：開始時の席決め（無作為）：人間と CPU で4席、選んだ CPU は必ず入り、自動は重複なし。最初の親も無作為', () => {
+  const lobby = { 0: { uid: 'a', name: 'A', kind: 'human', joinedAt: 1 }, 2: { uid: 'b', name: 'B', kind: 'human', joinedAt: 2 } };
+  const seen = { order: new Set(), dealer: new Set() };
+  for (let i = 0; i < 200; i++) {
+    const p = planSeats(lobby, 'kanata,auto', createRng(i + 1).next);
+    assert.equal(p.seats.length, 4);
+    assert.deepEqual(p.seats.filter((s) => s.kind === 'human').map((s) => s.uid).sort(), ['a', 'b']);
+    const cpus = p.seats.filter((s) => s.kind === 'cpu').map((s) => s.cpuId);
+    assert.equal(cpus.length, 2);
+    assert.ok(cpus.includes('kanata'));
+    assert.equal(new Set(cpus).size, 2);
+    assert.ok(cpus.every((id) => CPU_IDS.includes(id)));
+    assert.ok(p.startDealer >= 0 && p.startDealer < 4);
+    seen.order.add(p.seats.map((s) => s.uid || 'cpu').join(','));
+    seen.dealer.add(p.startDealer);
+  }
+  assert.ok(seen.order.size >= 6, '席の並びが偏らない');
+  assert.equal(seen.dealer.size, 4, '最初の親は4席どこでも');
+});
+
+test('段階2：開始で seats を決め直し（CPU は uid なし）、seedBase と最初の親は host にだけ書く', async () => {
+  const { ts, bus } = setup(3);
+  const { code } = await createRoom(ts[0], { name: 'ホスト', appVersion: V });
+  await joinRoom(ts[1], { code, name: 'B', appVersion: V });
+  const r = await startMatch(ts[0], code, { rand: createRng(7).next, seedBase: 4242 });
+  const seats = bus.read(`rooms/${code}/seats`);
+  assert.equal(Object.keys(seats).length, 4);
+  assert.deepEqual(Object.values(seats).filter((s) => s.kind === 'human').map((s) => s.uid).sort(), ['u0', 'u1']);
+  for (const s of Object.values(seats).filter((x) => x.kind === 'cpu')) { assert.equal(s.uid, undefined); assert.ok(CPU_IDS.includes(s.cpuId)); }
+  assert.deepEqual(bus.read(`rooms/${code}/host`), { seedBase: 4242, startDealer: r.startDealer });
+  assert.equal(bus.read(`rooms/${code}/meta/status`), 'playing');
+  assert.equal(JSON.stringify(bus.read(`rooms/${code}/meta`)).includes('4242'), false, 'seedBase は meta に出さない');
+  let v;
+  watchRoom(ts[1], code, (x) => { v = x; });
+  await tick();
+  assert.equal(v.seats.filter((s) => s.kind === 'cpu' && s.cpuId).length, 2);
+  assert.equal(v.seats[v.mySeat].uid, 'u1');
 });

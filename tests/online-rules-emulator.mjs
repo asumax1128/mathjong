@@ -153,6 +153,43 @@ await deny('開始後は席を取れない', req('PUT', R(CODE, 'seats/3'), { to
 await deny('開始後はゲストが離席（席の削除）できない', req('DELETE', R(CODE, 'seats/1'), { token: B.token }));
 await allow('開始後も自分の名前は更新できる', req('PUT', R(CODE, 'seats/1/name'), { token: B.token, body: 'もどった' }));
 
+// ---- 段階2：空席の CPU（ホストだけが書く・uid を持たない）と開始時の席の決め直し ----
+const CQ = 'CPUQ22';
+const cpu = (id = 'kanata', extra = {}) => ({ name: 'かなた', kind: 'cpu', cpuId: id, joinedAt: now, ...extra });
+await allow('段階2：ホストが部屋を作る', req('PUT', R(CQ, 'meta'), { token: A.token, body: meta(A.uid) }));
+await allow('段階2：ホストが席0', req('PUT', R(CQ, 'seats/0'), { token: A.token, body: seat(A.uid, 'ホスト') }));
+await allow('段階2：ゲストが席1', req('PUT', R(CQ, 'seats/1'), { token: B.token, body: seat(B.uid, 'ゲスト') }));
+await allow('CPU の選択（meta.cpus）はホストが書ける', req('PUT', R(CQ, 'meta/cpus'), { token: A.token, body: 'kanata,auto' }));
+await deny('CPU の選択をゲストは書けない', req('PUT', R(CQ, 'meta/cpus'), { token: B.token, body: 'auto,auto' }));
+await deny('CPU の選択の形', req('PUT', R(CQ, 'meta/cpus'), { token: A.token, body: 'Kanata!' }));
+await deny('ゲストは CPU の席を書けない', req('PUT', R(CQ, 'seats/2'), { token: B.token, body: cpu() }));
+await deny('部外者は CPU の席を書けない', req('PUT', R(CQ, 'seats/2'), { token: C.token, body: cpu() }));
+await deny('CPU の席に uid は付けられない', req('PUT', R(CQ, 'seats/2'), { token: A.token, body: cpu('kanata', { uid: C.uid }) }));
+await deny('CPU の席には cpuId が要る', req('PUT', R(CQ, 'seats/2'), { token: A.token, body: { name: 'x', kind: 'cpu', joinedAt: now } }));
+await deny('cpuId の形', req('PUT', R(CQ, 'seats/2'), { token: A.token, body: cpu('Kanata1') }));
+await deny('人間の席に cpuId は付けられない', req('PUT', R(CQ, 'seats/3'), { token: C.token, body: seat(C.uid, 'x', { cpuId: 'kanata' }) }));
+await deny('kind は human か cpu', req('PUT', R(CQ, 'seats/2'), { token: A.token, body: cpu('kanata', { kind: 'bot' }) }));
+await deny('ゲストは開始（席の決め直し）をできない', req('PATCH', R(CQ), { token: B.token, body: { 'seats/0': seat(B.uid, 'ゲスト'), 'seats/1': seat(A.uid, 'ホスト'), 'meta/status': 'playing' } }));
+// 開始：席を決め直し（人間の席の入れ替え＋CPU）、host に seedBase、status を playing に。1回のまとめ書き
+await allow('ホストの開始（席の決め直し・CPU・host・status を1回で）', req('PATCH', R(CQ), { token: A.token, body: {
+  'seats/0': cpu('aoto'), 'seats/1': seat(B.uid, 'ゲスト'), 'seats/2': seat(A.uid, 'ホスト'), 'seats/3': cpu('kanata'),
+  host: { seedBase: 123, startDealer: 2 }, 'meta/status': 'playing', 'meta/startedAt': now } }));
+await allow('ホストは CPU の席の priv を書ける（使わないが権限上は可）', req('PUT', R(CQ, 'priv/0'), { token: A.token, body: { s: '{}', seq: 1 } }));
+await deny('CPU の席の priv は誰も読めない（ゲスト）', req('GET', R(CQ, 'priv/0'), { token: B.token }));
+await deny('CPU の席の priv は誰も読めない（ホスト）', req('GET', R(CQ, 'priv/0'), { token: A.token }));
+await deny('CPU の席の act には誰も書けない（ゲスト）', req('PUT', R(CQ, 'act/0/x1'), { token: B.token, body: { k: 'discard', sid: 1, at: now, tile: 1 } }));
+await deny('CPU の席の act には誰も書けない（ホスト）', req('PUT', R(CQ, 'act/3/x1'), { token: A.token, body: { k: 'discard', sid: 1, at: now, tile: 1 } }));
+await allow('席が変わった後も、ゲストは新しい自分の席の act に書ける', req('PUT', R(CQ, 'act/1/x1'), { token: B.token, body: { k: 'ready', sid: 1, at: now } }));
+await deny('ゲストは元の席（いまはホスト）の act に書けない', req('PUT', R(CQ, 'act/2/x1'), { token: B.token, body: { k: 'ready', sid: 1, at: now } }));
+await allow('ホストは priv/1（ゲスト）を書ける', req('PUT', R(CQ, 'priv/1'), { token: A.token, body: { s: '{"hand":[1]}', seq: 2 } }));
+await allow('ゲストは自分の新しい席の priv を読める', req('GET', R(CQ, 'priv/1'), { token: B.token }));
+await deny('ゲストはホストの席の priv を読めない', req('GET', R(CQ, 'priv/2'), { token: B.token }));
+await deny('ゲストは pub/state を書けない', req('PUT', R(CQ, 'pub/state'), { token: B.token, body: { s: '{}', seq: 9 } }));
+await allow('参加者（ゲスト）は pub/state を読める', req('GET', R(CQ, 'pub/state'), { token: B.token }));
+await deny('開始後は CPU の席を人間が取れない', req('PUT', R(CQ, 'seats/0'), { token: C.token, body: seat(C.uid) }));
+await deny('ゲストは CPU の席を消せない', req('DELETE', R(CQ, 'seats/3'), { token: B.token }));
+await allow('段階2：ホストが部屋を消す', req('DELETE', R(CQ), { token: A.token }));
+
 // ---- 部屋の削除と期限切れ ----
 await deny('期限内の部屋をゲストは消せない', req('DELETE', R(CODE), { token: B.token }));
 await deny('期限内の部屋を部外者は消せない', req('DELETE', R(CODE), { token: C.token }));

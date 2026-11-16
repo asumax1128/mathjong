@@ -1317,3 +1317,11 @@ table.values td.undef { color: #999; font-size: 12px; }
 .online-screen .ol-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #6b7d73; }
 .online-screen .ol-dot.on { background: #58d68d; }
 .online-screen .ol-dot.cpu { background: transparent; border: 1px dashed var(--ink-dim); }
+
+/* ---- オンライン対戦 段階2：残り時間の帯（#app の外）・CPU の選択 ---- */
+.ol-timer { position: fixed; left: 50%; top: max(4px, env(safe-area-inset-top)); transform: translateX(-50%); z-index: 40; display: flex; gap: 8px; align-items: center;
+  padding: 4px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.62); color: var(--ink); font-size: 0.85rem; pointer-events: none; max-width: calc(100vw - 32px); white-space: nowrap; }
+.ol-timer:empty { display: none; }
+.ol-timer .ol-left { color: var(--accent); font-variant-numeric: tabular-nums; }
+.ol-timer .ol-notice { color: #ffd9a8; overflow: hidden; text-overflow: ellipsis; }
+.online-screen .ol-cpu { margin-left: auto; min-width: 0; max-width: 60%; font: inherit; padding: 4px 6px; border-radius: 6px; background: #0e271e; color: var(--ink); border: 1px solid var(--felt-line); }
