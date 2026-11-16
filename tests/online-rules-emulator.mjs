@@ -190,6 +190,41 @@ await deny('開始後は CPU の席を人間が取れない', req('PUT', R(CQ, '
 await deny('ゲストは CPU の席を消せない', req('DELETE', R(CQ, 'seats/3'), { token: B.token }));
 await allow('段階2：ホストが部屋を消す', req('DELETE', R(CQ), { token: A.token }));
 
+// ---- 段階3：一時停止（paused・pausedAt）・離席（away）・再戦（ロビーへ戻す） ----
+const P3 = 'PAUS33';
+await allow('段階3：部屋', req('PUT', R(P3, 'meta'), { token: A.token, body: meta(A.uid) }));
+await allow('段階3：ホスト席', req('PUT', R(P3, 'seats/0'), { token: A.token, body: seat(A.uid, 'ホスト') }));
+await allow('段階3：ゲスト席', req('PUT', R(P3, 'seats/1'), { token: B.token, body: seat(B.uid, 'ゲスト') }));
+await allow('段階3：開始', req('PATCH', R(P3), { token: A.token, body: { 'seats/2': cpu('aoto'), 'seats/3': cpu('kanata'), host: { seedBase: 1, startDealer: 0, log: { e000000: '{"r":1}' } }, 'meta/status': 'playing', 'meta/startedAt': now } }));
+await allow('ホストは一時停止（paused・pausedAt）を書ける（onDisconnect と同じ形）', req('PATCH', R(P3, 'meta'), { token: A.token, body: { status: 'paused', pausedAt: { '.sv': 'timestamp' } } }));
+const pm = await req('GET', R(P3, 'meta'), { token: B.token });
+assert.equal(pm.val.status, 'paused');
+assert.equal(typeof pm.val.pausedAt, 'number', 'pausedAt はサーバー時刻');
+await deny('ゲストは一時停止を解けない', req('PATCH', R(P3, 'meta'), { token: B.token, body: { status: 'playing' } }));
+await deny('ゲストは一時停止にできない', req('PATCH', R(P3, 'meta'), { token: B.token, body: { status: 'paused', pausedAt: now } }));
+await deny('pausedAt は数', req('PATCH', R(P3, 'meta'), { token: A.token, body: { pausedAt: 'x' } }));
+await deny('status の値', req('PATCH', R(P3, 'meta'), { token: A.token, body: { status: 'halt' } }));
+await allow('ホストは再開（playing・pausedAt を消す）', req('PATCH', R(P3, 'meta'), { token: A.token, body: { status: 'playing', pausedAt: null } }));
+await allow('ホストは席の離席（away）を書ける', req('PUT', R(P3, 'seats/1/away'), { token: A.token, body: true }));
+await deny('away は真偽値', req('PUT', R(P3, 'seats/1/away'), { token: A.token, body: 'yes' }));
+await deny('CPU の席に away は付けられない', req('PUT', R(P3, 'seats/2/away'), { token: A.token, body: true }));
+await deny('ゲストは他人の away を書けない', req('PUT', R(P3, 'seats/0/away'), { token: B.token, body: true }));
+await allow('ホストは離席を解ける（away を消す）', req('DELETE', R(P3, 'seats/1/away'), { token: A.token }));
+await deny('ゲストは host（行動の記録）を読めない', req('GET', R(P3, 'host/log'), { token: B.token }));
+await allow('ホストは host（行動の記録）を読める（再読み込みからの再生）', req('GET', R(P3, 'host/log'), { token: A.token }));
+await deny('ゲストは行動の記録に書けない', req('PUT', R(P3, 'host/log/e000001'), { token: B.token, body: '{}' }));
+await allow('離席・復帰の act（away・back）は本人が書ける', req('PUT', R(P3, 'act/1/z1'), { token: B.token, body: { k: 'away', sid: 0, at: now } }));
+await allow('復帰の act', req('PUT', R(P3, 'act/1/z2'), { token: B.token, body: { k: 'back', sid: 0, at: now } }));
+await allow('ホストは pub に書ける（再戦の前）', req('PUT', R(P3, 'pub/state'), { token: A.token, body: { s: '{}', seq: 1 } }));
+// 再戦：ホストがロビーへ戻す（席を詰め直し・前の試合の pub/priv/host を消し・matchNo を進める）
+await allow('ホストの再戦（ロビーへ戻す）', req('PATCH', R(P3), { token: A.token, body: {
+  'meta/status': 'lobby', 'meta/matchNo': 1, 'meta/startedAt': null, 'meta/pausedAt': null, pub: null, host: null,
+  'priv/0': null, 'priv/1': null, 'priv/2': null, 'priv/3': null,
+  'seats/0': seat(A.uid, 'ホスト'), 'seats/1': seat(B.uid, 'ゲスト'), 'seats/2': null, 'seats/3': null } }));
+await deny('ゲストは再戦（ロビーへ戻す）をできない', req('PATCH', R(P3), { token: B.token, body: { 'meta/status': 'lobby', 'meta/matchNo': 2 } }));
+await allow('再戦のロビーには新しい人が入れる', req('PUT', R(P3, 'seats/2'), { token: C.token, body: seat(C.uid, 'さん') }));
+await allow('段階3：ホストが部屋を消す', req('DELETE', R(P3), { token: A.token }));
+
 // ---- 部屋の削除と期限切れ ----
 await deny('期限内の部屋をゲストは消せない', req('DELETE', R(CODE), { token: B.token }));
 await deny('期限内の部屋を部外者は消せない', req('DELETE', R(CODE), { token: C.token }));

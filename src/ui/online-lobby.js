@@ -132,7 +132,7 @@ export async function startMatch(t, code, { rand = Math.random, seedBase = Math.
 // 接続の有無：入室中は online:true。切れたら onDisconnect で online:false
 export async function enterPresence(t, code) {
   const p = room(code, `presence/${t.uid}`);
-  await t.onDisconnectSet(p, { online: false, at: Math.floor(t.now()) });
+  await t.onDisconnectSet(p, { online: false, at: t.TS || Math.floor(t.now()) });
   await t.set(p, { online: true, at: Math.floor(t.now()) });
 }
 
@@ -189,4 +189,24 @@ export function viewOf(uid, code, meta, seats, presence, now) {
     canStart: meta.hostUid === uid && canStart(meta, seats),
     expired: !(meta.expiresAt > now),
   };
+}
+
+// 段階3：再戦（docs/79「7.1」）。最終結果の後、ホストが部屋をロビーへ戻す。「もう一戦」を押した人（keepUids）とホストだけが残り、
+// 席は詰めて並べ直す（ホストが席0）。前の試合の pub・priv・host は消し、matchNo を1つ進める。CPU の選択（meta.cpus）は残す
+export async function reopenLobby(t, code, keepUids) {
+  const [meta, seats] = await Promise.all([t.get(room(code, 'meta')), t.get(room(code, 'seats'))]);
+  if (!meta) fail('not-found');
+  if (meta.hostUid !== t.uid) fail('not-host');
+  const humans = [];
+  for (let i = 0; i < SEATS; i++) { const x = seats && seats[i]; if (x && x.kind === 'human') humans.push(x); }
+  const keep = new Set(keepUids || []);
+  keep.add(t.uid);
+  const order = [...humans.filter((x) => x.uid === t.uid), ...humans.filter((x) => x.uid !== t.uid && keep.has(x.uid))];
+  const upd = {
+    'meta/status': 'lobby', 'meta/matchNo': (meta.matchNo || 0) + 1, 'meta/startedAt': null, 'meta/pausedAt': null,
+    pub: null, host: null, 'priv/0': null, 'priv/1': null, 'priv/2': null, 'priv/3': null,
+  };
+  for (let i = 0; i < SEATS; i++) upd[`seats/${i}`] = order[i] ? { uid: order[i].uid, name: order[i].name, kind: 'human', joinedAt: order[i].joinedAt || Math.floor(t.now()) } : null;
+  await t.update(room(code), upd);
+  return { seats: order.length, matchNo: upd['meta/matchNo'] };
 }

@@ -193,6 +193,7 @@ const ONLINE_EMU = IS_LOCAL && params.get('online') === 'emu';
 const ONLINE_ENTRY = ONLINE_EMU;
 const ONLINE_APP_VERSION = (IS_LOCAL && params.get('onlineAppVersion')) || APP_VERSION;
 let onlineUI = null;
+const localMs = (k) => (IS_LOCAL && params.get(k) !== null ? Math.max(0, Number(params.get(k)) || 0) : undefined);
 function openOnline() {
   if (!ONLINE_ENTRY || S.screen !== 'title' || S.onlineOpening) return;
   S.onlineError = null; S.onlineOpening = true;
@@ -203,7 +204,10 @@ function openOnline() {
       appVersion: ONLINE_APP_VERSION, emulator: ONLINE_EMU, store, root: app,
       rerender: () => { if (S.screen === 'online') render(); }, onExit: exitOnline, game: onlineGame,
       // ?onlineCpuDelay=（ローカルだけ・試験用）：CPU の手番の間（ミリ秒）。既定は 600
-      hostOptions: { cpuDelayMs: IS_LOCAL && params.get('onlineCpuDelay') !== null ? Math.max(0, Number(params.get('onlineCpuDelay')) || 0) : undefined },
+      // ?onlineHostGraceMs=・?onlineAwayMs=（ローカルだけ・試験用）：ホストの復帰の猶予（既定90秒）・切断から代打ちまで（既定10秒）
+      hostOptions: {
+        cpuDelayMs: localMs('onlineCpuDelay'), graceMs: localMs('onlineHostGraceMs'), awayMs: localMs('onlineAwayMs'),
+      },
     });
     S.screen = 'online';
     render();
@@ -223,10 +227,10 @@ let onlineProto = null; // online-protocol.js（オンラインに入ったと�
 const onlineGame = {
   rulesFor: (mode) => rulesForMode(mode),
   // proto：online-protocol.js。send(action)：行動を送る。leave()：部屋を出る。now()：サーバー時刻の推定
-  enter({ proto, mode, length, mySeat, send, leave, now }) {
+  enter({ proto, mode, length, mySeat, send, leave, now, rematch = null, isHost = false }) {
     onlineProto = proto;
     if (drag && drag.isDragging()) drag.cancel('render');
-    S.online = { mySeat, send, leave, now, pub: null, priv: null, sentSid: null, readySid: null };
+    S.online = { mySeat, send, leave, now, rematch, isHost, pub: null, priv: null, sentSid: null, readySid: null, rematchSid: null, hostWait: null, prevModal: null };
     S.mode = mode;
     rules = rulesForMode(mode);
     S.matchSettings = { mode, length, chars: [], seats: [], ruleset: CURRENT_RULESET, newRules: true, exam: false, online: true };
@@ -247,7 +251,8 @@ const onlineGame = {
     const newRound = !o.pub || o.pub.round !== pub.round;
     o.pub = pub; o.priv = priv;
     if (o.sentSid !== null && o.sentSid !== pub.sid) o.sentSid = null;
-    PLAYERS = perm(pub.players).map((x) => (x.kind === 'cpu' && ROSTER_BY_ID[x.cpuId] ? { ...ROSTER_BY_ID[x.cpuId], kind: 'ai' } : { name: x.name, kind: x.kind === 'cpu' ? 'ai' : 'human', styleLabel: x.kind === 'cpu' ? 'CPU' : 'オンライン' }));
+    // 離席中（代打ち）の人は名前に印を付ける（全員の画面に分かるように）
+    PLAYERS = perm(pub.players).map((x) => (x.kind === 'cpu' && ROSTER_BY_ID[x.cpuId] ? { ...ROSTER_BY_ID[x.cpuId], kind: 'ai' } : { name: x.away ? `${x.name}（代打ち）` : x.name, kind: x.kind === 'cpu' ? 'ai' : 'human', styleLabel: x.kind === 'cpu' ? 'CPU' : 'オンライン', away: !!x.away }));
     S.match = onlineProto.rotateMatch(pub.match, me);
     S.scores = S.match.scores;
     S.round = pub.round;
@@ -257,10 +262,21 @@ const onlineGame = {
     if (newRound) onlineRoundReset();
     S.game = onlineProto.buildRemoteTable(rules, pub, priv, me, { sent: o.sentSid === pub.sid });
     S.dealer = S.game.dealer;
-    if (pub.phase === 'final') { if (S.modal !== 'final') { closeHint(); S.modal = 'final'; } }
+    if (S.modal === 'online-host') { /* ホストの復帰待ちの表示を優先（配信は止まっている） */ }
+    else if (pub.phase === 'final') { if (S.modal !== 'final') { closeHint(); S.modal = 'final'; } }
     else if (pub.phase === 'result') { if (o.resultRound !== pub.round) { o.resultRound = pub.round; closeHint(); S.modal = 'result'; } }
     onlineTimerTick();
     step(true);
+  },
+  // ホストの切断（ゲストの画面）：{ deadline } の間は「ホストの復帰を待っています（残り時間）」。締切を過ぎたら途中終了。null で戻す
+  setHostWait(w) {
+    const o = S.online;
+    if (!o) return;
+    const was = o.hostWait;
+    o.hostWait = w;
+    if (w && !was) { o.prevModal = S.modal === 'online-host' ? null : S.modal; closeHint(); S.modal = 'online-host'; }
+    else if (!w && was) S.modal = o.prevModal || (o.pub && o.pub.phase === 'final' ? 'final' : o.pub && o.pub.phase === 'result' ? 'result' : null);
+    if (S.screen === 'game') render();
   },
   leave() {
     onlineTimerStop();
@@ -301,7 +317,27 @@ onlineTimerEl.setAttribute('role', 'status');
 let onlineTimerId = null;
 function onlineTimerStart() { if (!onlineTimerEl.isConnected) document.body.appendChild(onlineTimerEl); clearInterval(onlineTimerId); onlineTimerId = setInterval(onlineTimerTick, 250); onlineTimerTick(); }
 function onlineTimerStop() { clearInterval(onlineTimerId); onlineTimerId = null; onlineTimerEl.remove(); }
-const ONLINE_NOTICE = { overridden: '他家の宣言が優先されました', timeout: '時間切れ：自動で進めました', rejected: 'その操作はできませんでした' };
+const ONLINE_NOTICE = { overridden: '他家の宣言が優先されました', timeout: '時間切れ：自動で進めました', rejected: 'その操作はできませんでした', away: '離席中：代打ち（CPU）が打っています' };
+onlineTimerEl.addEventListener('click', (ev) => {
+  const b = ev.target.closest('[data-action="online-back"]');
+  if (b && S.online) { S.online.send({ type: 'back' }); b.disabled = true; }
+});
+// ホストの復帰待ち・途中終了（ゲストの画面）
+function onlineHostHTML() {
+  const o = S.online;
+  const w = o && o.hostWait;
+  if (!w) return '';
+  if (w.expired || w.deadline <= o.now()) {
+    const m = S.match;
+    const rows = m ? [0, 1, 2, 3].map((s) => `<li>${s === HUMAN ? 'あなた' : PLAYERS[s].name}：${m.scores[s]}点</li>`).join('') : '';
+    return `<div class="ol-host-ended" role="alert"><h2>途中終了</h2><p>ホストが90秒以内に戻らなかったため、試合は途中で終了しました。<b>結果は確定しません。</b></p>
+      ${rows ? `<p class="note">参考：精算が済んだ局までの持ち点</p><ul class="ol-ref">${rows}</ul>` : ''}
+      <div class="modal-actions"><button data-action="online-leave" class="primary">部屋を出る</button></div></div>`;
+  }
+  return `<div class="ol-host-wait" role="status"><h2>ホストの復帰を待っています</h2><p>ホストの接続が切れました。ホストがページを開き直すと、続きから再開します。</p>
+    <p class="ol-host-count">残り <b class="ol-host-left">${Math.max(0, Math.ceil((w.deadline - o.now()) / 1000))}</b> 秒</p>
+    <div class="modal-actions"><button data-action="online-leave">部屋を出る</button></div></div>`;
+}
 function onlineTimerTick() {
   const o = S.online;
   if (!o || !o.pub) { onlineTimerEl.textContent = ''; return; }
@@ -313,7 +349,17 @@ function onlineTimerTick() {
   else if (w && (w.kind === 'claim' || w.kind === 'reask')) what = w.kind === 'reask' ? 'ロンの確認' : '宣言の受付';
   else if (w && w.kind === 'next') what = o.pub.phase === 'result' ? '次の局まで' : '';
   const notice = o.priv && o.priv.notice && ONLINE_NOTICE[o.priv.notice] ? `<span class="ol-notice">${ONLINE_NOTICE[o.priv.notice]}</span>` : '';
-  const html = what && left !== null ? `<span class="ol-what">${what}</span><b class="ol-left" data-left="${left}">残り ${left}秒</b>${notice}` : notice;
+  // 自分が離席中（代打ち）：戻るボタン
+  const meAway = o.pub.players && o.pub.players[o.mySeat] && o.pub.players[o.mySeat].away;
+  const back = meAway ? '<button type="button" class="ol-back small" data-action="online-back">代打ち中：対局に戻る</button>' : '';
+  const html = (what && left !== null ? `<span class="ol-what">${what}</span><b class="ol-left" data-left="${left}">残り ${left}秒</b>${notice}` : notice) + back;
+  // ホストの復帰待ち：残り秒数（締切を過ぎたら途中終了の表示へ描き直す）
+  if (o.hostWait) {
+    const hl = Math.max(0, Math.ceil((o.hostWait.deadline - o.now()) / 1000));
+    const el = document.querySelector('.ol-host-left');
+    if (el && el.textContent !== String(hl)) el.textContent = String(hl);
+    if (hl === 0 && !o.hostWait.expired) { o.hostWait.expired = true; if (S.screen === 'game') render(); }
+  }
   if (onlineTimerEl.innerHTML !== html) onlineTimerEl.innerHTML = html;
   onlineTimerEl.dataset.kind = w ? w.kind : '';
 }
@@ -323,6 +369,17 @@ function onlineResultActionsHTML(over) {
   const ready = o.pub && o.pub.window && o.pub.window.kind === 'next' && (o.readySid === o.pub.sid || (o.pub.window.ready || []).includes(o.mySeat));
   return `<div class="modal-actions"><button data-action="online-next" class="primary"${ready ? ' disabled' : ''}>${ready ? 'ほかの人を待っています…' : over ? '最終結果へ' : '次の局へ'}</button>
     <button data-action="close-result">盤面を見る</button></div>`;
+}
+// 最終結果（オンライン）：もう一戦（押した人だけで再戦）／部屋を出る。ホストが押すと、押した人とホストでロビーへ戻る
+function onlineFinalActionsHTML() {
+  const o = S.online;
+  const w = o.pub && o.pub.window;
+  const ready = w && w.kind === 'rematch' ? w.ready || [] : [];
+  const mine = ready.includes(o.mySeat) || o.rematchSid === (o.pub && o.pub.sid);
+  const others = ready.filter((s) => s !== o.mySeat).length;
+  const label = o.isHost ? `もう一戦（ロビーへ${others ? `・${others}人が参加` : ''}）` : mine ? 'ホストの再戦を待っています…' : 'もう一戦';
+  return `<p class="note ol-rematch-note">「もう一戦」を押した人だけで、同じ部屋のロビーへ戻って再戦できます。押さない人は部屋から抜けます。</p>
+    <div class="modal-actions final-actions"><button data-action="online-rematch" class="primary"${!o.isHost && mine ? ' disabled' : ''}>${label}</button><button data-action="online-leave">部屋を出る</button></div>`;
 }
 function exitOnline() {
   onlineUI = null;
@@ -1299,7 +1356,8 @@ function modalHTML() {
   if (S.modal === 'table') body = tableHTML();
   if (S.modal === 'settings') body = settingsHTML();
   if (S.modal === 'final') body = finalHTML();
-  const closable = S.modal !== 'result' && S.modal !== 'final';
+  if (S.modal === 'online-host') body = onlineHostHTML();
+  const closable = S.modal !== 'result' && S.modal !== 'final' && S.modal !== 'online-host';
   return `<div class="overlay${S.modal === 'result' ? ' overlay-result' : ''}" role="dialog" aria-modal="true"><div class="modal">${body}
     ${closable ? '<div class="modal-actions"><button data-action="close" class="primary">閉じる</button></div>' : ''}</div></div>`;
 }
@@ -1454,7 +1512,7 @@ function finalHTML() {
     </ul>
     ${matchLogHTML(m)}
     ${S.matchSettings.exam ? examResultHTML(rk[HUMAN]) : ''}
-    ${S.online ? '<div class="modal-actions final-actions"><button data-action="online-leave" class="primary">部屋を出る</button></div>' : `<div class="modal-actions final-actions">${S.matchSettings.exam ? '<button data-action="br-back" class="primary">初心者の部屋へ戻る</button>' : ''}<button data-action="again" class="${S.matchSettings.exam ? '' : 'primary'}">同じ3人と再戦</button><button data-action="change-opponents">相手を変更</button><button data-action="to-title">タイトルへ戻る</button></div>`}
+    ${S.online ? onlineFinalActionsHTML() : `<div class="modal-actions final-actions">${S.matchSettings.exam ? '<button data-action="br-back" class="primary">初心者の部屋へ戻る</button>' : ''}<button data-action="again" class="${S.matchSettings.exam ? '' : 'primary'}">同じ3人と再戦</button><button data-action="change-opponents">相手を変更</button><button data-action="to-title">タイトルへ戻る</button></div>`}
   </div>`;
 }
 
@@ -1900,6 +1958,14 @@ app.addEventListener('click', (ev) => {
       break;
     }
     case 'online-leave': if (S.online) S.online.leave(); break;
+    case 'online-rematch': {
+      const o = S.online;
+      if (!o || !o.pub || o.pub.phase !== 'final' || !o.rematch) break;
+      if (!o.isHost) { if (o.rematchSid === o.pub.sid) break; o.rematchSid = o.pub.sid; }
+      o.rematch();
+      render();
+      break;
+    }
     case 'pr-open': openReview(); render(); break;
     case 'pr-exit': exitReview(); break;
     case 'tile': {

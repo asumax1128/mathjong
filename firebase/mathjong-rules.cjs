@@ -33,7 +33,8 @@ module.exports = {
           && (data.exists() || (newData.child('createdAt').val() >= now - ${SKEW} && newData.child('createdAt').val() <= now + ${SKEW}
               && newData.child('status').val() === 'lobby'))`,
         hostUid: { '.validate': 'newData.isString()' },
-        status: { '.validate': "newData.isString() && newData.val().matches(/^(lobby|playing|closed)$/)" },
+        // 段階3：paused＝ホストの切断（ホストの onDisconnect が書く）
+        status: { '.validate': "newData.isString() && newData.val().matches(/^(lobby|playing|paused|closed)$/)" },
         mode: { '.validate': "newData.isString() && newData.val().matches(/^math[12]$/)" },
         length: { '.validate': 'newData.val() === 1 || newData.val() === 4 || newData.val() === 8' },
         ruleset: { '.validate': 'newData.val() === 2' },
@@ -41,6 +42,8 @@ module.exports = {
         createdAt: { '.validate': 'newData.isNumber()' },
         expiresAt: { '.validate': `newData.isNumber() && newData.val() <= newData.parent().child('createdAt').val() + ${TTL}` },
         startedAt: { '.validate': 'newData.isNumber()' },
+        // 段階3：ホストが切れた時刻（サーバー時刻）。ゲストは pausedAt＋90秒まで待つ
+        pausedAt: { '.validate': 'newData.isNumber()' },
         matchNo: { '.validate': 'newData.isNumber() && newData.val() >= 0' },
         // 段階2：空席の CPU の選択（'auto' か名簿の ID を「,」でつないだもの）
         cpus: { '.validate': "newData.isString() && newData.val().matches(/^[a-z,]{0,64}$/)" },
@@ -63,6 +66,8 @@ module.exports = {
           name: { '.validate': 'newData.isString() && newData.val().length >= 1 && newData.val().length <= 10' },
           kind: { '.validate': "newData.val() === 'human' || newData.val() === 'cpu'" },
           cpuId: { '.validate': "newData.isString() && newData.val().matches(/^[a-z]{2,16}$/)" },
+          // 段階3：離席（代打ち中）。人間の席だけ
+          away: { '.validate': "newData.isBoolean() && newData.parent().child('kind').val() === 'human'" },
           joinedAt: { '.validate': 'newData.isNumber()' },
           $other: no,
         },
