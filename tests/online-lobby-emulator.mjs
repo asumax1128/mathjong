@@ -62,6 +62,9 @@ await leaveRoom(D, code);
 await until(() => hv.seats[3].kind === 'cpu'); ok('ゲストの退出で CPU 予定に戻る');
 await startMatch(A, code);
 await until(() => gv.meta.status === 'playing'); ok('開始が全員に届く');
+await until(() => hv.seats.filter((x) => x.kind === 'cpu' && x.cpuId).length === 1);
+assert.equal(hv.seats.filter((x) => x.kind === 'human').length, 3);
+assert.ok(gv.mySeat !== null && gv.seats[gv.mySeat].uid === B.uid); ok('開始で席を決め直し、空席は CPU（uid なし）');
 await assert.rejects(joinRoom(E, { code, name: 'イー', appVersion: V }), (e) => e.code === 'started'); ok('開始後は入れない');
 
 // 期限切れ：所有者権限で古い部屋を置き、参加の試みで丸ごと消える
@@ -73,7 +76,7 @@ assert.equal(await owner('GET', 'games/mathjong/rooms/XPRD77/meta'), null); ok('
 
 // 切断：B の接続を閉じると onDisconnect で offline
 B.close();
-await until(() => hv.seats[1].online === false); ok('切断で presence が offline');
+await until(() => hv.seats.find((x) => x.uid === B.uid).online === false); ok('切断で presence が offline');
 stopA(); stopB();
 await leaveRoom(A, code);
 assert.equal(await owner('GET', `games/mathjong/rooms/${code}`), null);

@@ -201,7 +201,9 @@ function openOnline() {
     if (S.screen !== 'title') return;
     onlineUI = m.createOnlineUI({
       appVersion: ONLINE_APP_VERSION, emulator: ONLINE_EMU, store, root: app,
-      rerender: () => { if (S.screen === 'online') render(); }, onExit: exitOnline,
+      rerender: () => { if (S.screen === 'online') render(); }, onExit: exitOnline, game: onlineGame,
+      // ?onlineCpuDelay=（ローカルだけ・試験用）：CPU の手番の間（ミリ秒）。既定は 600
+      hostOptions: { cpuDelayMs: IS_LOCAL && params.get('onlineCpuDelay') !== null ? Math.max(0, Number(params.get('onlineCpuDelay')) || 0) : undefined },
     });
     S.screen = 'online';
     render();
@@ -212,6 +214,115 @@ function openOnline() {
     S.onlineError = 'オンライン対戦の画面を読み込めませんでした。ひとりでの対局はできます。';
     if (S.screen === 'title') render();
   });
+}
+// ---- オンライン対戦の対局画面（段階2・docs/79「7.2」）：配信値から RemoteTable（自分が席0）を作り、S.game の代わりに渡して
+// 既存の卓の描画・ヒント・自動パス・オートツモ切りをそのまま使う。操作はエンジンに適用せず act への追記（send）だけ。
+// 進行（AI・精算・次局）はホストの進行役（online-host.js）が行い、ここでは配信値を表示するだけ。牌譜は記録しない。
+S.online = null;
+let onlineProto = null; // online-protocol.js（オンラインに入ったときだけ読み込む）
+const onlineGame = {
+  rulesFor: (mode) => rulesForMode(mode),
+  // proto：online-protocol.js。send(action)：行動を送る。leave()：部屋を出る。now()：サーバー時刻の推定
+  enter({ proto, mode, length, mySeat, send, leave, now }) {
+    onlineProto = proto;
+    if (drag && drag.isDragging()) drag.cancel('render');
+    S.online = { mySeat, send, leave, now, pub: null, priv: null, sentSid: null, readySid: null };
+    S.mode = mode;
+    rules = rulesForMode(mode);
+    S.matchSettings = { mode, length, chars: [], seats: [], ruleset: CURRENT_RULESET, newRules: true, exam: false, online: true };
+    S.history = [];
+    S.screen = 'game';
+    S.modal = null;
+    S.game = null;
+    S.autoSort = { on: false, key: null };
+    S.publicAiHistory = newPublicHistory();
+    onlineTimerStart();
+  },
+  update(pub, priv) {
+    if (!S.online || !onlineProto) return;
+    const o = S.online;
+    const me = o.mySeat;
+    const rot = onlineProto.rotOf(me);
+    const perm = (a) => [0, 1, 2, 3].map((l) => a[(l + me) % 4]);
+    const newRound = !o.pub || o.pub.round !== pub.round;
+    o.pub = pub; o.priv = priv;
+    if (o.sentSid !== null && o.sentSid !== pub.sid) o.sentSid = null;
+    PLAYERS = perm(pub.players).map((x) => (x.kind === 'cpu' && ROSTER_BY_ID[x.cpuId] ? { ...ROSTER_BY_ID[x.cpuId], kind: 'ai' } : { name: x.name, kind: x.kind === 'cpu' ? 'ai' : 'human', styleLabel: x.kind === 'cpu' ? 'CPU' : 'オンライン' }));
+    S.match = onlineProto.rotateMatch(pub.match, me);
+    S.scores = S.match.scores;
+    S.round = pub.round;
+    S.prevScores = pub.prevScores ? perm(pub.prevScores) : null;
+    S.lastRound = pub.lastRound ? { ...pub.lastRound, dealer: rot(pub.lastRound.dealer) } : null;
+    S.scored = pub.phase !== 'play';
+    if (newRound) onlineRoundReset();
+    S.game = onlineProto.buildRemoteTable(rules, pub, priv, me, { sent: o.sentSid === pub.sid });
+    S.dealer = S.game.dealer;
+    if (pub.phase === 'final') { if (S.modal !== 'final') { closeHint(); S.modal = 'final'; } }
+    else if (pub.phase === 'result') { if (o.resultRound !== pub.round) { o.resultRound = pub.round; closeHint(); S.modal = 'result'; } }
+    onlineTimerTick();
+    step(true);
+  },
+  leave() {
+    onlineTimerStop();
+    S.online = null;
+    onlineProto = null;
+    if (S.screen === 'game') leaveGame('online');
+  },
+};
+// 局が変わったときの画面だけの初期化（startRound の画面側と同じ。ゲームの状態はホストの配信値）
+function onlineRoundReset() {
+  clearTimeout(S.timer);
+  S.timer = null;
+  S.stepDeferred = false;
+  S.gameSerial = (S.gameSerial || 0) + 1;
+  S.handOrder = null;
+  S.selected = null;
+  S.hintStats = { discover: 0, confirm: 0, table: 0 };
+  S.hintCounted = { discover: new Set(), confirm: new Set() };
+  S.hintsUsed = 0;
+  closeHint();
+  S.modal = null;
+  S.claimPolicy = null;
+  S.riichiSelect = false;
+  S.ankanSelect = false;
+  S.autoTsumo.on = false;
+  S.autoTsumo.key = null;
+  fxClear();
+  sound.silence();
+  S.autoPass.noticePending = false;
+  S.autoPass.noticeKind = null;
+  S.autoPass.noticeKey = null;
+  S.autoPass.shownKind = null;
+}
+// 残り時間の表示（全員に同じ締切。ホストの時計で判定し、ここは表示だけ）。#app の外の小さな帯で、1秒ごとに文字だけ更新する
+const onlineTimerEl = document.createElement('div');
+onlineTimerEl.className = 'ol-timer';
+onlineTimerEl.setAttribute('role', 'status');
+let onlineTimerId = null;
+function onlineTimerStart() { if (!onlineTimerEl.isConnected) document.body.appendChild(onlineTimerEl); clearInterval(onlineTimerId); onlineTimerId = setInterval(onlineTimerTick, 250); onlineTimerTick(); }
+function onlineTimerStop() { clearInterval(onlineTimerId); onlineTimerId = null; onlineTimerEl.remove(); }
+const ONLINE_NOTICE = { overridden: '他家の宣言が優先されました', timeout: '時間切れ：自動で進めました', rejected: 'その操作はできませんでした' };
+function onlineTimerTick() {
+  const o = S.online;
+  if (!o || !o.pub) { onlineTimerEl.textContent = ''; return; }
+  const w = o.pub.window;
+  const left = w && w.deadline ? Math.max(0, Math.ceil((w.deadline - o.now()) / 1000)) : null;
+  const rot = onlineProto ? onlineProto.rotOf(o.mySeat) : (x) => x;
+  let what = '';
+  if (w && w.kind === 'turn') what = rot(w.seat) === HUMAN ? 'あなたの番' : `${nameOf(rot(w.seat))} の番`;
+  else if (w && (w.kind === 'claim' || w.kind === 'reask')) what = w.kind === 'reask' ? 'ロンの確認' : '宣言の受付';
+  else if (w && w.kind === 'next') what = o.pub.phase === 'result' ? '次の局まで' : '';
+  const notice = o.priv && o.priv.notice && ONLINE_NOTICE[o.priv.notice] ? `<span class="ol-notice">${ONLINE_NOTICE[o.priv.notice]}</span>` : '';
+  const html = what && left !== null ? `<span class="ol-what">${what}</span><b class="ol-left" data-left="${left}">残り ${left}秒</b>${notice}` : notice;
+  if (onlineTimerEl.innerHTML !== html) onlineTimerEl.innerHTML = html;
+  onlineTimerEl.dataset.kind = w ? w.kind : '';
+}
+// オンラインの局の結果・最終結果のボタン（次へ＝準備OK。ホストは全員を進める）
+function onlineResultActionsHTML(over) {
+  const o = S.online;
+  const ready = o.pub && o.pub.window && o.pub.window.kind === 'next' && (o.readySid === o.pub.sid || (o.pub.window.ready || []).includes(o.mySeat));
+  return `<div class="modal-actions"><button data-action="online-next" class="primary"${ready ? ' disabled' : ''}>${ready ? 'ほかの人を待っています…' : over ? '最終結果へ' : '次の局へ'}</button>
+    <button data-action="close-result">盤面を見る</button></div>`;
 }
 function exitOnline() {
   onlineUI = null;
@@ -387,6 +498,7 @@ function step(changed = false) {
     scheduleAutoTsumogiri();
     return;
   }
+  if (S.online) { render(); return; } // オンライン：ほかの席の判断はホストが進める（ここでは表示だけ）
   if (changed) render();
   const [turnDelay, claimDelay] = speedDelays(S.speed, IS_LOCAL);
   S.timer = setTimeout(() => {
@@ -445,6 +557,11 @@ function scheduleAutoTsumogiri() {
 
 function finishRound() {
   const g = S.game;
+  if (S.online) { // オンライン：精算はホストの配信値（S.match）。結果の画面を出すだけ
+    if (S.modal !== 'final' && S.modal !== 'result' && S.online.pub && S.online.resultRound !== S.online.pub.round) { S.online.resultRound = S.online.pub.round; S.modal = 'result'; }
+    render();
+    return;
+  }
   if (!S.scored) {
     // 試合の状態に反映（親子の精算・連荘／親交代・終了判定）。1局につき1回だけ。
     S.scored = true;
@@ -478,6 +595,15 @@ function applyHumanAction(action, source = 'human') {
   const g = S.game;
   const p = g.pending();
   if (!p || p.seat !== HUMAN) return 'ignored';
+  if (S.online) {
+    // オンライン：エンジンには適用せず、ホストへ送るだけ（同じ局面で2回は送らない）。届いた配信で画面が進む
+    const o = S.online;
+    if (!o.pub || o.sentSid === o.pub.sid) return 'ignored';
+    o.sentSid = o.pub.sid;
+    o.send(action);
+    S.game = onlineProto.buildRemoteTable(rules, o.pub, o.priv, o.mySeat, { sent: true });
+    return 'ok';
+  }
   const eventsBefore = g.events.length;
   try {
     applyAction(g, HUMAN, action);
@@ -1022,7 +1148,8 @@ function actionsHTML() {
   if (p.seat !== HUMAN) {
     const kan = p.type === 'turn' ? recentKan() : null;
     // AI の暗カン：記録の順（暗カン → 嶺上ツモ → カンドラ）で、その AI の打牌までの間だけ示す
-    const what = kan && kan.seat === p.seat ? `${nameOf(p.seat)} 暗カン → 嶺上ツモ（カンドラ追加）…`
+    // オンライン：誰の判断かを出さない待ち（宣言の受付・送信済み）は waitText（RemoteTable が作る）
+    const what = p.waitText ? p.waitText : kan && kan.seat === p.seat ? `${nameOf(p.seat)} 暗カン → 嶺上ツモ（カンドラ追加）…`
       : p.type === 'turn' ? `${nameOf(p.seat)} の手番…` : `${nameOf(p.seat)} が考え中…`;
     // リーチ中は他家の番でもオートツモ切りを切り替えられる（次の自分のツモから反映）
     return `<div class="actions waiting"><span class="status">${what}</span>${g.riichi[HUMAN] ? autoTsumoToggleHTML() : ''}</div>`;
@@ -1256,8 +1383,8 @@ function resultHTML() {
     <h3>${S.lastRound.label}${S.lastRound.renchan ? `（連荘${S.lastRound.renchan}）` : ''}の精算</h3>${payout}${depositLineHTML()}${scores}${nextLine}${hints}
     <details><summary>全員の手牌を見る</summary>${[0, 1, 2, 3].map(revealHTML).join('')}</details>
     ${reportInfoHTML()}
-    <div class="modal-actions"><button data-action="next" class="primary">${m.over ? '最終結果へ' : '次の局へ'}</button>
-    <button data-action="close-result">盤面を見る</button></div></div>`;
+    ${S.online ? onlineResultActionsHTML(m.over) : `<div class="modal-actions"><button data-action="next" class="primary">${m.over ? '最終結果へ' : '次の局へ'}</button>
+    <button data-action="close-result">盤面を見る</button></div>`}</div>`;
 }
 
 // 結果画面の供託（リーチ宣言料・docs/65）：この局の宣言料、和了者が得た供託、持ち越し、四家立直・試合終了の返還
@@ -1292,6 +1419,7 @@ const ROUND_LIMIT_NOTE = `通し局数の上限（${MAX_ROUND.toLocaleString('en
 // 牌譜の保存状態（短い文）。内容（手牌・山）は出さない。記録中・未保存／保存中／保存済み／保存失敗／対象外を区別する
 // （文言は src/ui/paifu-recorder.js の describePaifuStatus。牌譜の機能の読込前・失敗時は、ここの短い文）
 function paifuStatusText() {
+  if (S.online) return 'オンライン対戦は牌譜の記録の対象外です';
   const st = paifu.status();
   if (paifuSys) return paifuSys.describe(st).text;
   if (st.reason === 'exam' || st.reason === 'replay-url' || st.reason === 'old-ruleset') return 'この対局は牌譜の記録の対象外です';
@@ -1326,7 +1454,7 @@ function finalHTML() {
     </ul>
     ${matchLogHTML(m)}
     ${S.matchSettings.exam ? examResultHTML(rk[HUMAN]) : ''}
-    <div class="modal-actions final-actions">${S.matchSettings.exam ? '<button data-action="br-back" class="primary">初心者の部屋へ戻る</button>' : ''}<button data-action="again" class="${S.matchSettings.exam ? '' : 'primary'}">同じ3人と再戦</button><button data-action="change-opponents">相手を変更</button><button data-action="to-title">タイトルへ戻る</button></div>
+    ${S.online ? '<div class="modal-actions final-actions"><button data-action="online-leave" class="primary">部屋を出る</button></div>' : `<div class="modal-actions final-actions">${S.matchSettings.exam ? '<button data-action="br-back" class="primary">初心者の部屋へ戻る</button>' : ''}<button data-action="again" class="${S.matchSettings.exam ? '' : 'primary'}">同じ3人と再戦</button><button data-action="change-opponents">相手を変更</button><button data-action="to-title">タイトルへ戻る</button></div>`}
   </div>`;
 }
 
@@ -1471,12 +1599,14 @@ function oppDetailHTML(id) {
 
 // 対戦相手の名前（席の順）：最終結果・再現情報で使う
 function opponentsText() {
+  if (S.online) return [1, 2, 3].map((s) => `${POS[s]} ${PLAYERS[s].name}（${PLAYERS[s].kind === 'human' ? '人' : LEVEL_LABELS[LEVEL_BY_ID[PLAYERS[s].id]] || 'CPU'}）`).join('・');
   return [1, 2, 3].map((s) => `${POS[s]} ${PLAYERS[s].name}（${LEVEL_LABELS[LEVEL_BY_ID[PLAYERS[s].id]]}）`).join('・');
 }
 
 // 不具合報告用の再現情報。山は seed と局の通し番号（round）で決まり、親の席・親番・連荘回数・局数も URL で指定する。
 // （持ち点は再現しない。連荘で「局番号から親が決まらない」ため dealer を明示する）
 function reportInfoHTML() {
+  if (S.online) return '<p class="note report-info">オンライン対戦（再現情報は出しません。山・seed はホストだけが持ちます）</p>';
   const m = S.match;
   const label = S.scored && S.lastRound ? S.lastRound : { label: handLabel(m), renchan: m.renchan };
   const hand = S.scored && S.lastRound ? m.log[m.log.length - 1].hand : m.hand;
@@ -1606,8 +1736,8 @@ function settingsHTML() {
     <p class="note setting-note">チー・ポンの自動パスは、対戦画面の手牌の下のボタンで切り替えます（いま：チー ${S.chiAutoPass ? 'ON' : 'OFF'}・ポン ${S.ponAutoPass ? 'ON' : 'OFF'}）。チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。</p>
     ${reportInfoHTML()}
     ${paifuStatusText() ? `<p class="note paifu-status" role="status">${paifuStatusText()}</p>` : ''}
-    <div class="modal-actions"><button data-action="reset">新しい対局（得点リセット）</button>
-      ${S.confirmTitle ? '<span class="confirm-title">この対局を終了しますか？<button data-action="to-title" class="danger">終了してタイトルへ</button><button data-action="cancel-title">続ける</button></span>' : '<button data-action="ask-title">タイトルへ戻る</button>'}</div>`;
+    <div class="modal-actions">${S.online ? '' : '<button data-action="reset">新しい対局（得点リセット）</button>'}
+      ${S.confirmTitle ? S.online ? '<span class="confirm-title">部屋を出ますか？<button data-action="online-leave" class="danger">部屋を出る</button><button data-action="cancel-title">続ける</button></span>' : '<span class="confirm-title">この対局を終了しますか？<button data-action="to-title" class="danger">終了してタイトルへ</button><button data-action="cancel-title">続ける</button></span>' : '<button data-action="ask-title">タイトルへ戻る</button>'}</div>`;
 }
 
 // ---------- ヒント ----------
@@ -1761,6 +1891,15 @@ app.addEventListener('click', (ev) => {
   if (S.screen === 'online') { if (onlineUI && act.startsWith('ol-')) onlineUI.handle(act, el.dataset); return; }
   switch (act) {
     case 'online-open': openOnline(); render(); break;
+    case 'online-next': {
+      const o = S.online;
+      if (!o || !o.pub || o.pub.phase !== 'result' || o.readySid === o.pub.sid) break;
+      o.readySid = o.pub.sid;
+      o.send({ type: 'ready' });
+      render();
+      break;
+    }
+    case 'online-leave': if (S.online) S.online.leave(); break;
     case 'pr-open': openReview(); render(); break;
     case 'pr-exit': exitReview(); break;
     case 'tile': {
@@ -1903,16 +2042,19 @@ app.addEventListener('click', (ev) => {
     case 'close-result': S.modal = null; render(); break;
     case 'show-result': S.modal = 'result'; render(); break;
     case 'next':
+      if (S.online) break;
       // 試合が終わっていれば最終結果へ。続くなら次の局（連荘なら同じ親、親交代なら下家が親）
       if (S.match.over) { S.modal = 'final'; paifuPrefetch(); render(); break; }
       S.round++;
       startRound();
       break;
     case 'reset':
+      if (S.online) break;
       // 設定画面の「新しい対局」：予約したモード（S.nextMode）・タイトルで選んだ局数と、この試合の3人（座席は選び直す）
       startMatch({ settings: { mode: S.nextMode, length: S.length, chars: S.matchSettings.chars, ruleset: CURRENT_RULESET } });
       break;
     case 'again':
+      if (S.online) break;
       // 同じ3人と再戦：終了した試合と同じ設定（モード・局数・3人）で、新しい山・全員100点から。座席は選び直す。
       // 予約中の次回用モード（S.nextMode）やタイトルの選択（S.length）は使わない。
       S.seedBase = Math.floor(Math.random() * 1e9);
@@ -2065,7 +2207,7 @@ app.addEventListener('click', (ev) => {
 });
 
 app.addEventListener('change', (ev) => {
-  if (S.screen === 'online') { const a = ev.target.dataset.action; if (onlineUI && a && a.startsWith('ol-')) onlineUI.change(a, ev.target.value); return; }
+  if (S.screen === 'online') { const a = ev.target.dataset.action; if (onlineUI && a && a.startsWith('ol-')) onlineUI.change(a, ev.target.value, ev.target.dataset); return; }
   if (ev.target.dataset.action === 'fx-mode') {
     // 値の保存だけ（ゲームは進めない）。表示中の演出は変えず、次の演出から反映する。
     S.fx.mode = parseEffectMode(ev.target.value);

@@ -5,6 +5,16 @@
 // ・設定の変更と開始はホストだけ（ルールでも守る）。開始は人間2人以上。段階1では status を playing にするまで。
 // ・退出：ホストは部屋を丸ごと消す（ホストの移譲はしない・U3）。ゲストは自分の席を外す。
 import { ROOM_TTL_MS, SEATS, MODES, LENGTHS, RULESET, generateCode, normalizeCode, normalizeName } from './online-config.js';
+import { OPPONENTS, drawOpponents, assignSeats } from './opponents.js';
+
+// 段階2：空席の CPU（U7）。meta.cpus は CPU の枠（空席を席の順に並べたもの）ごとの選択を「,」でつないだ文字列。
+// 'auto'＝自動（開始時に、選ばれていない人から無作為に選ぶ。ローカルの「おまかせ」と同じ drawOpponents）。
+export const CPU_AUTO = 'auto';
+export const CPU_IDS = OPPONENTS.map((o) => o.id);
+export const parseCpus = (s) => {
+  const a = String(s || '').split(',').map((x) => x.trim());
+  return [0, 1, 2].map((i) => (CPU_IDS.includes(a[i]) ? a[i] : CPU_AUTO));
+};
 
 export class LobbyError extends Error {
   constructor(code, detail) { super(code); this.code = code; this.detail = detail; }
@@ -79,12 +89,44 @@ export async function changeSettings(t, code, { mode, length }) {
   await t.update(room(code, 'meta'), patch);
 }
 
-export async function startMatch(t, code) {
+// CPU の枠の選択（ホストだけ）。同じ人を2つの枠に選べない（後から選んだ枠を優先し、ほかの枠の同じ人は自動に戻す）
+export async function setCpu(t, code, slot, id) {
+  if (!(slot >= 0 && slot < 3) || !(id === CPU_AUTO || CPU_IDS.includes(id))) fail('bad-settings');
+  const meta = await t.get(room(code, 'meta'));
+  if (!meta) fail('not-found');
+  if (meta.hostUid !== t.uid) fail('not-host');
+  if (meta.status !== 'lobby') fail('started');
+  const cpus = parseCpus(meta.cpus).map((x, i) => (i === slot ? id : x === id ? CPU_AUTO : x));
+  await t.update(room(code, 'meta'), { cpus: cpus.join(',') });
+}
+
+// 開始の席決め（ホストの端末で無作為に・U9）：人間と CPU を4席に並べ、最初の親も無作為。純関数（rand を渡す）
+export function planSeats(lobbySeats, cpus, rand) {
+  const humans = [];
+  for (let i = 0; i < SEATS; i++) { const s = lobbySeats && lobbySeats[i]; if (s && s.kind === 'human') humans.push({ kind: 'human', uid: s.uid, name: s.name, joinedAt: s.joinedAt }); }
+  const n = SEATS - humans.length;
+  const picks = parseCpus(cpus).slice(0, n);
+  const fixed = picks.filter((x) => x !== CPU_AUTO);
+  const autos = drawOpponents(rand, picks.length - fixed.length, CPU_IDS.filter((id) => !fixed.includes(id)));
+  const autoQueue = assignSeats(autos, rand);
+  const cpuIds = picks.map((x) => (x === CPU_AUTO ? autoQueue.shift() : x));
+  const cpuSeats = cpuIds.map((id) => { const o = OPPONENTS.find((x) => x.id === id); return { kind: 'cpu', cpuId: id, name: o ? o.name : id }; });
+  const order = assignSeats([...humans, ...cpuSeats], rand);
+  return { seats: order, startDealer: Math.floor(rand() * SEATS) };
+}
+
+// 開始：人間2人以上。席を決め直して seats に書き、seedBase と最初の親は host（ホストだけが読める）へ。status を playing に
+export async function startMatch(t, code, { rand = Math.random, seedBase = Math.floor(rand() * 1e9) } = {}) {
   const [meta, seats] = await Promise.all([t.get(room(code, 'meta')), t.get(room(code, 'seats'))]);
   if (!meta) fail('not-found');
   if (meta.hostUid !== t.uid) fail('not-host');
   if (!canStart(meta, seats)) fail('need-two');
-  await t.update(room(code, 'meta'), { status: 'playing', startedAt: Math.floor(t.now()) });
+  const plan = planSeats(seats, meta.cpus, rand);
+  const now = Math.floor(t.now());
+  const upd = { host: { seedBase, startDealer: plan.startDealer }, 'meta/status': 'playing', 'meta/startedAt': now };
+  plan.seats.forEach((s, i) => { upd[`seats/${i}`] = s.kind === 'human' ? { uid: s.uid, name: s.name, kind: 'human', joinedAt: s.joinedAt || now } : { name: s.name, kind: 'cpu', cpuId: s.cpuId, joinedAt: now }; });
+  await t.update(room(code), upd);
+  return { seats: plan.seats, startDealer: plan.startDealer, seedBase, mode: meta.mode, length: meta.length };
 }
 
 // 接続の有無：入室中は online:true。切れたら onDisconnect で online:false
@@ -128,9 +170,14 @@ export function viewOf(uid, code, meta, seats, presence, now) {
     const s = seats && seats[i];
     if (s && s.kind === 'human') {
       const p = presence && presence[s.uid];
-      list.push({ seat: i, kind: 'human', name: s.name, me: s.uid === uid, host: s.uid === meta.hostUid, online: !!(p && p.online) });
-    } else list.push({ seat: i, kind: 'cpu' });
+      list.push({ seat: i, kind: 'human', name: s.name, uid: s.uid, me: s.uid === uid, host: s.uid === meta.hostUid, online: !!(p && p.online) });
+    } else if (s && s.kind === 'cpu') list.push({ seat: i, kind: 'cpu', name: s.name, cpuId: s.cpuId });
+    else list.push({ seat: i, kind: 'cpu', slot: null });
   }
+  // ロビーの空席：CPU の枠を席の順に割り当てる（枠ごとの選択は meta.cpus）
+  const cpus = parseCpus(meta.cpus);
+  let slot = 0;
+  for (const s of list) if (s.kind === 'cpu' && !s.cpuId) { s.slot = slot; s.pick = cpus[slot]; slot++; }
   const mine = list.find((s) => s.me);
   return {
     code, closed: false, meta,

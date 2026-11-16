@@ -185,7 +185,7 @@ try {
   ok('誤ったコード（形が違う・無い部屋）');
   await join(B.page, code.toLowerCase());
   await waitScreen(B.page, 'lobby');
-  await waitSeats(B.page, ['ホスト<b>', 'ビー', 'CPU（予定）', 'CPU（予定）']);
+  await waitSeats(B.page, ['ホスト<b>', 'ビー', 'CPU（予定）：自動', 'CPU（予定）：自動']); // ゲストには CPU の選択（既定は自動）を表示だけ
   await waitSeats(A.page, ['ホスト<b>', 'ビー', 'CPU（予定）', 'CPU（予定）']);
   await A.page.waitForSelector('[data-action="ol-start"]:not([disabled])');
   assert.equal(await B.page.locator('[data-action="ol-start"]').count(), 0, 'ゲストには開始ボタンが無い');
@@ -243,18 +243,20 @@ try {
   assert.equal(await B.page.getAttribute('.ol-seat.me', 'data-seat'), '1');
   ok('ニックネームは端末に保存・同じ端末は自分の席に戻る');
 
-  // ---- 5. 開始 → 全員が開始状態の表示 ----
+  // ---- 5. 開始 → ロビーが閉じて全員が対局の卓へ（段階2。対局そのものは online-match.mjs）----
   await A.page.click('[data-action="ol-start"]');
-  await waitScreen(A.page, 'started');
-  await waitScreen(B.page, 'started');
-  assert.match(await B.page.textContent('.ol-started'), /数学Ⅱ・8局戦/);
+  await A.page.waitForSelector('.self', { timeout: 20000 });
+  await B.page.waitForSelector('.self', { timeout: 20000 });
+  assert.equal(await B.page.evaluate(() => window.__mathjong.S.online.pub.mode + '/' + window.__mathjong.S.online.pub.length), 'math2/8');
   await shot(B.page, 'started-guest');
   await join(E.page, code);
   await E.page.waitForSelector('.ol-error[data-kind="started"]');
-  ok('開始：ロビーが閉じて全員が開始状態の表示・開始後は入れない');
+  ok('開始：ロビーが閉じて全員が対局の卓へ（数学Ⅱ・8局戦）・開始後は入れない');
 
-  // ---- 6. ホストの退出で部屋が閉じる ----
-  await A.page.click('[data-action="ol-leave"]');
+  // ---- 6. ホストの退出で部屋が閉じる（対局中の設定から「部屋を出る」）----
+  await A.page.click('[data-action="settings"]');
+  await A.page.click('[data-action="ask-title"]');
+  await A.page.click('[data-action="online-leave"]');
   await waitScreen(A.page, 'menu');
   await waitScreen(B.page, 'closed');
   assert.equal(await owner('GET', `games/mathjong/rooms/${code}`), null);
