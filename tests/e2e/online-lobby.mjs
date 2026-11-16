@@ -84,19 +84,20 @@ try {
   await owner('PUT', '.settings/rules', { rules: { games: { mathjong: require('../../firebase/mathjong-rules.cjs') } } });
   await owner('DELETE', 'games/mathjong');
 
-  // ---- 0. 入口：?online=emu が無ければ出ない・SDK も読まない ----
+  // ---- 0. 入口（段階4・公開）：どのタイトルにも「オンライン対戦」が出る。押すまで Firebase SDK は読まない ----
   {
     const { page, errors, sdkRequests } = await newCtx();
     await page.goto(URL0);
     await page.waitForSelector('.title-screen');
-    assert.equal(await page.locator('[data-action="online-open"]').count(), 0);
+    assert.equal(await page.locator('[data-action="online-open"]').count(), 1, '入口が出る');
     await page.waitForTimeout(300);
     assert.deepEqual(sdkRequests, []);
     assert.deepEqual(errors, []);
-    ok('通常のタイトルにはオンライン入口が無く、Firebase SDK を読まない');
+    ok('タイトルにオンライン入口が出る（段階4）・押すまで Firebase SDK を読まない');
   }
 
-  // ---- 0b. 公開サイト相当のホストでは ?online=emu を無視する（入口を出さない） ----
+  // ---- 0b. 公開サイト相当のホスト：入口が出て、押すと本番（asumath-games）へ接続する経路に入る。
+  //      本番には接続しない（本番の認証・データベースへの要求はブラウザ内で止め、行き先だけを確かめる）。?online=emu は無視する ----
   {
     const ctx = await browser.newContext();
     contexts.push(ctx);
@@ -106,14 +107,28 @@ try {
       await route.fulfill({ status: r.status, headers: { 'content-type': r.headers.get('content-type') || 'text/plain' }, body: Buffer.from(await r.arrayBuffer()) });
     });
     let sdk = 0;
-    await ctx.route((u) => u.hostname === 'www.gstatic.com', (route) => { sdk++; return route.abort('failed'); });
+    await ctx.route((u) => u.hostname === 'www.gstatic.com', (route) => {
+      const m = new URL(route.request().url()).pathname.match(/^\/firebasejs\/12\.12\.0\/(firebase-(?:app|auth|database)\.js)$/);
+      sdk++;
+      if (!m) return route.abort('failed');
+      return route.fulfill({ status: 200, contentType: 'text/javascript', body: readFileSync(pjoin(FB_DIR, m[1])) });
+    });
+    // 本番の Firebase（認証・データベース・設定）への要求：送らずに止めて記録する
+    const prod = [];
+    await ctx.route((u) => /(^|\.)googleapis\.com$|firebasedatabase\.app$|firebaseapp\.com$/.test(u.hostname), (route) => { prod.push(route.request().url()); return route.abort('failed'); });
+    const emu = [];
+    await ctx.route((u) => u.hostname === '127.0.0.1' && (u.port === '9000' || u.port === '9099'), (route) => { emu.push(route.request().url()); return route.abort('failed'); });
     const page = await ctx.newPage();
     await page.goto(`http://mathjong.test${BASE}?online=emu`);
     await page.waitForSelector('.title-screen');
-    await page.waitForTimeout(300);
-    assert.equal(await page.locator('[data-action="online-open"]').count(), 0);
-    assert.equal(sdk, 0);
-    ok('公開サイト相当のホストでは ?online=emu でも入口が出ない（段階1は本番に接続しない）');
+    assert.equal(await page.locator('[data-action="online-open"]').count(), 1, '公開ホストでも入口が出る');
+    assert.equal(sdk, 0, '押すまで SDK を読まない');
+    await page.click('[data-action="online-open"]');
+    await page.waitForSelector('[data-online-screen="load-failed"]', { timeout: 20000 });
+    assert.ok(sdk >= 3, 'SDK を読み込む');
+    assert.ok(prod.some((u) => u.includes('identitytoolkit.googleapis.com') && u.includes('key=AIzaSyC3__kwx4TH-ezcCCUWcb_J7PWZ7pDUjDc')), `本番（asumath-games）の匿名認証へ向かう：${prod.join(' ')}`);
+    assert.deepEqual(emu, [], '公開ホストではエミュレータへ向かわない（?online=emu は無視）');
+    ok('公開サイト相当のホスト：入口が出て、押すと本番（asumath-games）へ接続する経路に入る（試験では要求を止める）');
   }
 
   // ---- 1. 停止スイッチ：config.enabled が true でなければ入れない ----

@@ -1,8 +1,9 @@
 // オンライン対戦（段階1：ロビーまで・docs/79）の定数と小さな純関数。ネットワークにも DOM にも触れない。
 // FB_CONFIG はブラウザに公開される値（秘密ではない）。FACTOR×FACTOR・いろヨミと同じ asumath-games プロジェクト。
-// 段階1では本番に接続しない：ONLINE_PUBLIC が false の間は、オンライン入口はローカル開発環境の
-// ?online=emu（Auth・Database エミュレータ）でだけ現れる。本番の公開は段階4（ルール適用の後）で切り替える。
-export const ONLINE_PUBLIC = false;
+// 段階4（公開）：ONLINE_PUBLIC が true なので、オンライン入口は公開サイトにも出て、本番（FB_CONFIG・asumath-games）へ接続する。
+// 本番のルール（games/mathjong）と config.enabled は所有者が適用済み。止めるときは config.enabled を false にする（停止スイッチ）。
+// ローカル開発環境の ?online=emu は従来どおり Auth・Database エミュレータ（demo- プロジェクト）へ接続する（試験用）。
+export const ONLINE_PUBLIC = true;
 export const FIREBASE_SDK_VERSION = '12.12.0';
 export const FIREBASE_SDK_BASE = `https://www.gstatic.com/firebasejs/${FIREBASE_SDK_VERSION}/`;
 export const FB_CONFIG = Object.freeze({
