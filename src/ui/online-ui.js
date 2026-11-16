@@ -52,7 +52,7 @@ export function createOnlineUI({ appVersion, emulator = false, store, root, rere
   const redraw = () => { if (alive) rerender(); };
 
   async function open() {
-    if (!emulator && !ONLINE_PUBLIC) { st.screen = 'disabled'; redraw(); return; } // 段階1：本番には接続しない
+    if (!emulator && !ONLINE_PUBLIC) { st.screen = 'disabled'; redraw(); return; } // ONLINE_PUBLIC が false なら本番に接続しない（段階4で true）
     try {
       t = await connect({ emulator });
     } catch {

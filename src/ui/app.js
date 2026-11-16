@@ -187,10 +187,12 @@ function openReview() {
 // オンライン対戦（段階1：ロビーまで・docs/79）：タイトルの「オンライン対戦」で src/ui/online-ui.js を動的 import する。
 // Firebase SDK はその画面の中で、入ったときだけ読み込む。読込・接続の失敗はオンラインの画面（またはタイトル）に文で示すだけで、
 // 通常対局・初心者の部屋・牌譜の状態（S のゲーム部分）には触れない。
-// 段階1では本番に接続しない：入口はローカル開発環境の ?online=emu（Auth・Database エミュレータ）でだけ出す（公開は段階4）。
+// 段階4（公開）：入口はどこでも出す（online-config.js の ONLINE_PUBLIC と同じ。ここで import しないのは、オンラインの部品の読込失敗が
+// タイトル・オフラインの機能に及ばないようにするため）。接続先は本番（asumath-games）。止めるのは本番の config.enabled（停止スイッチ）。
+// ローカル開発環境の ?online=emu だけは Auth・Database エミュレータ（demo- プロジェクト）へ接続する（試験用）。
 // ?onlineAppVersion= はローカルだけの試験用（版の違いの確認）。
 const ONLINE_EMU = IS_LOCAL && params.get('online') === 'emu';
-const ONLINE_ENTRY = ONLINE_EMU;
+const ONLINE_ENTRY = true;
 const ONLINE_APP_VERSION = (IS_LOCAL && params.get('onlineAppVersion')) || APP_VERSION;
 let onlineUI = null;
 const localMs = (k) => (IS_LOCAL && params.get(k) !== null ? Math.max(0, Number(params.get(k)) || 0) : undefined);
