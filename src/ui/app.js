@@ -184,6 +184,42 @@ function openReview() {
     if (S.screen === 'title') render();
   });
 }
+// オンライン対戦（段階1：ロビーまで・docs/79）：タイトルの「オンライン対戦」で src/ui/online-ui.js を動的 import する。
+// Firebase SDK はその画面の中で、入ったときだけ読み込む。読込・接続の失敗はオンラインの画面（またはタイトル）に文で示すだけで、
+// 通常対局・初心者の部屋・牌譜の状態（S のゲーム部分）には触れない。
+// 段階1では本番に接続しない：入口はローカル開発環境の ?online=emu（Auth・Database エミュレータ）でだけ出す（公開は段階4）。
+// ?onlineAppVersion= はローカルだけの試験用（版の違いの確認）。
+const ONLINE_EMU = IS_LOCAL && params.get('online') === 'emu';
+const ONLINE_ENTRY = ONLINE_EMU;
+const ONLINE_APP_VERSION = (IS_LOCAL && params.get('onlineAppVersion')) || APP_VERSION;
+let onlineUI = null;
+function openOnline() {
+  if (!ONLINE_ENTRY || S.screen !== 'title' || S.onlineOpening) return;
+  S.onlineError = null; S.onlineOpening = true;
+  import('./online-ui.js').then((m) => {
+    S.onlineOpening = false;
+    if (S.screen !== 'title') return;
+    onlineUI = m.createOnlineUI({
+      appVersion: ONLINE_APP_VERSION, emulator: ONLINE_EMU, store, root: app,
+      rerender: () => { if (S.screen === 'online') render(); }, onExit: exitOnline,
+    });
+    S.screen = 'online';
+    render();
+    window.scrollTo(0, 0);
+    onlineUI.open();
+  }).catch(() => {
+    S.onlineOpening = false;
+    S.onlineError = 'オンライン対戦の画面を読み込めませんでした。ひとりでの対局はできます。';
+    if (S.screen === 'title') render();
+  });
+}
+function exitOnline() {
+  onlineUI = null;
+  S.screen = 'title';
+  refreshPaifuInfo();
+  render();
+  window.scrollTo(0, 0);
+}
 function exitReview() {
   if (reviewUI) reviewUI.close();
   reviewUI = null;
@@ -1093,6 +1129,7 @@ function render() {
   if (S.screen === 'beginner-room') { app.innerHTML = roomHTML(S.beginnerRoom, rulesForMode('math1')); return; }
   if (S.screen === 'replay-error') { app.innerHTML = replayErrorHTML(); return; }
   if (S.screen === 'paifu-review') { app.innerHTML = reviewUI ? reviewUI.html() : '<main class="pr-screen"><p class="pr-note">読み込み中…</p></main>'; return; }
+  if (S.screen === 'online') { app.innerHTML = onlineUI ? onlineUI.html() : '<main class="online-screen"><p class="ol-note">読み込み中…</p></main>'; return; }
   if (!S.game) return;
   // 並び替え中に再描画が必要になったら、並び替えを中止してから描画する（DOM が作り直されるため）
   if (drag && drag.isDragging()) drag.cancel('render');
@@ -1352,6 +1389,7 @@ function titleHTML() {
     </div>
     <button data-action="choose-opponents" class="primary start-btn">対戦相手を選ぶ</button>
     <button data-action="br-open" class="br-open">初心者の部屋（練習）</button>
+    ${ONLINE_ENTRY ? `<button data-action="online-open" class="online-open"${S.onlineOpening ? ' disabled' : ''}>オンライン対戦</button>${S.onlineError ? `<p class="note ol-title-error" role="alert">${S.onlineError}</p>` : ''}` : ''}
     ${paifuTitleHTML()}
     <p class="note title-ver">持ち点 各${START_POINTS}点 ／ 画面 v${APP_VERSION}・エンジン v${ENGINE_VERSION}</p>
   </main>`;
@@ -1719,7 +1757,10 @@ app.addEventListener('click', (ev) => {
   const g = S.game;
   // 振り返りの画面の操作（前後の移動・局の選択・一覧）。ゲームの状態は変えない
   if (S.screen === 'paifu-review' && reviewUI && act.startsWith('pr-') && act !== 'pr-exit') { reviewUI.handle(act, el.dataset); return; }
+  // オンライン対戦の画面の操作（online-ui.js の中だけで扱う）
+  if (S.screen === 'online') { if (onlineUI && act.startsWith('ol-')) onlineUI.handle(act, el.dataset); return; }
   switch (act) {
+    case 'online-open': openOnline(); render(); break;
     case 'pr-open': openReview(); render(); break;
     case 'pr-exit': exitReview(); break;
     case 'tile': {
@@ -2024,6 +2065,7 @@ app.addEventListener('click', (ev) => {
 });
 
 app.addEventListener('change', (ev) => {
+  if (S.screen === 'online') { const a = ev.target.dataset.action; if (onlineUI && a && a.startsWith('ol-')) onlineUI.change(a, ev.target.value); return; }
   if (ev.target.dataset.action === 'fx-mode') {
     // 値の保存だけ（ゲームは進めない）。表示中の演出は変えず、次の演出から反映する。
     S.fx.mode = parseEffectMode(ev.target.value);
@@ -2174,4 +2216,4 @@ function startMatch({ fromUrl = false, settings = null } = {}) {
 if (REPLAY.kind !== 'none' && REPLAY.ok) startMatch({ fromUrl: true, settings: RV.chars ? { mode: S.nextMode, length: S.length, chars: RV.chars, seats: RV.chars, ruleset: RV.ruleset } : { mode: S.nextMode, length: S.length, ai: S.ai, ruleset: RV.ruleset } });
 else { if (S.screen === 'title') refreshPaifuInfo(); render(); } // タイトル画面、または再現 URL のエラー画面
 // 振り返りの画面：左右の矢印キーで前後の判断へ（入力欄がないので他の操作と衝突しない）
-document.addEventListener('keydown', (ev) => { if (S.screen === 'paifu-review' && reviewUI && !ev.altKey && !ev.ctrlKey && !ev.metaKey && reviewUI.key(ev.key)) ev.preventDefault(); });
+document.addEventListener('keydown', (ev) => { if (S.screen === 'online' && onlineUI && onlineUI.key(ev)) { ev.preventDefault(); return; } if (S.screen === 'paifu-review' && reviewUI && !ev.altKey && !ev.ctrlKey && !ev.metaKey && reviewUI.key(ev.key)) ev.preventDefault(); });
