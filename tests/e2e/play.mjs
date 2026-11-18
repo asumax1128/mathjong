@@ -14,6 +14,7 @@ import { startServer } from '../../tools/serve.mjs';
 import { RECIPES } from '../../src/ui/sound.js';
 import { RON_LATE_LIMIT_MS, judgeRonLate } from './ron-late.mjs';
 import { publicTarget } from './public-target.mjs';
+import { replayQuery } from '../../src/ui/replay.js';
 
 const require = createRequire(import.meta.url);
 
@@ -70,6 +71,24 @@ function watchErrors(page) {
   // ゲーム以外のページへの遷移（ブラウザの「戻る」スワイプなど）を検出
   page.on('framenavigated', (f) => { if (f === page.mainFrame() && !/^https?:\/\//.test(f.url())) errors.push(`unexpected navigation: ${f.url()}`); });
   return errors;
+}
+
+// 再現 URL の末尾（?seed=…）。Ver.0.7.2 で結果画面・設定画面の「再現情報」の表示は廃止したので、画面の状態から同じ式（replay.js の replayQuery）で作る。
+// URL からの再現機能そのもの（?seed=… を開くと同じ局が始まる）は残っており、その往復の試験にだけ使う
+async function reproQueryOf(page) {
+  const v = await page.evaluate(() => {
+    const { S, rules } = window.__mathjong;
+    const m = S.match;
+    const last = S.scored && S.lastRound ? S.lastRound : null;
+    return { seed: S.seedBase, round: S.round, dealer: S.dealer, hand: last ? m.log[m.log.length - 1].hand : m.hand, renchan: last ? last.renchan : m.renchan,
+      len: m.length, mode: rules.config.mode, chars: S.matchSettings.seats.slice(), ruleset: S.matchSettings.ruleset };
+  });
+  return replayQuery(v);
+}
+// 結果画面・設定画面に「再現情報」（report-info）が出ない
+async function assertNoReportInfo(page, where) {
+  assert.equal(await page.locator('.report-info, .report-caveat').count(), 0, `${where}：再現情報は出さない`);
+  assert.doesNotMatch(await page.locator('body').innerText(), /再現情報|この局から再現|このURLでは山・配牌/, `${where}：再現情報の文言は出さない`);
 }
 
 const DEVICES = [
@@ -407,7 +426,7 @@ async function publicMode(browser) {
   await page.locator('button[data-action="settings"]').tap();
   const speeds = await page.locator('select[data-action="speed"] option').evaluateAll((o) => o.map((x) => x.value));
   assert.deepEqual(speeds, ['fast', 'normal', 'slow']);
-  assert.match(await page.locator('.report-info').innerText(), /seed 5/);
+  await assertNoReportInfo(page, '設定画面');
   // seed 再現：同じ seed は同じ配牌、違う seed は違う配牌
   const a1 = await firstHand('?seed=123');
   const a2 = await firstHand('?seed=123');
@@ -2194,14 +2213,14 @@ async function chiAutoPass(browser) {
     await ctx.close();
   }
 
-  // (12) バージョン表示：ヘッダー・ページタイトル・再現情報
+  // (12) バージョン表示：ヘッダー・ページタイトル（再現情報は廃止）
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    // 版の変更（docs/62・docs/84）：画面 0.7.1・エンジン 0.7.0（門前ツモ・一発）
-    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.7.1');
-    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.7.1');
+    // 版の変更（docs/62・docs/84・docs/85）：画面 0.7.2（結果画面の再現情報を廃止）・エンジン 0.7.0（門前ツモ・一発）。版はヘッダーとページタイトルに出る
+    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.7.2');
+    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.7.2');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.7\.1 ・ エンジン v0\.7\.0/);
+    await assertNoReportInfo(page, '設定画面');
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -3001,8 +3020,8 @@ async function v04Match(browser) {
     await page.waitForSelector('.hand .tile');
     const st = await matchState(page);
     await page.locator('button[data-action="settings"]').tap();
-    const info = await page.locator('.report-info').innerText();
-    const q = info.match(/(\?seed=\S+)/)[1];
+    await assertNoReportInfo(page, '設定画面');
+    const q = await reproQueryOf(page);
     assert.match(q, /seed=555&round=8&dealer=1&hand=5&renchan=2&len=8&mode=math2/);
     const deal = await page.evaluate(() => ({ wall: window.__mathjong.S.game.wall.slice(), hands: window.__mathjong.S.game.hands.map((h) => h.slice()) }));
     await page.goto(`${LOCAL}${q}&speed=slow`);
@@ -3053,9 +3072,9 @@ async function v04Match(browser) {
 const dealOf = (page) => page.evaluate(() => ({ wall: window.__mathjong.S.game.wall.slice(), hands: window.__mathjong.S.game.hands.map((h) => h.slice()), dealer: window.__mathjong.S.game.dealer }));
 const reproQuery = async (page) => {
   await page.locator('button[data-action="settings"]').tap();
-  const info = await page.locator('.report-info').innerText();
+  await assertNoReportInfo(page, '設定画面');
   await page.locator('.modal-actions button[data-action="close"]').tap();
-  return { info, q: info.match(/(\?seed=\S+)/)[1] };
+  return { q: await reproQueryOf(page) };
 };
 
 async function v04Fixes(browser) {
@@ -3200,24 +3219,16 @@ async function v04Fixes(browser) {
     await ctx.close();
   }
 
-  // (3) P3-1：再現情報の注意書き（設定・局結果）。URL から復元すると全員100点から
+  // (3) 再現 URL から復元すると全員100点から（再現情報の注意書きの表示は Ver.0.7.2 で廃止。機能は残る）。結果画面・設定画面に再現情報は出ない
   {
     const { ctx, page, errors } = await v3Page(browser, 'math1', { query: '&len=4' });
     await v3Scene(page, presetWall(TSUMO_HAND, ['=1'], [V3_O1, V3_O2, V3_O3]));
     await page.locator('button[data-action="tsumo"]').tap();
     await page.waitForSelector('.overlay .result');
-    const caveat = /このURLでは山・配牌・親・局状態を再現します。持ち点や過去の対局履歴は復元されず、全員100点から開始します。/;
-    assert.match(await page.locator('.overlay .result .report-info').innerText(), caveat, '局結果の再現情報');
+    await assertNoReportInfo(page, '局の精算画面');
     assert.deepEqual((await matchState(page)).scores, [112, 96, 96, 96]);
     await page.locator('button[data-action="close-result"]').tap();
-    const { info, q } = await reproQuery(page);
-    assert.match(info, caveat, '設定の再現情報');
-    // 注意書きは再現情報の中（別の画面を開かない）。長すぎず、横にはみ出さない
-    // （終局後は設定を閉じると局結果へ戻るので、局結果を閉じてから設定を開き直す）
-    await page.locator('button[data-action="close-result"]').tap();
-    await page.locator('button[data-action="settings"]').tap();
-    const m = await page.evaluate(() => { const c = document.querySelector('.report-caveat'); const mo = document.querySelector('.modal'); return { inside: !!c.closest('.report-info'), fs: parseFloat(getComputedStyle(c).fontSize), over: mo.scrollWidth - mo.clientWidth, len: c.textContent.length }; });
-    assert.ok(m.inside && m.fs >= 11 && m.over <= 0 && m.len <= 70, JSON.stringify(m));
+    const { q } = await reproQuery(page);
     await page.goto(`${LOCAL}${q}&speed=slow`);
     await page.waitForSelector('.hand .tile');
     const st = await matchState(page);
@@ -3226,7 +3237,7 @@ async function v04Fixes(browser) {
     assert.deepEqual(errors, []);
     await ctx.close();
   }
-  console.log('✓ Ver.0.4-A 監査 P2-2・P3-1：連荘99→100／通し局数999→1000／大きな値の再現 URL の往復・従来 URL・不正な整数の拒否・上限での試合終了・再現情報の注意書き（全員100点から）');
+  console.log('✓ Ver.0.4-A 監査 P2-2・P3-1：連荘99→100／通し局数999→1000／大きな値の再現 URL の往復・従来 URL・不正な整数の拒否・上限での試合終了・再現 URL から復元すると全員100点から）');
 }
 
 // ---- Ver.0.4-A 最終修正（PR #9）：終了理由（通常終了／通し局数の上限）と不可能な局状態の再現 URL ----
@@ -3318,12 +3329,12 @@ async function v04bLevels(browser) {
     assert.deepEqual(await page.evaluate(() => window.__mathjong.S.matchSettings.chars), chars, '同じ3人');
     sc = await seatCheck();
     for (const x of sc) { assert.equal(x.shown, NAMES[x.id]); assert.ok(x.deciders.every((dd) => dd === x.id)); }
-    // 再現情報に ID（席の順）が入る
+    // 再現 URL に ID（席の順）が入る（表示は廃止・URL の作り方は同じ）
     await page.locator('button[data-action="settings"]').tap();
+    await assertNoReportInfo(page, '設定画面');
     const seats2 = sc.map((x) => x.id);
     // docs/62：新しく出力する再現 URL は末尾にルールの版（newrules=2）を付ける（席の順の chars はその前）
-    assert.match(await page.locator('.report-info code').innerText(), new RegExp(`&chars=${seats2.join(',')}&newrules=2$`));
-    assert.match(await page.locator('.report-info').innerText(), new RegExp(`ID ${seats2.join(',')}`));
+    assert.match(await reproQueryOf(page), new RegExp(`&chars=${seats2.join(',')}&newrules=2$`));
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -4446,7 +4457,7 @@ async function v04End(browser) {
     assert.deepEqual([(await matchState(page)).round, (await matchState(page)).renchan], [1000000, 1]);
     // 次の URL（上限の局）も読み取れる
     await page.locator('button[data-action="settings"]').tap();
-    const q2 = (await page.locator('.report-info').innerText()).match(/(\?seed=\S+)/)[1];
+    const q2 = await reproQueryOf(page);
     assert.match(q2, /round=1000000&dealer=0&hand=0&renchan=1&len=8/);
     assert.deepEqual(errors, []);
     await ctx.close();
@@ -7392,12 +7403,14 @@ async function v09RulesUnified(browser) {
     assert.equal(await page.locator('.bc-rule').count(), 0, '現行の新ルールに再現の印はない');
     await page.locator('button[data-action="settings"]').tap();
     assert.equal(await page.locator('[data-action="ruleset"], .rule-select').count(), 0, '設定にルールの選択はない');
-    assert.match(await page.locator('.report-info').innerText(), /新ルール[\s\S]*newrules=2/, '再現URLは newrules=2');
+    await assertNoReportInfo(page, '設定画面');
+    assert.match(await reproQueryOf(page), /newrules=2/, '再現URLは newrules=2');
     await page.locator('button[data-action="reset"]').tap();
     await page.locator('.hand .tile').first().waitFor();
     assert.equal(await page.evaluate(() => window.__mathjong.S.game.ruleset), 2, '新しい対局も新ルール');
     await page.evaluate(() => { const m = window.__mathjong; m.S.match.over = true; m.S.modal = 'final'; m.render(); });
     assert.match(await page.locator('.final').innerText(), /ルール：新ルール/);
+    await assertNoReportInfo(page, '最終結果画面');
     await page.locator('button[data-action="again"]').tap();
     await page.locator('.hand .tile').first().waitFor();
     assert.equal(await page.evaluate(() => window.__mathjong.S.game.ruleset), 2, '再戦も新ルール');
@@ -7417,7 +7430,7 @@ async function v09RulesUnified(browser) {
     if (note) assert.equal(await page.locator('.bc-rule').innerText(), note); else assert.equal(await page.locator('.bc-rule').count(), 0);
     assert.equal(await page.locator('.bc-mode').innerText(), '数学Ⅱ', 'モードの表示は変えない');
     await page.locator('button[data-action="settings"]').tap();
-    const info = await page.locator('.report-info').innerText();
+    const info = await reproQueryOf(page);
     assert.ok(ruleset ? info.includes(`newrules=${ruleset}`) : !info.includes('newrules'), '出力する再現URLは元の版のまま');
   }
   // 同じ seed の再現：新旧の版は別の進行（王牌の有無）、同じ版は同じ進行
@@ -7964,8 +7977,9 @@ async function v11OneRoundEnd(browser) {
     const text = await frResultText(page);
     assert.match(text, /1局戦はこの1局で終わりです/);
     assert.doesNotMatch(text, /次は|連荘1回目|親交代/);
-    // 再現情報：1局戦の URL（len=1・newrules=2）。開くと同じ親の1局戦の東1局。1局戦にない連荘はエラー画面
-    const replay = await page.locator('.overlay .result .report-info code').innerText();
+    // 再現 URL：1局戦の URL（len=1・newrules=2）。開くと同じ親の1局戦の東1局。1局戦にない連荘はエラー画面（精算画面に再現情報は出ない）
+    await assertNoReportInfo(page, '局の精算画面');
+    const replay = await reproQueryOf(page);
     assert.match(replay, new RegExp(`^\\?seed=\\d+&round=1&dealer=${dealer}&hand=0&renchan=0&len=1&mode=${mode}&chars=[a-z,]+&newrules=2$`));
     if (name === '流局') {
       const p2 = await ctx.newPage();

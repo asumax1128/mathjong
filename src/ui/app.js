@@ -24,14 +24,14 @@ import { createRoomState, pickRoomTile, checkRoom, nextRoom, roomHint, roomHTML,
 import { loadProgress, saveProgress, hasProgress, recordExam } from './beginner-progress.js';
 import { SEAT_AREA, SEAT_ROT, riverRows as layoutRiverRows, boardShape as layoutBoardShape } from './table-layout.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, MAX_ROUND } from './params.js';
-import { validateReplay, replayQuery, CURRENT_RULESET } from './replay.js';
+import { validateReplay, CURRENT_RULESET } from './replay.js';
 import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, scanEffects, fxOffer, fxAdvance, fxTimes, fxProgress, isLiteEffect } from './effects.js';
 import { SOUND_KEY, parseSoundSetting, pickSound, createSoundPlayer } from './sound.js';
 import { VOICE_KEY, parseVoiceSetting, createVoicePlayer } from './voice.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
-// ヘッダー・ページタイトル・再現情報はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
-const APP_VERSION = '0.7.1';
+// ヘッダー・ページタイトル・タイトル画面の版表示はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
+const APP_VERSION = '0.7.2';
 document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`;
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -1442,7 +1442,6 @@ function resultHTML() {
   return `<div class="result">${head}${detail}
     <h3>${S.lastRound.label}${S.lastRound.renchan ? `（連荘${S.lastRound.renchan}）` : ''}の精算</h3>${payout}${depositLineHTML()}${scores}${nextLine}${hints}
     <details><summary>全員の手牌を見る</summary>${[0, 1, 2, 3].map(revealHTML).join('')}</details>
-    ${reportInfoHTML()}
     ${S.online ? onlineResultActionsHTML(m.over) : `<div class="modal-actions"><button data-action="next" class="primary">${m.over ? '最終結果へ' : '次の局へ'}</button>
     <button data-action="close-result">盤面を見る</button></div>`}</div>`;
 }
@@ -1657,22 +1656,10 @@ function oppDetailHTML(id) {
   </div></div>`;
 }
 
-// 対戦相手の名前（席の順）：最終結果・再現情報で使う
+// 対戦相手の名前（席の順）：最終結果で使う
 function opponentsText() {
   if (S.online) return [1, 2, 3].map((s) => `${POS[s]} ${PLAYERS[s].name}（${PLAYERS[s].kind === 'human' ? '人' : LEVEL_LABELS[LEVEL_BY_ID[PLAYERS[s].id]] || 'CPU'}）`).join('・');
   return [1, 2, 3].map((s) => `${POS[s]} ${PLAYERS[s].name}（${LEVEL_LABELS[LEVEL_BY_ID[PLAYERS[s].id]]}）`).join('・');
-}
-
-// 不具合報告用の再現情報。山は seed と局の通し番号（round）で決まり、親の席・親番・連荘回数・局数も URL で指定する。
-// （持ち点は再現しない。連荘で「局番号から親が決まらない」ため dealer を明示する）
-function reportInfoHTML() {
-  if (S.online) return '<p class="note report-info">オンライン対戦（再現情報は出しません。山・seed はホストだけが持ちます）</p>';
-  const m = S.match;
-  const label = S.scored && S.lastRound ? S.lastRound : { label: handLabel(m), renchan: m.renchan };
-  const hand = S.scored && S.lastRound ? m.log[m.log.length - 1].hand : m.hand;
-  return `<p class="note report-info">再現情報：seed <b>${S.seedBase}</b> ／ ${label.label}・連荘${label.renchan}（通し第<b>${S.round}</b>局・親 ${POS[S.dealer]}）／ ${m.length}局戦 ／ ${modeLabel(rules)}・${RULESET_LABEL[S.matchSettings.ruleset]} ／ 対戦相手 ${opponentsText()}（ID ${S.matchSettings.seats.join(',')}）／ 画面 v${APP_VERSION} ・ エンジン v${ENGINE_VERSION}<br>
-    この局から再現：URL の末尾に <code>${replayQuery({ seed: S.seedBase, round: S.round, dealer: S.dealer, hand, renchan: label.renchan, len: m.length, mode: LEGACY ? null : rules.config.mode, chars: S.matchSettings.seats, ruleset: S.matchSettings.ruleset }).replace(/&/g, '&amp;')}</code><br>
-    <span class="report-caveat">このURLでは山・配牌・親・局状態を再現します。持ち点や過去の対局履歴は復元されず、全員100点から開始します。</span></p>`;
 }
 
 // ---------- ガイド（役一覧・ルール・牌一覧） ----------
@@ -1796,7 +1783,6 @@ function settingsHTML() {
     ${voice.manifest.credit ? `<p class="note voice-credit">${voice.manifest.credit}</p>` : ''}` : ''}
     <p class="note sound-note">打牌・チー・ポン・リーチ・ロン・ツモの効果音です。オフでもゲームは同じように進みます。音が出ないときは、画面を一度タップしてからお試しください（マナーモードでは鳴らない端末があります）。</p>
     <p class="note setting-note">チー・ポンの自動パスは、対戦画面の手牌の下のボタンで切り替えます（いま：チー ${S.chiAutoPass ? 'ON' : 'OFF'}・ポン ${S.ponAutoPass ? 'ON' : 'OFF'}）。チー・ポンをそれぞれ自動で見送ります。ロン・ツモは自動で見送りません。</p>
-    ${reportInfoHTML()}
     ${paifuStatusText() ? `<p class="note paifu-status" role="status">${paifuStatusText()}</p>` : ''}
     <div class="modal-actions">${S.online ? '' : '<button data-action="reset">新しい対局（得点リセット）</button>'}
       ${S.confirmTitle ? S.online ? '<span class="confirm-title">部屋を出ますか？<button data-action="online-leave" class="danger">部屋を出る</button><button data-action="cancel-title">続ける</button></span>' : '<span class="confirm-title">この対局を終了しますか？<button data-action="to-title" class="danger">終了してタイトルへ</button><button data-action="cancel-title">続ける</button></span>' : '<button data-action="ask-title">タイトルへ戻る</button>'}</div>`;
@@ -2388,7 +2374,7 @@ function startMatch({ fromUrl = false, settings = null } = {}) {
   let chars = cfg.chars, seats = cfg.seats;
   if (!chars) { chars = rosterForLevel(cfg.ai || 'intermediate').map((c) => c.id); seats = chars.slice(); }
   if (!seats) seats = assignSeats(chars, Math.random);
-  // この試合の設定（「同じ3人と再戦」「相手を変更」「最終結果」「再現情報」で使う）
+  // この試合の設定（「同じ3人と再戦」「相手を変更」「最終結果」で使う）
   // ruleset：ルールの版（docs/62）。通常の開始・再戦・新しい対局は現行の版、再現 URL はその URL の版。旧規則（?rules=legacy）は版0
   const ruleset = LEGACY ? 0 : [0, 1, 2].includes(cfg.ruleset) ? cfg.ruleset : CURRENT_RULESET;
   S.matchSettings = { mode: cfg.mode, length: cfg.length, chars: chars.slice(), seats: seats.slice(), ruleset, newRules: ruleset >= 1, exam: !!cfg.exam };
