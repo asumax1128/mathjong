@@ -182,6 +182,7 @@ try {
   assert.equal(hf.pub.match.scores.reduce((x, y) => x + y, 0), 400);
   // 画面の最終結果：自分の順位と得点が、配信の持ち点と一致
   for (const [P, st] of [[H.page, hf], [G.page, gf]]) {
+    assert.equal(await P.locator('.report-info').count(), 0, 'オンラインの結果画面にも再現情報（注記を含む）は出さない');
     const me = await P.textContent('.final-me');
     const pts = st.pub.match.scores[st.mySeat];
     const rank = 1 + st.pub.match.scores.filter((x) => x > pts).length;
