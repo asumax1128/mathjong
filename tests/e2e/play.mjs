@@ -8311,10 +8311,11 @@ async function v12AgariYame(browser) {
       const { ctx, page, errors } = await v3Page(browser, mode, { query: `&round=${hand + 1}&dealer=0&hand=${hand}&renchan=0&len=${len}&newrules=2` });
       await dealerTsumo(page);
       await page.waitForSelector('button[data-action="tsumo"]');
-      // 和了点 B（ドラの加点を含む。エンジンの _endWin と同じ数え方）
+      // 和了点 B（門前ツモ・ドラの加点を含む。エンジンの _endWin と同じ数え方。エンジン 0.7.0 から門前のツモ和了は +1）
       const B = await page.evaluate(() => {
         const g = window.__mathjong.S.game, a = g.tsumoAnalysis(0);
-        return a.points + g.deadWall.indicators.reduce((n, d) => n + g.hands[0].filter((id) => g.typeOf(id) === d.type).length, 0);
+        const menzen = g.tsumoIppatsuRule && g.isClosed(0) && !a.yakuman ? (g.rules.config.rules.menzenTsumoBonus ?? 1) : 0;
+        return a.points + menzen + g.deadWall.indicators.reduce((n, d) => n + g.hands[0].filter((id) => g.typeOf(id) === d.type).length, 0);
       });
       // 和了前の持ち点（合計400）：親ツモは自分 +6B・子 各 −2B。second＝和了後も下家が上（2位）、tie＝和了後に下家と同点の1位
       if (kind !== 'top') await page.evaluate(([kind, B]) => {
