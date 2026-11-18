@@ -2197,11 +2197,11 @@ async function chiAutoPass(browser) {
   // (12) バージョン表示：ヘッダー・ページタイトル・再現情報
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    // 版の変更（docs/62）：画面 0.7.0・エンジン 0.6.0
-    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.7.0');
-    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.7.0');
+    // 版の変更（docs/62・docs/84）：画面 0.7.1・エンジン 0.7.0（門前ツモ・一発）
+    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.7.1');
+    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.7.1');
     await page.locator('button[data-action="settings"]').tap();
-    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.7\.0 ・ エンジン v0\.6\.0/);
+    assert.match(await page.locator('.report-info').innerText(), /画面 v0\.7\.1 ・ エンジン v0\.7\.0/);
     assert.deepEqual(errors, []);
     await ctx.close();
   }
@@ -9537,7 +9537,7 @@ async function v16PaifuReviewErrors(browser) {
     const put = (store, v) => new Promise((res, rej) => { const tx = db.transaction(store, 'readwrite'); tx.objectStore(store).put(v); tx.oncomplete = res; tx.onerror = () => rej(tx.error); });
     const sha = async (s) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))].map((x) => x.toString(16).padStart(2, '0')).join('');
     const r1 = await get('records', bad);
-    await put('records', { ...r1, json: r1.json.replace('"appVersion":"0.7.0"', '"appVersion":"0.7.1"') });
+    await put('records', { ...r1, json: r1.json.replace(/"appVersion":"[^"]*"/, '"appVersion":"9.9.9"') });
     const r2 = await get('records', old), i2 = await get('index', old);
     const json = r2.json.replace(/"engineVersion":"[^"]*"/, '"engineVersion":"0.0.0-old"');
     const bytes = new TextEncoder().encode(json).length, digest = await sha(json);

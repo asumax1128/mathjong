@@ -9,7 +9,7 @@
 // AI に再判断させない・ゲーム本体や AI の乱数を消費しない（検証用の Game は独立したインスタンス）。
 //
 // 注意：この記録（visibility: 'private-full'）から全員の手牌・山を再現できる。画面への表示・共有・AI への受け渡しはしない。
-import { ENGINE_VERSION, makeConfig } from './config.js';
+import { ENGINE_VERSION, PRE_TSUMO_IPPATSU_ENGINE, makeConfig } from './config.js';
 import { createRules } from './rules.js';
 import { Game } from './game.js';
 import { applyRoundResult, dealerOf, ranks, potTotal, START_POINTS } from './match.js';
@@ -134,13 +134,17 @@ export function createPaifu({ id, createdAt, appVersion, mode, length, seedBase,
 
 const header = (p) => {
   requireThat(p && p.format === PAIFU_FORMAT && p.schemaVersion === PAIFU_SCHEMA_VERSION && p.kind === PAIFU_KIND, 'schemaVersion', 'unsupported format/version');
-  requireThat(p.engineVersion === ENGINE_VERSION, 'engineVersion', 'unsupported engine version');
+  // エンジン 0.6.0 の牌譜（門前ツモ・一発の追加前）も読む：その点の数え方で再生する（newRoundGame）
+  requireThat(p.engineVersion === ENGINE_VERSION || p.engineVersion === PRE_TSUMO_IPPATSU_ENGINE, 'engineVersion', 'unsupported engine version');
   requireThat(p.visibility === 'private-full', 'visibility', 'private full record required');
 };
 const lastMatch = (p) => (p.rounds.length ? p.rounds.at(-1).settlement.matchAfter : p.initialMatch);
 const replaceLast = (p, r, extra = {}) => freeze({ ...p, ...extra, rounds: [...p.rounds.slice(0, -1), freeze(r)] });
+// 記録に書き足せるのは今のエンジンの版の牌譜だけ（古い版は再生・振り返りのみ）
+const writable = (p) => requireThat(p.engineVersion === ENGINE_VERSION, 'engineVersion', 'old engine version is read-only');
 function active(p) {
   header(p);
+  writable(p);
   requireThat(p.status === 'recording', 'status', 'not recording');
   const r = p.rounds.at(-1);
   requireThat(r && r.settlement === null, 'rounds', 'no active round');
@@ -149,12 +153,14 @@ function active(p) {
 // 局の Game を記録の設定どおりに作る（app.js の startRound と同じ式。presetWall は使わない）
 export function newRoundGame(p, round, dealer) {
   const seed = p.settings.seedBase + round * ROUND_SEED_STEP;
-  return new Game({ rules: paifuRules(p.settings.mode), seed, dealer, players: copy(p.settings.players), round, ruleset: p.settings.ruleset });
+  return new Game({ rules: paifuRules(p.settings.mode), seed, dealer, players: copy(p.settings.players), round, ruleset: p.settings.ruleset,
+    tsumoIppatsu: p.engineVersion !== PRE_TSUMO_IPPATSU_ENGINE });
 }
 
 // 局の開始：game はその局の開始直後（親の最初のツモの後）。標準の配牌（seed・親・局番号）と一致しなければ記録しない
 export function beginRound(p, game) {
   header(p);
+  writable(p);
   requireThat(p.status === 'recording', 'status', 'not recording');
   const prev = p.rounds.at(-1);
   requireThat(!prev || prev.settlement !== null, 'rounds', 'previous round not settled');

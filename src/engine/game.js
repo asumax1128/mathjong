@@ -11,7 +11,8 @@ export class Game {
   // ルールの版（ruleset）：0＝従来ルール、1＝新ルール初版（PR #44：王牌・ドラ・暗カン・数学Ⅱ24回）、
   // 2＝現行の新ルール（1 に加えてフリテン・関数牌のポン禁止）。newRules: true は ruleset 1（従来の呼び出し・再現 URL newrules=1）。
   // 過去の局（従来・初版）を同じ seed で同じ進行に再現できるよう、版ごとに規則を切り替える。
-  constructor({ rules, seed = 1, dealer = 0, players, round = 1, presetWall = null, newRules = false, ruleset = newRules ? 1 : 0 }) {
+  // tsumoIppatsu：門前ツモ・一発を数えるか（ruleset 1・2 で既定は数える）。false はエンジン 0.6.0 までの牌譜の再生用（追加前の点）
+  constructor({ rules, seed = 1, dealer = 0, players, round = 1, presetWall = null, newRules = false, ruleset = newRules ? 1 : 0, tsumoIppatsu = true }) {
     this.rules = rules;
     this.ruleset = ruleset;
     this.newRules = ruleset >= 1;
@@ -20,6 +21,8 @@ export class Game {
     this.funcPonBan = ruleset >= 2;
     // ruleset 2：四家立直（4人全員のリーチが成立したら途中流局）。4人目の宣言牌へのロンの判断が終わってから判定する
     this.fourRiichiRule = ruleset >= 2;
+    // ruleset 1・2：門前ツモ（+1）・一発（+1）。従来ルール（0）の局は従来の点のまま（過去の再現 URL を変えない）
+    this.tsumoIppatsuRule = ruleset >= 1 && tsumoIppatsu !== false;
     this.seed = seed;
     this.dealer = dealer;
     this.round = round;
@@ -392,6 +395,7 @@ export class Game {
     this.phase = 'ended';
     this.claim = null;
     analysis = this._withRiichi(seat, analysis);
+    analysis = this._withTsumoIppatsu(seat, how, analysis);
     if(this.deadWall && !analysis.yakuman) {
       const winning=[...this.hands[seat],...this.melds[seat].flatMap(m=>m.tiles)];
       const count=this.deadWall.indicators.reduce((n,d)=>n+winning.filter(id=>this.typeOf(id)===d.type).length,0);
@@ -408,6 +412,33 @@ export class Game {
     const bonus = analysis.yakuman ? 0 : (this.rules.config.rules.riichiBonus ?? 1);
     const yaku = bonus ? [...analysis.yaku, { id: 'riichi', name: 'リーチ', points: bonus, yakuman: false, riichi: true }] : analysis.yaku;
     return { ...analysis, yaku, points: analysis.points + bonus, riichi: true, riichiBonus: bonus };
+  }
+
+  // 門前ツモ・一発（ruleset 1・2）：リーチの加点と同じ流儀で、役の一覧に加え、基本点に加点する。役満には加算しない。
+  // ・門前ツモ：門前（公開面子なし。暗カンだけの手は門前）でのツモ和了（嶺上ツモを含む）
+  // ・一発：その席のリーチの宣言から、その席の次のツモが和了せずに終わる（＝その席が次に打牌する）までの和了（天鳳式）。
+  //   他家のポン・チー・カンでは途切れない。記録（events）だけから決まるので、牌譜の再生でも同じ結果になる
+  _withTsumoIppatsu(seat, how, analysis) {
+    if (!this.tsumoIppatsuRule || analysis.yakuman) return analysis;
+    const r = this.rules.config.rules;
+    const add = [];
+    if (how === 'tsumo' && this.isClosed(seat)) add.push({ id: 'menzen-tsumo', name: '門前ツモ', points: r.menzenTsumoBonus ?? 1, yakuman: false, menzenTsumo: true });
+    if (this.ippatsuOpen(seat)) add.push({ id: 'ippatsu', name: '一発', points: r.ippatsuBonus ?? 1, yakuman: false, ippatsu: true });
+    if (!add.length) return analysis;
+    const bonus = add.reduce((a, y) => a + y.points, 0);
+    return { ...analysis, yaku: [...analysis.yaku, ...add], points: analysis.points + bonus,
+      ...(add.some((y) => y.menzenTsumo) ? { menzenTsumo: true, menzenTsumoBonus: r.menzenTsumoBonus ?? 1 } : {}),
+      ...(add.some((y) => y.ippatsu) ? { ippatsu: true, ippatsuBonus: r.ippatsuBonus ?? 1 } : {}) };
+  }
+  // 一発の窓が開いているか：リーチの宣言（riichi の記録）の後、その席の打牌が宣言牌の1枚だけ（次の打牌をまだしていない）
+  ippatsuOpen(seat) {
+    if (!this.riichi[seat]) return false;
+    let i = this.events.length - 1;
+    while (i >= 0 && !(this.events[i].type === 'riichi' && this.events[i].seat === seat)) i--;
+    if (i < 0) return false;
+    let discards = 0;
+    for (let k = i + 1; k < this.events.length; k++) if (this.events[k].type === 'discard' && this.events[k].seat === seat) discards++;
+    return discards <= 1;
   }
 
   // reason：なし＝山切れ・数学Ⅱの24回（従来と同じ形）、'four-riichi'＝四家立直の途中流局（ruleset 2）。どちらも点数の移動なし

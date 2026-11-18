@@ -284,7 +284,9 @@ test('③ 嶺上ツモで和了：既存の9枚・3面子（槓子＝1面子）�
   const dora = g.doraIndicators.reduce((n, d) => n + [...g.hands[0], ...g.melds[0].flatMap((m) => m.tiles)].filter((id) => g.typeOf(id) === d.type).length, 0);
   assert.equal(a.doraBonus, dora);
   const base = g.rules.analyzeWin(g.countsOf(g.hands[0]), g.exposedMelds(0), { closed: true });
-  assert.equal(r.points, base.points + dora, 'ドラ1枚につき+1点（基本点・役は変えない）');
+  // 嶺上ツモも門前ツモ（暗カンだけの手は門前）：+1。ドラ1枚につき+1点（基本点・役は変えない）
+  assert.ok(a.yaku.some((y) => y.id === 'menzen-tsumo'), '嶺上ツモでも門前ツモ');
+  assert.equal(r.points, base.points + 1 + dora, '基本点＋門前ツモ1＋ドラ');
   conserved(g);
 });
 

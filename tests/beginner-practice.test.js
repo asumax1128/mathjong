@@ -249,7 +249,8 @@ test('5-C：ツモ（引いた牌で和了）。捨てる操作は練習では�
   assert.equal(practiceAct(p, { type: 'tsumo' }), true);
   const r = p.game.result;
   assert.equal(r.how, 'tsumo');
-  assert.equal(r.points, 2 + r.analysis.doraBonus, '和了点＝通常和了1＋三関制覇1＋ドラ（現行ルール）');
+  assert.equal(r.points, 3 + r.analysis.doraBonus, '和了点＝通常和了1＋三関制覇1＋門前ツモ1＋ドラ（現行ルール・エンジン 0.7.0）');
+  assert.ok(r.analysis.yaku.some((y) => y.id === 'menzen-tsumo' && y.name === '門前ツモ' && y.points === 1));
   const B = r.points;
   assert.deepEqual(p.settlement.deltas, [4 * B, -B, -B, -2 * B], '子ツモ：親（席3）が2B、ほかの子2人がBずつ支払う');
   assert.deepEqual(p.settlement.deltas, settle(r, p.game.dealer));
