@@ -5,7 +5,7 @@
 //  C. ホストが戻らない：猶予（試験用に ?onlineHostGraceMs= で短縮）を過ぎると、ゲストに「途中終了（結果は確定しません）」
 // 実行：firebase emulators:exec --only auth,database --project demo-mathjong --config firebase.emulator.json "node tests/e2e/online-reconnect.mjs"
 import assert from 'node:assert/strict';
-import { setup, enter, createRoomUI, joinUI, onlineState, playUntil, stepOnce, waitScreen, owner, shotter, argOf } from './online-helpers.mjs';
+import { setup, enter, createRoomUI, joinUI, onlineState, playUntil, stepOnce, waitScreen, owner, shotter, argOf, watchRiichiFlash, assertRiichiFlashed } from './online-helpers.mjs';
 
 const shot = shotter(argOf('--shots'));
 let passed = 0;
@@ -26,8 +26,11 @@ try {
   await G.page.waitForSelector('.self', { timeout: 20000 });
   const g0 = await onlineState(G.page);
   const gSeat = g0.mySeat;
+  await watchRiichiFlash(G.page); // 画面 0.7.4：ゲストの画面でリーチ宣言の席が光るか
   await playUntil([H.page, G.page], async () => ((await onlineState(H.page)) || { pub: { game: { events: [] } } }).pub.game.events.length > 25);
 
+  const rf1 = await assertRiichiFlashed(G.page, 'ゲスト');
+  ok(`ゲストの画面：リーチを宣言した席はすべて名札が光った（宣言 ${rf1} 件）`);
   // A. ゲストがタブを閉じる
   await G.page.close();
   const tClose = Date.now();
@@ -62,6 +65,7 @@ try {
   await H.page.waitForFunction((s) => { const o = window.__mathjong.S.online; return o && o.pub && !o.pub.players[s].away; }, gSeat, { timeout: 30000 });
   assert.equal((await owner('GET', `games/mathjong/rooms/${code}/seats/${gSeat}/away`)), null, 'away が消える');
   ok('同じ端末で開き直すと自分の席に戻り、代打ちが止まる');
+  await watchRiichiFlash(gp);
   // 戻った後は自分で操作できる（ゲストの手で打牌が届く）
   const humanBefore = (await onlineState(gp)).pub.game.events.length;
   let gActed = false;
@@ -101,6 +105,8 @@ try {
   assert.equal(hf.pub.phase, 'final');
   assert.deepEqual(gf.pub.match.scores, hf.pub.match.scores, '両端末の持ち点が一致');
   assert.ok(hf.pub.match.played >= 4);
+  const rf2 = await assertRiichiFlashed(gp, 'ゲスト（再接続後）');
+  ok(`再接続後のゲストの画面：リーチを宣言した席はすべて名札が光った（宣言 ${rf2} 件）`);
   ok(`再開後もそのまま4局戦を完走（${hf.pub.match.played}局・持ち点 ${hf.pub.match.scores.join('・')}）`);
   await shot(gp, 'reconnect-final-guest');
   await H.page.click('[data-action="online-leave"]');
