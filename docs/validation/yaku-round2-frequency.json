@@ -19,29 +19,29 @@
    "on_round2": {
     "wins": 2929,
     "winRate": 0.976,
-    "avgWinPoints": 4.987,
-    "avgYakuPoints": 2.18
+    "avgWinPoints": 4.797,
+    "avgYakuPoints": 1.989
    },
    "per100Wins": {
     "seifu": 10.41,
     "hokaku": 19.8,
-    "tousa": 13.83,
-    "anyNew": 34.82,
+    "tousa": 7.48,
+    "anyNew": 29.22,
     "newOnly": 13.86
    },
    "counts": {
     "seifu": 305,
     "hokaku": 580,
-    "tousa": 405,
-    "anyNew": 1020,
+    "tousa": 219,
+    "anyNew": 856,
     "newOnly": 406
    },
-   "avgWinPointsDelta": 0.996,
+   "avgWinPointsDelta": 0.806,
    "sameHandRescore": {
     "wins": 2929,
-    "raised": 1003,
-    "raisedPer100": 34.24,
-    "avgDelta": 1.005
+    "raised": 838,
+    "raisedPer100": 28.61,
+    "avgDelta": 0.813
    },
    "identicalRounds": 2979,
    "topCombos": [
@@ -54,16 +54,8 @@
      177
     ],
     [
-     "shougen+shougenSankaku+tousa",
-     85
-    ],
-    [
      "seifu",
      73
-    ],
-    [
-     "sankan+shougen+shougenSankaku+tousa",
-     56
     ],
     [
      "hokaku+seifu",
@@ -76,6 +68,14 @@
     [
      "tousa",
      40
+    ],
+    [
+     "hokaku+sankan+tousa",
+     37
+    ],
+    [
+     "sankan+tousa",
+     35
     ]
    ]
   },
@@ -89,29 +89,29 @@
    "on_round2": {
     "wins": 2908,
     "winRate": 0.969,
-    "avgWinPoints": 4.612,
-    "avgYakuPoints": 1.826
+    "avgWinPoints": 4.557,
+    "avgYakuPoints": 1.771
    },
    "per100Wins": {
     "seifu": 17.06,
     "hokaku": 7.74,
-    "tousa": 6.84,
-    "anyNew": 27.3,
+    "tousa": 5.02,
+    "anyNew": 25.86,
     "newOnly": 8.39
    },
    "counts": {
     "seifu": 496,
     "hokaku": 225,
-    "tousa": 199,
-    "anyNew": 794,
+    "tousa": 146,
+    "anyNew": 752,
     "newOnly": 244
    },
-   "avgWinPointsDelta": 0.69,
+   "avgWinPointsDelta": 0.635,
    "sameHandRescore": {
     "wins": 2907,
-    "raised": 785,
-    "raisedPer100": 27,
-    "avgDelta": 0.693
+    "raised": 743,
+    "raisedPer100": 25.56,
+    "avgDelta": 0.638
    },
    "identicalRounds": 2986,
    "topCombos": [
@@ -150,5 +150,9 @@
    ]
   }
  },
- "seconds": 2625.229
+ "seconds": {
+  "math1": 518.618,
+  "math2": 2155.765
+ },
+ "note": "象限三角の手には等差三連を付けない（オーナー決定）後の再測定"
 }
