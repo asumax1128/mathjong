@@ -210,12 +210,12 @@ test('120局：判定関数による自動パスと独立実装の見送りで�
   assert.ok(ronSeen > 0 && tsumoSeen > 0, `ロン ${ronSeen}・ツモ ${tsumoSeen} の局面を確認`);
 });
 
-// 版（docs/62・docs/84・docs/86）：画面 0.7.3・エンジン 0.8.0（正負対称・補角対・等差三連の追加で和了の点が変わるため）
-test('バージョン：画面 0.7.3（ヘッダー・title は同じ値）、エンジン 0.8.0（正負対称・補角対・等差三連の追加）', () => {
+// 版（docs/62・docs/84・docs/86・docs/87）：画面 0.7.4（演出の追加：一発・役の段階表示・リーチの席の発光）・エンジン 0.8.0
+test('バージョン：画面 0.7.4（ヘッダー・title は同じ値）、エンジン 0.8.0', () => {
   const app = readFileSync(new URL('../src/ui/app.js', import.meta.url), 'utf8');
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const v = app.match(/const APP_VERSION = '([^']+)';/)[1];
-  assert.equal(v, '0.7.3');
+  assert.equal(v, '0.7.4');
   assert.equal(ENGINE_VERSION, '0.8.0');
   assert.match(html, new RegExp(`<title>数雀（MATHJONG）Ver\\.${v.replace(/\./g, '\\.')}</title>`), 'index.html の title が画面の版と一致');
   assert.ok(app.includes('document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`'), 'JS の title も同じ');

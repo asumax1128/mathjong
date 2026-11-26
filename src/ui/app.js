@@ -25,13 +25,13 @@ import { loadProgress, saveProgress, hasProgress, recordExam } from './beginner-
 import { SEAT_AREA, SEAT_ROT, riverRows as layoutRiverRows, boardShape as layoutBoardShape } from './table-layout.js';
 import { isLocalHost, resolveSpeed, speedDelays, publicSpeedNames, MAX_ROUND } from './params.js';
 import { validateReplay, CURRENT_RULESET } from './replay.js';
-import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, scanEffects, fxOffer, fxAdvance, fxTimes, fxProgress, isLiteEffect } from './effects.js';
+import { EFFECTS, EFFECT_MODE_KEY, parseEffectMode, scanEffects, fxOffer, fxAdvance, fxTimes, fxProgress, isLiteEffect, isWinEffect } from './effects.js';
 import { SOUND_KEY, parseSoundSetting, pickSound, createSoundPlayer } from './sound.js';
 import { VOICE_KEY, parseVoiceSetting, createVoicePlayer } from './voice.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・タイトル画面の版表示はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
-const APP_VERSION = '0.7.3';
+const APP_VERSION = '0.7.4';
 document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`;
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -725,6 +725,48 @@ function fxScan() {
   for (const o of r.offers) fxFire(o.kind, o.event);
 }
 
+// ---- リーチ宣言の席の発光（画面 0.7.4。表示だけ）----
+// ゲームの記録（events）に新しいリーチの宣言があれば、その席の名札（卓中央の .seat-tag）を RF_MS だけ光らせる。
+// 宣言の演出（カットイン）のキューとは別に持つので、続けてロン・ツモがあってカットインを出さなかった場合でも、宣言した席は必ず光る。
+// オンラインのゲストも、ホストの配信する記録（pub.game.events：公開情報）から同じように光る（追加の通信なし）。
+// 再描画しても最初からやり直さない（経過分だけ animation-delay をずらす）。reduced motion・簡易表示では点滅せず、縁取りだけ（静止）。
+const RF_MS = 1000;
+S.rflash = { serial: -1, seen: 0, list: [], timer: null };
+function riichiFlashScan() {
+  const g = S.game;
+  if (!g) return;
+  const st = S.rflash;
+  if (st.serial !== S.gameSerial) { st.serial = S.gameSerial; st.seen = 0; st.list = []; }
+  const from = st.seen > g.events.length ? 0 : st.seen;
+  const now = performance.now();
+  for (let i = from; i < g.events.length; i++) {
+    const e = g.events[i];
+    if (e && e.type === 'riichi') { st.list = st.list.filter((x) => x.seat !== e.seat); st.list.push({ seat: e.seat, at: now }); }
+  }
+  st.seen = g.events.length;
+}
+function riichiFlashApply() {
+  const st = S.rflash;
+  clearTimeout(st.timer);
+  st.timer = null;
+  for (const el of app.querySelectorAll('.seat-tag.riichi-flash')) { el.classList.remove('riichi-flash', 'riichi-flash-still'); el.style.removeProperty('animation-delay'); }
+  if (!S.game) return;
+  riichiFlashScan(); // 描画のたびに新しい記録を読む（自分の宣言は step より先に描画されるため。記録は読むだけ）
+  const now = performance.now();
+  st.list = st.list.filter((x) => now - x.at < RF_MS);
+  if (!st.list.length) return;
+  const still = fxLite();
+  for (const x of st.list) {
+    const el = app.querySelector(`.seat-tag.seat-${x.seat}`);
+    if (!el) continue;
+    el.classList.add('riichi-flash');
+    if (still) el.classList.add('riichi-flash-still');
+    else el.style.animationDelay = `-${Math.round(now - x.at)}ms`;
+  }
+  const end = Math.min(...st.list.map((x) => x.at + RF_MS));
+  st.timer = setTimeout(riichiFlashApply, Math.max(10, end - now + 10));
+}
+
 // ゲームの記録に新しい打牌・チー・ポン・リーチ・ロン・ツモがあれば、効果音を1つ鳴らす。同じ記録で2回は鳴らさない。
 // 優先度は ロン・ツモ ＞ リーチ ＞ ポン ＞ チー ＞ 打牌。演出（fxScan）と同じ step() の先頭で、同じ記録を一度だけ読む。
 function soundScan() {
@@ -1346,6 +1388,8 @@ function render() {
   `;
   restoreTableScroll(scrollSnapshot);
   fxApply(); // 再描画で作り直された要素にも、演出中なら続きから発光・揺れを付ける
+  yakuRevealApply(); // 和了の役の段階表示（表示中なら続きから）
+  riichiFlashApply(); // リーチ宣言の席の発光（宣言の直後だけ）
 }
 
 // ---------- モーダル ----------
@@ -1369,6 +1413,80 @@ function revealHTML(seat) {
   const hand = g.hands[seat].slice().sort((a, b) => g.typeOf(a) - g.typeOf(b)).map((id) => tileHTML(T(g.typeOf(id)), { size: 's' })).join('');
   return `<div class="reveal"><span class="who">${seat === HUMAN ? 'あなた' : `${POS[seat]} ${nameOf(seat)}`}</span><span class="tiles">${hand}</span><span class="melds">${meldsHTML(seat, 's')}</span></div>`;
 }
+
+// ---- 和了の役を1つずつ表示（画面 0.7.4。表示だけで、判定・点数・進行・ボタンの操作は変えない） ----
+// 1行あたり YR_STEP_MS（行が多いときは全体が YR_TOTAL_MS に収まるよう短くする）。合計は行が現れるごとに積み上がって見える。
+// 合計の欄の文字（textContent）は最初から最終の点（読み上げ・試験は従来どおり最終の値）。途中の値は ::after（data-run）で見せる。
+// 結果の画面をタップすると残りを一気に表示する。prefers-reduced-motion では最初から全部表示（静止）。
+// 再描画しても最初からやり直さない（局ごとに開始時刻を1つだけ持つ）。
+const YR_STEP_MS = 250;
+const YR_TOTAL_MS = 2000;
+const yrKey = () => (S.game && S.game.result ? `${S.gameSerial}:${S.round}:${S.game.events.length}` : null);
+function yrState(n) {
+  const key = yrKey();
+  if (!S.yakuReveal || S.yakuReveal.key !== key) {
+    // ロン・ツモのカットイン（通常表示）の中央の表示が消えてから始める（それまでは結果の上にカットインが重なって見えないため）。
+    // カットインの中央の表示は長さの約55%で消える（styles.css の fx-card-win）。ボタンの操作・タップでの全部表示は待たない
+    const now = performance.now();
+    const c = S.fx.current;
+    const after = c && !c.lite && isWinEffect(c.kind) ? c.startedAt + EFFECTS[c.kind].ms * 0.56 : now;
+    S.yakuReveal = { key, startedAt: Math.max(now, after), done: fxReduced(), doneAt: null, timer: null };
+  }
+  const st = S.yakuReveal;
+  const step = n > 0 ? Math.min(YR_STEP_MS, YR_TOTAL_MS / n) : 0;
+  const shown = st.done ? n : Math.max(0, Math.min(n, 1 + Math.floor((performance.now() - st.startedAt) / step)));
+  if (shown >= n && !st.done) { st.done = true; st.doneAt = performance.now(); }
+  return { st, step, shown };
+}
+function yakuListHTML(rows, total, yakuman) {
+  const { st, shown } = yrState(rows.length);
+  const cum = [];
+  rows.reduce((acc, [, v], i) => (cum[i] = acc + v), 0);
+  // 途中の合計は、足し上げが最終の点と一致するときだけ見せる（一致しない形・役満は最終の点だけ）
+  const exact = !yakuman && cum.length && cum[cum.length - 1] === total;
+  const lis = rows.map(([html], i) => html.replace(/^<li( class="([^"]*)")?/, (_m, _a, c) => `<li data-yr="${i}" class="${c ? `${c} ` : ''}yr-step${i < shown ? ' yr-on' : ''}"`));
+  const running = !st.done;
+  const run = running ? (exact ? `${cum[Math.max(0, shown - 1)]}点` : '…') : '';
+  return `<ul class="yaku" data-reveal="${running ? 'running' : 'done'}" data-yr-cum="${exact ? cum.join(',') : ''}">${lis.join('')}
+      <li class="total"><span>合計</span><b class="yr-total${running ? ' yr-running' : ''}" data-run="${run}">${total}点</b></li></ul>`;
+}
+// 描画の後：まだ現れていない行を時刻に合わせて出していく（DOM の class と data-run だけを変える。再描画はしない）
+function yakuRevealApply() {
+  const st = S.yakuReveal;
+  if (st && st.timer) { clearTimeout(st.timer); st.timer = null; }
+  if (!st || st.key !== yrKey()) return;
+  const ul = app.querySelector('.overlay-result ul.yaku');
+  if (!ul) return;
+  const items = [...ul.querySelectorAll('li.yr-step')];
+  const { step, shown } = yrState(items.length);
+  items.forEach((li, i) => li.classList.toggle('yr-on', i < shown));
+  // 一発！の光：その行が初めて現れた時刻から1回だけ（再描画で作り直されても光り直さない。経過分だけ animation-delay をずらす）
+  const ip = ul.querySelector('li.yr-on .ippatsu-flash');
+  if (ip) {
+    const now = performance.now();
+    if (st.ippatsuAt == null) st.ippatsuAt = now;
+    ip.style.animationDelay = `-${Math.round(now - st.ippatsuAt)}ms`;
+  }
+  if (ul.dataset.reveal !== 'running') return;
+  const tot = ul.querySelector('.yr-total');
+  const cum = ul.dataset.yrCum ? ul.dataset.yrCum.split(',').map(Number) : null;
+  if (st.done) {
+    ul.dataset.reveal = 'done';
+    tot.classList.remove('yr-running');
+    tot.dataset.run = '';
+    return;
+  }
+  if (cum) tot.dataset.run = `${cum[Math.max(0, shown - 1)]}点`;
+  const next = st.startedAt + shown * step;
+  st.timer = setTimeout(yakuRevealApply, Math.max(10, next - performance.now()));
+}
+// 結果の画面のどこかをタップしたら残りを全部表示する（ボタンの操作はそのまま通す。待たせない）
+document.addEventListener('pointerdown', (ev) => {
+  const st = S.yakuReveal;
+  if (!st || st.done || !ev.target.closest || !ev.target.closest('.overlay-result')) return;
+  st.done = true;
+  yakuRevealApply();
+}, { capture: true, passive: true });
 
 function resultHTML() {
   const g = S.game;
@@ -1395,16 +1513,18 @@ function resultHTML() {
         return `<li class="${m.kind}"><span class="tiles">${tiles}</span>${formulaHTML(rules, mi)}${tag}</li>`;
       }).join('')}</ol>`;
     }
-    const base = a.yakuman ? '' : `<li><span>通常和了</span><b>${rules.config.scoring.base}</b></li>`;
-    const yaku = a.yaku.map((y) => `<li class="${y.yakuman ? 'yakuman' : ''}"><span>${y.name}${y.yakuman ? '（役満）' : ''}</span><b>${a.yakuman ? '' : '+'}${y.points}</b></li>`).join('');
+    // 役を1つずつ表示する（画面 0.7.4・表示だけ）。行ごとに [HTML, 加える点（合計の積み上げ用。役満・+0 は 0）]
+    const rows = [];
+    if (!a.yakuman) rows.push([`<li><span>通常和了</span><b>${rules.config.scoring.base}</b></li>`, rules.config.scoring.base]);
+    // 一発：その行で「一発！」の文字が一瞬光って消える（1秒以内）。門前ツモだけの和了には何も出さない
+    for (const y of a.yaku) rows.push([`<li class="${y.yakuman ? 'yakuman' : ''}${y.ippatsu ? ' yaku-ippatsu' : ''}"><span>${y.name}${y.yakuman ? '（役満）' : ''}${y.ippatsu ? '<i class="ippatsu-flash" aria-hidden="true">一発！</i>' : ''}</span><b>${a.yakuman ? '' : '+'}${y.points}</b></li>`, a.yakuman ? 0 : y.points]);
+    if (!a.yaku.length && !a.yakuman) rows.push(['<li class="none"><span>役なし（門前のため和了可）</span><b></b></li>', 0]);
     // リーチの加点は yaku に含まれる（エンジンが追加）。役満では加点しないことを明示する
-    const riichiNote = a.riichi && !a.riichiBonus ? '<li class="riichi-li"><span>リーチ（役満のため加点なし）</span><b>+0</b></li>' : '';
+    if (a.riichi && !a.riichiBonus) rows.push(['<li class="riichi-li"><span>リーチ（役満のため加点なし）</span><b>+0</b></li>', 0]);
     // ドラ（新ルール）：役ではない。通常和了だけ1枚につき +1点。役満には加えない
-    const doraLi = !g.newRules ? '' : a.yakuman
-      ? '<li class="dora-li"><span>ドラ（役満のため加点なし）</span><b>+0</b></li>'
-      : `<li class="dora-li"><span>ドラ ${a.doraBonus || 0}枚（役ではありません）</span><b>+${a.doraBonus || 0}</b></li>`;
-    detail += `<ul class="yaku">${base}${yaku || (a.yakuman ? '' : '<li class="none"><span>役なし（門前のため和了可）</span><b></b></li>')}${riichiNote}${doraLi}
-      <li class="total"><span>合計</span><b>${r.points}点</b></li></ul>${doraResultHTML()}
+    if (g.newRules) rows.push([a.yakuman ? '<li class="dora-li"><span>ドラ（役満のため加点なし）</span><b>+0</b></li>' : `<li class="dora-li"><span>ドラ ${a.doraBonus || 0}枚（役ではありません）</span><b>+${a.doraBonus || 0}</b></li>`, a.yakuman ? 0 : a.doraBonus || 0]);
+    detail += yakuListHTML(rows, r.points, a.yakuman);
+    detail += `${doraResultHTML()}
       ${a.kind === 'normal' && a.melds.some((mi) => rules.melds[mi].kind === 'koutsu') && a.melds.some((mi) => rules.melds[mi].kind === 'formula') ? '<p class="note">数式面子と刻子の混合形：数式系の役は付きません（門前なら役なしで和了できます）。</p>' : ''}
       ${a.candidateCount > 1 ? `<p class="note">この手は${a.candidateCount}通りの和了形に分けられます。最高得点の形を採用しました。</p>` : ''}`;
   } else if (r.reason === 'four-riichi') {
