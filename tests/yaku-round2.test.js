@@ -1,6 +1,7 @@
 // エンジン 0.8.0 の役（docs/86）：正負対称（seifu）・補角対（hokaku）・等差三連（tousa）。
 // ・数式面子3つの和了だけ（刻子が混じると不成立）・門前限定でない・ruleset 1・2 の Game だけ（従来ルール 0・legacy・AI の評価の既定では数えない）
-// ・点数は config の値（暫定）。既存の役と重なれば加算
+// ・点数は config の値（オーナー決定で確定：正負対称2・補角対2・等差三連3）。既存の役と重なれば加算
+// ・象限三角が成立する手には等差三連を付けない（象限三角の3角度は必ず公差15°の等差）
 // ・牌譜：0.8.0 の記録は新しい役込みで再生が一致し、0.7.0 の記録は追加前の数え方で再生できる
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,7 +19,7 @@ const idx = (r, key) => { const m = r.melds.find((x) => x.key === key); assert.o
 const ev = (keys, { mode = 'math2', round2 = true, closed = true, rules = R[mode] } = {}) => rules.evaluateMelds(keys.map((k) => idx(rules, k)), closed, { round2 });
 const has = (e, id) => e.yaku.some((y) => y.id === id);
 
-test('版と設定：エンジン 0.8.0。点数は config の値（暫定・門前限定でない・数式面子だけ）', () => {
+test('版と設定：エンジン 0.8.0。点数は config の値（確定値・門前限定でない・数式面子だけ）', () => {
   assert.equal(ENGINE_VERSION, '0.8.0');
   assert.equal(PRE_ROUND2_YAKU_ENGINE, '0.7.0');
   assert.deepEqual({ ...PAIFU_ENGINE_FEATURES['0.7.0'] }, { tsumoIppatsu: true, round2Yaku: false });
@@ -27,7 +28,7 @@ test('版と設定：エンジン 0.8.0。点数は config の値（暫定・門
     const ys = R[mode].config.yaku;
     for (const [id, pts] of [['seifu', 2], ['hokaku', 2], ['tousa', 3]]) {
       const y = ys.find((x) => x.id === id);
-      assert.ok(y && y.enabled && y.provisional && y.round2 && y.formulaOnly && !y.closedOnly && y.points === pts, `${mode} ${id}`);
+      assert.ok(y && y.enabled && !y.provisional && y.round2 && y.formulaOnly && !y.closedOnly && y.points === pts, `${mode} ${id}`);
     }
   }
   assert.ok(!makeConfig({ legacy: true }).yaku.some((y) => NEW.includes(y.id)), 'legacy には入れない');
@@ -203,4 +204,43 @@ test('待ちの表示（waits-view）：round2 を渡すと、新しい役だけ
   assert.ok(w1 && w0);
   assert.equal(w1.winnable, true, 'round2：補角対で和了できる');
   assert.equal(w0.winnable, false, '既定：役なし');
+});
+
+test('象限三角の手（30・45・60 など）には等差三連を付けない。象限三角でない等差の手（30・60・90）には付く。和了・待ち・役ヒントで同じ', () => {
+  const quads = { math1: [['sin30=1/2', 'cos45=1/√2', 'tan60=√3'], ['sin120=√3/2', 'cos135=-1/√2', 'tan150=-1/√3']],
+    math2: [['sin30=1/2', 'cos45=1/√2', 'tan60=√3'], ['sin120=√3/2', 'cos135=-1/√2', 'tan150=-1/√3'], ['sin210=-1/2', 'cos225=-1/√2', 'tan240=√3'], ['sin300=-√3/2', 'cos315=1/√2', 'tan330=-1/√3']] };
+  for (const mode of ['math1', 'math2']) {
+    const r = R[mode];
+    for (const keys of quads[mode]) {
+      const e = ev(keys, { mode });
+      assert.ok(has(e, 'shougenSankaku'), `${mode} ${keys}：象限三角`);
+      assert.ok(!has(e, 'tousa'), `${mode} ${keys}：等差三連は付かない`);
+      // 点数：新しい役（ここでは等差三連）を足さない＝round2 なしの評価と同じ点
+      const e0 = ev(keys, { mode, round2: false });
+      assert.equal(e.points, e0.points, `${mode} ${keys}：象限三角の点だけ`);
+      assert.equal(e.points, r.config.scoring.base + e.yaku.reduce((a, y) => a + y.points, 0));
+      // 和了判定（analyzeWin・Game と同じ引数）でも付かない
+      const counts = r.countsOf(keys.flatMap((k) => r.melds[idx(r, k)].tiles));
+      const w = r.analyzeWin(counts, [], { closed: true, round2: true });
+      assert.ok(w && !w.yaku.some((y) => y.id === 'tousa') && w.yaku.some((y) => y.id === 'shougenSankaku'), `${mode} ${keys}：和了判定`);
+    }
+  }
+  // 象限三角でない等差：付く（点も加算）
+  const e = ev(['sin30=1/2', 'cos60=1/2', 'sin90=1'], { mode: 'math1' });
+  assert.ok(has(e, 'tousa') && !has(e, 'shougenSankaku'));
+  assert.equal(e.points, ev(['sin30=1/2', 'cos60=1/2', 'sin90=1'], { mode: 'math1', round2: false }).points + 3);
+  // 同じ象限の等差でも、同じ角度の並びが象限三角にならないもの（30・60・90 は軸を含む）は上で確認済み。
+  // 象限一色だが象限三角でない（30・30・60）は等差でもないので付かない
+  assert.ok(!has(ev(['sin30=1/2', 'cos30=√3/2', 'tan60=√3'], { mode: 'math1' }), 'tousa'));
+  // 役ヒント：象限三角の手の候補に等差三連は出ない（象限三角は出る）
+  const r = R.math1;
+  const all = [];
+  for (const ty of r.types) for (let c = 0; c < ty.copies; c++) all.push(ty.idx);
+  const take = (keys) => { const used = new Set(); return keys.flatMap((k) => r.melds[idx(r, k)].tiles).map((t) => { const i = all.findIndex((x, k) => x === t && !used.has(k)); used.add(i); return { id: i, type: t }; }); };
+  const view = (keys) => ({ seat: 0, hand: take(keys), melds: [[], [], [], []], rivers: [[], [], [], []], doraIndicators: [], drawn: null });
+  const c1 = yakuCandidates(r, view(['sin30=1/2', 'cos45=1/√2', 'tan60=√3']), { limit: 30, round2: true });
+  assert.ok(c1.some((c) => c.id === 'shougenSankaku'), `候補：${c1.map((c) => c.id)}`);
+  assert.ok(!c1.some((c) => c.id === 'tousa' && c.missing === 0), `象限三角の手で等差三連が完成として出ない：${c1.map((c) => c.id + ':' + c.missing)}`);
+  const c2 = yakuCandidates(r, view(['sin30=1/2', 'cos60=1/2', 'sin90=1']), { limit: 30, round2: true });
+  assert.ok(c2.some((c) => c.id === 'tousa' && c.missing === 0));
 });

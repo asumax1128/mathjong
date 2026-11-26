@@ -126,12 +126,12 @@ const KOUTSU_YAKU = [
   { id: 'tanIsshoku', name: '正接一色', points: 16, yakuman: true, closedOnly: false, enabled: true, category: 'koutsu', fn: 'tan', provisional: true },
 ];
 
-// ---- エンジン 0.8.0 の新役（数式系・チーした手でも成立）。点数は仮置き（頻度測定を見てオーナーが決める。変えるのはここの points だけ） ----
+// ---- エンジン 0.8.0 の新役（数式系・チーした手でも成立）。点数はオーナーが頻度測定を見て確定（正負対称2・補角対2・等差三連3。docs/86） ----
 // round2: true の役は ruleset 1・2 の Game だけが評価する（rules.evaluateMelds の round2）。従来ルール（0）・legacy には入れない
 const ROUND2_YAKU = [
-  { id: 'seifu', name: '正負対称', points: 2, closedOnly: false, enabled: true, round2: true, provisional: true },
-  { id: 'hokaku', name: '補角対', points: 2, closedOnly: false, enabled: true, round2: true, provisional: true },
-  { id: 'tousa', name: '等差三連', points: 3, closedOnly: false, enabled: true, round2: true, provisional: true },
+  { id: 'seifu', name: '正負対称', points: 2, closedOnly: false, enabled: true, round2: true },
+  { id: 'hokaku', name: '補角対', points: 2, closedOnly: false, enabled: true, round2: true },
+  { id: 'tousa', name: '等差三連', points: 3, closedOnly: false, enabled: true, round2: true }, // 象限三角が成立する手には付けない（rules.js）
 ];
 
 // 数学Ⅰでは 0°〜180° しかないため、3つの象限を使う三象限巡は成立しない（象限一色は第1・第2象限で成立する）（tests/modes.test.js で全組合せを確認）

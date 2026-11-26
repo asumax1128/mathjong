@@ -106,6 +106,7 @@ export function createRules(config = DEFAULT_CONFIG) {
 
   // ---- 役判定（完成した3面子に対して） ----
   const yakuDefs = config.yaku.filter((y) => y.enabled);
+  const sankakuEnabled = yakuDefs.some((y) => y.id === 'shougenSankaku');
   const detectors = {
     sankan: (ms) => new Set(ms.map((m) => m.fn)).size === 3,
     doukan: (ms) => new Set(ms.map((m) => m.fn)).size === 1,
@@ -125,9 +126,12 @@ export function createRules(config = DEFAULT_CONFIG) {
     seifu: (ms) => ms.some((a, i) => ms.some((b, j) => i < j && a.exact.p !== 0 && sumIsZero(a.exact, b.exact))),
     // 補角対：異なる2面子の角度の和が 180°（同じ角度どうし（90°と90°）は除く）。関数・値の条件はない
     hokaku: (ms) => ms.some((a, i) => ms.some((b, j) => i < j && a.deg !== b.deg && a.deg + b.deg === 180)),
-    // 等差三連：3面子の角度を小さい順に並べた差がすべて等しく、公差が正（360°をまたぐ回り込みは数えない）
+    // 等差三連：3面子の角度を小さい順に並べた差がすべて等しく、公差が正（360°をまたぐ回り込みは数えない）。
+    // 象限三角が成立する手（各象限の3角度は必ず公差15°の等差）では付けない（同じ角度の並びを二重に数えない。オーナー決定・docs/86）。
+    // 判定の中で除くので、和了・待ち・役ヒント（すべて evaluateMelds を通る）で同じ結果になる
     tousa: (ms) => {
       const d = ms.map((m) => m.deg).sort((a, b) => a - b);
+      if (sankakuEnabled && detectors.shougenSankaku(ms)) return false;
       return d[1] - d[0] > 0 && d[1] - d[0] === d[2] - d[1];
     },
     doukaku: (ms) => new Set(ms.map((m) => m.deg)).size === 1 && new Set(ms.map((m) => m.fn)).size === 3,
