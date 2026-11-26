@@ -12,6 +12,7 @@ import { readFileSync, mkdirSync } from 'node:fs';
 import { dirname, join as pjoin } from 'node:path';
 import assert from 'node:assert/strict';
 import { startServer } from '../../tools/serve.mjs';
+import { watchRiichiFlash, assertRiichiFlashed } from './online-helpers.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -118,6 +119,7 @@ try {
   const seats = await owner('GET', `games/mathjong/rooms/${code}/seats`);
   assert.equal(Object.values(seats).filter((s) => s.kind === 'cpu' && !s.uid).length, 2, 'CPU の席は uid なし');
   ok(`開始：両端末が卓の画面に（ホスト席${hs.mySeat}・ゲスト席${gs.mySeat}・最初の親は席${hs.pub.game.dealer}）`);
+  await watchRiichiFlash(G.page); // 画面 0.7.4：ゲストの画面でリーチ宣言の席が光るか（CPU の宣言があれば）
 
   // ゲストは他家の priv を読めない（エミュレータのルール）。ゲストのトークンを画面から取って REST で試す
   const gToken = await G.page.evaluate(async () => {
@@ -191,6 +193,8 @@ try {
     assert.deepEqual(rows.slice().sort((x, y) => y - x), st.pub.match.scores.slice().sort((x, y) => y - x));
   }
   ok(`両端末で結果（持ち点 ${hf.pub.match.scores.join('・')}・順位）が一致`);
+  const rfN = await assertRiichiFlashed(G.page, 'ゲスト');
+  ok(`ゲストの画面：リーチを宣言した席はすべて名札が光った（宣言 ${rfN} 件。配信の記録から・追加の通信なし）`);
 
   // 部屋を出る：ホストが出ると部屋が消え、ゲストに「閉じられました」
   await H.page.click('[data-action="online-leave"]');

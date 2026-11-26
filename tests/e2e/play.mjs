@@ -2216,9 +2216,9 @@ async function chiAutoPass(browser) {
   // (12) バージョン表示：ヘッダー・ページタイトル（再現情報は廃止）
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    // 版の変更（docs/62・docs/84・docs/86）：画面 0.7.3・エンジン 0.8.0（正負対称・補角対・等差三連）。版はヘッダーとページタイトルに出る
-    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.7.3');
-    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.7.3');
+    // 版の変更（docs/62・docs/84・docs/86）：画面 0.7.4（演出の追加）・エンジン 0.8.0。版はヘッダーとページタイトルに出る
+    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.7.4');
+    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.7.4');
     await page.locator('button[data-action="settings"]').tap();
     await assertNoReportInfo(page, '設定画面');
     assert.deepEqual(errors, []);
@@ -9899,6 +9899,128 @@ async function asDiscardLeft(page) {
   return 'discard';
 }
 
+// ---- 画面 0.7.4：演出の追加（docs/87）。一発の小さな光・和了の役を1つずつ表示・リーチ宣言の席の発光。表示だけで判定・点数・進行は変えない ----
+const v18Yaku = (page) => page.evaluate(() => {
+  const ul = document.querySelector('.overlay-result ul.yaku');
+  const tot = ul && ul.querySelector('.yr-total');
+  return ul && {
+    reveal: ul.dataset.reveal, on: ul.querySelectorAll('li.yr-step.yr-on').length, steps: ul.querySelectorAll('li.yr-step').length,
+    run: tot.dataset.run, running: tot.classList.contains('yr-running'), totalText: tot.textContent, text: ul.innerText,
+    names: [...ul.querySelectorAll('li.yr-step > span')].map((x) => x.firstChild.textContent),
+  };
+});
+// RI_HAND でリーチ（0 を捨てて =1 待ち）→ 他家3人はツモ切り → 次の自分のツモで =1（一発ツモ）。two=true なら1回ツモ切りしてから和了（一発なし）
+async function v18RiichiTsumo(page, { two = false, check = null } = {}) {
+  const draws = two ? ['0', '=-1/√3', '=-√3/2', '=-1/√2', '=0', '=-1/√3', '=-√3/2', '=-1/√2', '=1'] : ['0', '=-1/√3', '=-√3/2', '=-1/√2', '=1'];
+  await v3Scene(page, presetWall(RI_HAND, draws, [RI_O1, RI_O2, RI_O3]));
+  await page.locator('button[data-action="riichi"]').tap();
+  const zeroId = await page.evaluate(() => { const { S, rules } = window.__mathjong; return S.game.hands[0].find((x) => rules.types[S.game.typeOf(x)].key === 'a:0'); });
+  await page.locator(`.hand .tile[data-id="${zeroId}"]`).tap();
+  await page.locator('button[data-action="riichi-discard"]').tap();
+  if (check) await check();
+  await apForce(page, 1); await apForce(page, 2); await apForce(page, 3);
+  await riWaitTurn(page);
+  if (two) { await page.locator('button[data-action="tsumogiri"]').tap(); await apForce(page, 1); await apForce(page, 2); await apForce(page, 3); await riWaitTurn(page); }
+  await page.locator('button[data-action="tsumo"]').tap();
+  await page.waitForSelector('.overlay-result .result');
+  return page.evaluate(() => { const r = window.__mathjong.S.game.result; return { points: r.points, yaku: r.analysis.yaku.map((y) => ({ id: y.id, name: y.name, points: y.points })) }; });
+}
+async function v18Presentation(browser) {
+  // (1) リーチ宣言：宣言した席の名札（卓中央）が短く光る（1秒）。光は再描画しても続きから。その後は消える
+  // (2) 一発ツモ：一発の行に「一発！」の小さな光（1秒以内）。役が1つずつ現れ、最後は従来どおりの役と合計
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { query: '&newrules=2' });
+    const res = await v18RiichiTsumo(page, { check: async () => {
+      const f = await page.evaluate(() => { const el = document.querySelector('.seat-tag.seat-0'); const cs = getComputedStyle(el); return { cls: el.className, anim: cs.animationName, dur: cs.animationDuration, others: document.querySelectorAll('.seat-tag.riichi-flash:not(.seat-0)').length }; });
+      assert.match(f.cls, /riichi-flash/, `宣言した席の名札が光る：${f.cls}`);
+      assert.equal(f.anim, 'riichi-flash');
+      assert.equal(f.dur, '1s', '短い（1秒）');
+      assert.equal(f.others, 0, 'ほかの席は光らない');
+      await page.waitForFunction(() => !document.querySelector('.seat-tag.riichi-flash'), null, { timeout: 3000 });
+    } });
+    assert.ok(res.yaku.some((y) => y.id === 'ippatsu'), `一発が付く：${res.yaku.map((y) => y.id)}`);
+    const flash = await page.evaluate(() => { const el = document.querySelector('.overlay-result .yaku li.yaku-ippatsu .ippatsu-flash'); if (!el) return null; const cs = getComputedStyle(el); return { text: el.textContent, anim: cs.animationName, dur: parseFloat(cs.animationDuration) }; });
+    assert.ok(flash, '一発の行に演出の要素');
+    assert.equal(flash.text, '一発！');
+    assert.equal(flash.anim, 'ippatsu-flash');
+    assert.ok(flash.dur > 0 && flash.dur <= 1, `1秒以内：${flash.dur}s`);
+    // 段階表示：始めは途中（行が全部は出ていない・合計は途中の値）→ 最後は全部・合計は最終の点
+    const y0 = await v18Yaku(page);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v18-yaku-running.png` });
+    assert.equal(y0.reveal, 'running', '役が1つずつ現れる途中');
+    assert.ok(y0.on < y0.steps, `途中：${y0.on}/${y0.steps}`);
+    assert.equal(y0.totalText, `${res.points}点`, '合計の欄の文字は最初から最終の点（読み上げ用）');
+    assert.ok(y0.running && /点$/.test(y0.run) && y0.run !== `${res.points}点`, `合計は途中の値：${y0.run}`);
+    // 途中：いくつかの行が出て、合計は途中の積み上げ（最終の点より小さい）
+    await page.waitForFunction(() => { const ul = document.querySelector('.overlay-result ul.yaku'); return ul.dataset.reveal === 'running' && ul.querySelectorAll('li.yr-on').length >= 3; }, null, { timeout: 5000 });
+    const ym = await v18Yaku(page);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v18-yaku-mid.png` });
+    assert.ok(parseInt(ym.run, 10) < res.points, `合計が積み上がっていく：${ym.run}`);
+    await page.waitForFunction(() => document.querySelector('.overlay-result ul.yaku').dataset.reveal === 'done', null, { timeout: 5000 });
+    // 段階表示はツモのカットインの中央の表示が消えてから始め、始めてから2秒以内に終わる
+    const dur = await page.evaluate(() => { const { S } = window.__mathjong; return S.yakuReveal.doneAt - S.yakuReveal.startedAt; });
+    assert.ok(dur <= 2100, `段階表示は全体で2秒程度まで：${Math.round(dur)}ms`);
+    const y1 = await v18Yaku(page);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/v18-yaku-done.png` });
+    assert.equal(y1.on, y1.steps, '全部の行が出た');
+    assert.equal(y1.running, false);
+    for (const y of res.yaku) assert.ok(y1.text.includes(y.name), `役 ${y.name}`);
+    assert.match(y1.text, new RegExp(`一発[\\s\\S]*\\+1`));
+    assert.match(y1.text, new RegExp(`合計\\s*${res.points}点`), '最終の合計は従来どおり');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (3) 門前ツモだけ（一発なし）の和了では「一発！」は出ない。タップで残りを一気に表示。ボタンは待たずに押せる
+  {
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { query: '&newrules=2' });
+    const res = await v18RiichiTsumo(page, { two: true });
+    assert.ok(res.yaku.some((y) => y.id === 'menzen-tsumo') && !res.yaku.some((y) => y.id === 'ippatsu'), `門前ツモあり・一発なし：${res.yaku.map((y) => y.id)}`);
+    assert.equal(await page.locator('.overlay-result .ippatsu-flash').count(), 0, '一発の演出は出ない');
+    assert.equal((await v18Yaku(page)).reveal, 'running');
+    await page.locator('.overlay-result .yaku').tap();
+    const y = await v18Yaku(page);
+    assert.equal(y.reveal, 'done', 'タップで残りを全部表示');
+    assert.equal(y.on, y.steps);
+    assert.match(y.text, new RegExp(`合計\\s*${res.points}点`));
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  {
+    // ボタン（次へ）は段階表示を待たずに押せる（遷移を遅らせない）
+    const { ctx, page, errors } = await v3Page(browser, 'math1', { query: '&newrules=2' });
+    await v18RiichiTsumo(page);
+    assert.equal((await v18Yaku(page)).reveal, 'running');
+    const next = page.locator('.overlay-result .modal-actions button.primary').first();
+    await next.tap();
+    await page.waitForFunction(() => !document.querySelector('.overlay-result') || window.__mathjong.S.modal !== 'result', null, { timeout: 3000 });
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  // (4) prefers-reduced-motion：役は最初から全部（静止）、一発は光らずに表示、リーチの席は縁取りだけ（点滅なし）
+  {
+    const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+    const page = await ctx.newPage();
+    const errors = watchErrors(page);
+    await page.goto(`${LOCAL}?mode=math1&seed=1&speed=slow&newrules=2`);
+    await page.waitForSelector('.hand .tile');
+    const res = await v18RiichiTsumo(page, { check: async () => {
+      const f = await page.evaluate(() => { const el = document.querySelector('.seat-tag.seat-0'); return { cls: el.className, anim: getComputedStyle(el).animationName }; });
+      assert.match(f.cls, /riichi-flash/);
+      assert.equal(f.anim, 'none', '点滅しない（静止の縁取り）');
+    } });
+    const y = await v18Yaku(page);
+    assert.equal(y.reveal, 'done', '最初から全部表示');
+    assert.equal(y.on, y.steps);
+    assert.match(y.text, new RegExp(`合計\\s*${res.points}点`));
+    const f = await page.evaluate(() => { const el = document.querySelector('.overlay-result .ippatsu-flash'); const cs = getComputedStyle(el); return { anim: cs.animationName, op: cs.opacity }; });
+    assert.equal(f.anim, 'none');
+    assert.equal(f.op, '1', '一発の文字は静止表示');
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  }
+  console.log('✓ 画面 0.7.4：一発の小さな光（門前ツモだけでは出ない）・役を1つずつ表示（タップで全部・ボタンは待たない・最終は従来どおり）・リーチの席の発光・reduced motion は静止');
+}
+
 async function v17AutoSortToggle(browser) {
   const ctx = await newContext(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
   const page = await ctx.newPage(), errors = watchErrors(page);
@@ -10079,7 +10201,7 @@ try {
   // 開発用：--only 関数名,… で一部の検査だけを実行する（全体の E2E OK とは区別して表示）
   const ONLY = opt('--only', null);
   if (ONLY) {
-    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage, v15PaifuEpoch, v15PaifuLoadFailure, v15PaifuEpochNoBC, v15PaifuEpochFallback, v15PaifuSnapshot, v16PaifuReview, v16PaifuReviewErrors, v16PaifuReviewAudit, v16PaifuReviewAudit2, v17AutoSortToggle };
+    const fns = { publicMode, badSpeeds, fixedSeeds, roundReproduction, rapidTapGuard, v02aFeatures, v02aAuditFixes, guideFitsScreen, handReorderAuditFixes, handReorderAudit2, handReorderP22, handReorder, chiAutoPass, chiAutoPassLayouts, v03Rules, v03bHints, v04Match, v04Fixes, v04End, v04bLevels, v04bPonAutoPass, v05Riichi, v05bEffects, v05bFxModeFixed, v05cTsumo, v05cTitleLogo, v05dRiichiFx, v05dSound, v05dSoundSuspend, v05eCutin, v05eVoice, v05eAuditFix, v05eAudioIndependent, v06Characters, v06FreeSelect, v06TrioIntegration, v07BeginnerRoom, v07BeginnerRoom2, v07TableHintDock, v07MahjongTable, v08NewRulesTable, v08NewRulesLayout, newRulesPlay, v09FuritenWaits, v09FuncPon, v09RulesUnified, v09SelectTop, v09TileFaces, v09Layout, v10AutoTsumogiri, v10AutoTsumoLayout, v11OneRoundTitle, v11OneRoundEnd, v11FourRiichi, v11Layout, v12Deposit, v12AgariYame, v12WaitsAndYaku, v12Layout, v13RiichiAssist, v14DiscardPreview, v15PaifuRecording, v15PaifuExclusions, v15PaifuStorage, v15PaifuEpoch, v15PaifuLoadFailure, v15PaifuEpochNoBC, v15PaifuEpochFallback, v15PaifuSnapshot, v16PaifuReview, v16PaifuReviewErrors, v16PaifuReviewAudit, v16PaifuReviewAudit2, v17AutoSortToggle, v18Presentation };
     for (const n of ONLY.split(',')) await fns[n](browser);
     console.log(`E2E PARTIAL OK（--only ${ONLY}）`);
     if (EXTERNAL) console.log(`PUBLIC E2E OK：${PUBLIC}（${EXTERNAL.checks.join(',')}、Safari実機ではない）`);
@@ -10165,6 +10287,7 @@ try {
   await v16PaifuReviewAudit(browser);
   await v16PaifuReviewAudit2(browser);
   await v17AutoSortToggle(browser);
+  await v18Presentation(browser);
   await v08NewRulesLayout(browser);
   await newRulesPlay(browser, stats);
   // Ver.0.3：数学Ⅱ・数学Ⅰを交互に（ポン・刻子を含む新規則）。旧規則でも1回（互換）。

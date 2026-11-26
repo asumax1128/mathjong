@@ -119,3 +119,29 @@ export async function playUntil(pages, until = null, { timeoutMs = 300000 } = {}
 }
 export const shotter = (dir) => async (page, name) => { if (dir) { mkdirSync(dir, { recursive: true }); await page.screenshot({ path: pjoin(dir, `${name}.png`) }); } };
 export const argOf = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : null; };
+// 画面 0.7.4：リーチ宣言の席の発光（docs/87）。ゲストの画面で、配信の記録（pub.game.events）にあるリーチの宣言の席が、
+// 名札（.seat-tag.seat-N）の riichi-flash で光ったかを記録する（ページの中の MutationObserver。追加の通信はない）。
+// 席の番号はその端末から見た席（RemoteTable の events と同じ向き）。局ごとに（gameSerial）分けて数える。
+export async function watchRiichiFlash(page) {
+  await page.evaluate(() => {
+    if (window.__rfWatch) return;
+    const w = (window.__rfWatch = { flashed: new Set(), declared: new Set() });
+    const look = () => {
+      const m = window.__mathjong;
+      const S = m && m.S;
+      if (!S || !S.game) return;
+      for (const e of S.game.events || []) if (e.type === 'riichi') w.declared.add(`${S.gameSerial}:${e.seat}`);
+      for (const el of document.querySelectorAll('.seat-tag.riichi-flash')) { const k = el.className.match(/\bseat-(\d)\b/); if (k) w.flashed.add(`${S.gameSerial}:${k[1]}`); }
+    };
+    new MutationObserver(look).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+    look();
+  });
+}
+export const riichiFlashReport = (page) => page.evaluate(() => { const w = window.__rfWatch; return w ? { declared: [...w.declared], flashed: [...w.flashed] } : null; });
+// 宣言のあった席は、すべて光っている
+export async function assertRiichiFlashed(page, label) {
+  const r = await riichiFlashReport(page);
+  assert.ok(r, `${label}：記録の準備`);
+  for (const k of r.declared) assert.ok(r.flashed.includes(k), `${label}：リーチを宣言した席（${k}）が光る`);
+  return r.declared.length;
+}
