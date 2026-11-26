@@ -93,6 +93,7 @@ export function buildRemoteTable(rules, pub, priv, me, { sent = false } = {}) {
   if (result && gs.result.from === undefined) delete result.from;
   Object.assign(t, {
     rules, ruleset, newRules: true, furitenRule: true, funcPonBan: true, fourRiichiRule: true,
+    tsumoIppatsuRule: true, round2YakuRule: true, // ホストの Game（ruleset 2・既定）と同じ。ゲスト側の待ち・役ヒントの判定に使う
     seed: 0, dealer: rot(gs.dealer), round: gs.round,
     players: perm(pub.players || [{}, {}, {}, {}]),
     tileType,

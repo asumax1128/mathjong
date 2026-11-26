@@ -29,15 +29,16 @@ function combosFor(rules, k) {
 // ron: ロン和了としての評価（三暗刻の暫定規則 sanankouRonCounts が効く）。キャッシュはロンかどうかで分ける。
 const evalCache = new WeakMap();
 // closed：門前か（新ルールの暗カンだけの手は面子があっても門前。旧ルールは従来どおり面子なし＝門前）
-function evaluatorFor(rules, exposed, ron = false, closed = exposed.length === 0) {
+// round2：エンジン 0.8.0 の役（正負対称・補角対・等差三連）も候補にするか（Game の round2YakuRule と同じ値を渡す）
+function evaluatorFor(rules, exposed, ron = false, closed = exposed.length === 0, round2 = false) {
   let cache = evalCache.get(rules);
   if (!cache) evalCache.set(rules, (cache = new Map()));
-  const key = (ron ? 'ron:' : '') + (closed && exposed.length ? 'kan:' : '') + exposed.slice().sort((a, b) => a - b).join(',');
+  const key = (round2 ? 'r2:' : '') + (ron ? 'ron:' : '') + (closed && exposed.length ? 'kan:' : '') + exposed.slice().sort((a, b) => a - b).join(',');
   let ev = cache.get(key);
   if (ev) return ev;
   const combos = combosFor(rules, 3 - exposed.length);
   const memo = new Array(combos.length);
-  ev = (i) => memo[i] || (memo[i] = rules.evaluateMelds([...exposed, ...combos[i].melds], closed, { ron }));
+  ev = (i) => memo[i] || (memo[i] = rules.evaluateMelds([...exposed, ...combos[i].melds], closed, { ron, round2 }));
   cache.set(key, ev);
   return ev;
 }
@@ -101,9 +102,10 @@ function riversWithout(rivers, from, type) {
 //   category: 'formula'（数式系）/ 'koutsu'（刻子系）。並び順に使う。
 // claim: claimForSeat() の結果。現在の宣言対象牌は、実際の宣言（ロン・ポン・チー）で取れる場合だけ、
 //        その宣言を行った後の局面として評価する（1枚だけ。宣言しなければ取得不能）。
-export function yakuCandidates(rules, view, { limit = 3, claim = null } = {}) {
+// round2：エンジン 0.8.0 の役（正負対称・補角対・等差三連）も候補に出す（ruleset 1・2 の局。既定は出さない）
+export function yakuCandidates(rules, view, { limit = 3, claim = null, round2 = false } = {}) {
   const order = orderOf(rules);
-  const routes = baseCandidates(rules, view, limit).map((c) => ({ ...c, via: null }));
+  const routes = baseCandidates(rules, view, limit, { round2 }).map((c) => ({ ...c, via: null }));
   if (claim) {
     const rivers = riversWithout(view.rivers, claim.from, claim.type);
     const dora = 'doraIndicators' in view ? { doraIndicators: view.doraIndicators } : {}; // 新ルールだけ
@@ -111,7 +113,7 @@ export function yakuCandidates(rules, view, { limit = 3, claim = null } = {}) {
       // ロン：手牌＋対象牌でいま完成している形（あと0枚）だけが、この宣言で実現できる
       const v = { seat: view.seat, melds: view.melds, rivers, hand: [...view.hand, { id: -1, type: claim.type }], ...dora };
       // ロン和了として評価する（成立役・代表得点ともエンジンのロン判定と同じ。三暗刻の設定も反映）
-      for (const c of baseCandidates(rules, v, limit, { ron: true })) if (c.missing === 0) routes.push({ ...c, via: 'ron' });
+      for (const c of baseCandidates(rules, v, limit, { ron: true, round2 })) if (c.missing === 0) routes.push({ ...c, via: 'ron' });
     }
     const calls = claim.chiMelds.map((mi) => ['chi', mi]);
     if (claim.ponMeld !== null && claim.ponMeld !== undefined) calls.push(['pon', claim.ponMeld]);
@@ -127,7 +129,7 @@ export function yakuCandidates(rules, view, { limit = 3, claim = null } = {}) {
       }
       const melds = view.melds.map((ms) => ms.slice());
       melds[view.seat].push({ meld: mi, tiles: rules.melds[mi].tiles.slice(), from: claim.from });
-      for (const c of baseCandidates(rules, { seat: view.seat, hand, melds, rivers, ...dora }, limit)) routes.push({ ...c, via });
+      for (const c of baseCandidates(rules, { seat: view.seat, hand, melds, rivers, ...dora }, limit, { round2 })) routes.push({ ...c, via });
     }
   }
   // 役ごとに最良（順位が上 → 点数が高い）を採用。各経路の上位 limit 件の統合で全体の上位 limit 件は正確に求まる。
@@ -141,7 +143,7 @@ export function yakuCandidates(rules, view, { limit = 3, claim = null } = {}) {
 }
 
 // 宣言を考慮しない基本の役候補（河の牌はすべて取得不能）。ron: ロン和了として評価する（ロン経路）
-function baseCandidates(rules, view, limit, { ron = false } = {}) {
+function baseCandidates(rules, view, limit, { ron = false, round2 = false } = {}) {
   const counts = rules.countsOf(view.hand.map((h) => h.type));
   const exposed = view.melds[view.seat].map((m) => m.meld);
   // 門前：チー・ポンがない（新ルールの暗カンは門前のまま）。旧ルールの view（doraIndicators なし）には暗カンがないので
@@ -150,7 +152,7 @@ function baseCandidates(rules, view, limit, { ron = false } = {}) {
   const hasKan = exposed.length > 0 && closed; // 暗カンがある手は手牌が9枚に満たないので特殊和了（九角無双）はない
   const unseen = unseenFromView(rules, view);
   const combos = combosFor(rules, 3 - exposed.length);
-  const evaluate = evaluatorFor(rules, exposed, ron, closed);
+  const evaluate = evaluatorFor(rules, exposed, ron, closed, round2);
   const order = orderOf(rules);
   const best = new Map();
 
@@ -225,13 +227,13 @@ export function warmUpState(rules, exposed = []) {
   const m = warmState.get(rules);
   return (m && m.get(exposed.slice().sort((a, b) => a - b).join(','))) || 'idle';
 }
-export function warmUp(rules, exposed = [], { chunk = 300, schedule = (f) => setTimeout(f, 0) } = {}) {
+export function warmUp(rules, exposed = [], { chunk = 300, schedule = (f) => setTimeout(f, 0), round2 = false } = {}) {
   let states = warmState.get(rules);
   if (!states) warmState.set(rules, (states = new Map()));
-  const key = exposed.slice().sort((a, b) => a - b).join(',');
+  const key = (round2 ? 'r2:' : '') + exposed.slice().sort((a, b) => a - b).join(',');
   if (states.get(key) === 'running' || states.get(key) === 'done') return false;
   states.set(key, 'running');
-  const evaluate = evaluatorFor(rules, exposed);
+  const evaluate = evaluatorFor(rules, exposed, false, exposed.length === 0, round2);
   const n = combosFor(rules, 3 - exposed.length).length;
   let i = 0;
   const step = () => {

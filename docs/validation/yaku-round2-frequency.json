@@ -1,0 +1,158 @@
+{
+ "engine": "0.8.0",
+ "ruleset": 2,
+ "rounds": 3000,
+ "seed": 1,
+ "points": {
+  "seifu": 2,
+  "hokaku": 2,
+  "tousa": 3
+ },
+ "modes": {
+  "math1": {
+   "off_main": {
+    "wins": 2929,
+    "winRate": 0.976,
+    "avgWinPoints": 3.991,
+    "avgYakuPoints": 1.175
+   },
+   "on_round2": {
+    "wins": 2929,
+    "winRate": 0.976,
+    "avgWinPoints": 4.797,
+    "avgYakuPoints": 1.989
+   },
+   "per100Wins": {
+    "seifu": 10.41,
+    "hokaku": 19.8,
+    "tousa": 7.48,
+    "anyNew": 29.22,
+    "newOnly": 13.86
+   },
+   "counts": {
+    "seifu": 305,
+    "hokaku": 580,
+    "tousa": 219,
+    "anyNew": 856,
+    "newOnly": 406
+   },
+   "avgWinPointsDelta": 0.806,
+   "sameHandRescore": {
+    "wins": 2929,
+    "raised": 838,
+    "raisedPer100": 28.61,
+    "avgDelta": 0.813
+   },
+   "identicalRounds": 2979,
+   "topCombos": [
+    [
+     "hokaku",
+     185
+    ],
+    [
+     "hokaku+sankan",
+     177
+    ],
+    [
+     "seifu",
+     73
+    ],
+    [
+     "hokaku+seifu",
+     54
+    ],
+    [
+     "sankan+seifu",
+     53
+    ],
+    [
+     "tousa",
+     40
+    ],
+    [
+     "hokaku+sankan+tousa",
+     37
+    ],
+    [
+     "sankan+tousa",
+     35
+    ]
+   ]
+  },
+  "math2": {
+   "off_main": {
+    "wins": 2907,
+    "winRate": 0.969,
+    "avgWinPoints": 3.922,
+    "avgYakuPoints": 1.129
+   },
+   "on_round2": {
+    "wins": 2908,
+    "winRate": 0.969,
+    "avgWinPoints": 4.557,
+    "avgYakuPoints": 1.771
+   },
+   "per100Wins": {
+    "seifu": 17.06,
+    "hokaku": 7.74,
+    "tousa": 5.02,
+    "anyNew": 25.86,
+    "newOnly": 8.39
+   },
+   "counts": {
+    "seifu": 496,
+    "hokaku": 225,
+    "tousa": 146,
+    "anyNew": 752,
+    "newOnly": 244
+   },
+   "avgWinPointsDelta": 0.635,
+   "sameHandRescore": {
+    "wins": 2907,
+    "raised": 743,
+    "raisedPer100": 25.56,
+    "avgDelta": 0.638
+   },
+   "identicalRounds": 2986,
+   "topCombos": [
+    [
+     "seifu",
+     127
+    ],
+    [
+     "sankan+seifu",
+     91
+    ],
+    [
+     "sanshougen+seifu",
+     82
+    ],
+    [
+     "sankan+sanshougen+seifu",
+     46
+    ],
+    [
+     "hokaku",
+     46
+    ],
+    [
+     "tousa",
+     39
+    ],
+    [
+     "hokaku+sankan+sanshougen",
+     36
+    ],
+    [
+     "hokaku+sankan",
+     35
+    ]
+   ]
+  }
+ },
+ "seconds": {
+  "math1": 518.618,
+  "math2": 2155.765
+ },
+ "note": "象限三角の手には等差三連を付けない（オーナー決定）後の再測定"
+}

@@ -2216,9 +2216,9 @@ async function chiAutoPass(browser) {
   // (12) バージョン表示：ヘッダー・ページタイトル（再現情報は廃止）
   {
     const { ctx, page, errors } = await apPage(browser, { viewport: { width: 1366, height: 768 } });
-    // 版の変更（docs/62・docs/84・docs/85）：画面 0.7.2（結果画面の再現情報を廃止）・エンジン 0.7.0（門前ツモ・一発）。版はヘッダーとページタイトルに出る
-    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.7.2');
-    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.7.2');
+    // 版の変更（docs/62・docs/84・docs/86）：画面 0.7.3・エンジン 0.8.0（正負対称・補角対・等差三連）。版はヘッダーとページタイトルに出る
+    assert.equal(await page.title(), '数雀（MATHJONG）Ver.0.7.3');
+    assert.equal(await page.locator('.logo').innerText(), '数雀 Ver.0.7.3');
     await page.locator('button[data-action="settings"]').tap();
     await assertNoReportInfo(page, '設定画面');
     assert.deepEqual(errors, []);

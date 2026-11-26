@@ -6,9 +6,10 @@
 // 各待ちには「役があって和了できるか」（鳴いた手は役が必要）と、自分から見えていない残り枚数を付ける。
 import { unseenFromView } from '../engine/yakuhint.js';
 
-// view：Game.viewFor(seat)。opts：{ selected：捨てる候補の牌の id（自分の番だけ）、riichiWaits：リーチの待ち（その席の非公開情報）、myTurn }
+// view：Game.viewFor(seat)。opts：{ selected：捨てる候補の牌の id（自分の番だけ）、riichiWaits：リーチの待ち（その席の非公開情報）、myTurn、
+//   round2：エンジン 0.8.0 の役（正負対称・補角対・等差三連）を役に数えるか（Game の round2YakuRule と同じ値） }
 // 戻り値：null（表示なし）または { kind: 'riichi' | 'tenpai' | 'after-discard', waits: [{ type, winnable, unseen }] }
-export function tenpaiWaitsView(rules, view, { selected = null, riichiWaits = null, myTurn = false } = {}) {
+export function tenpaiWaitsView(rules, view, { selected = null, riichiWaits = null, myTurn = false, round2 = false } = {}) {
   const seat = view.seat;
   const own = view.melds[seat];
   const exposed = own.map((m) => m.meld);
@@ -43,7 +44,7 @@ export function tenpaiWaitsView(rules, view, { selected = null, riichiWaits = nu
   const waits = types.map((t) => {
     counts[t]++;
     // 実際に和了できるか：鳴いた手は役が必要（ロンで判定。ツモでも役の条件は同じ）
-    const winnable = !!rules.analyzeWin(counts, exposed, { closed, ron: true });
+    const winnable = !!rules.analyzeWin(counts, exposed, { closed, ron: true, round2 });
     counts[t]--;
     return { type: t, winnable, unseen: Math.max(0, unseen[t]) };
   });

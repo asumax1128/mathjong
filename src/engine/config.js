@@ -7,9 +7,18 @@
 // 内部の角度は常に度（deg）で持ち、弧度法は画面表示だけで切り替える（angleUnit）。
 
 // 0.7.0：門前ツモ（+1）・一発（+1）を追加（ruleset 1・2。和了の点が変わるので版を上げる。0.6.0 の牌譜は追加前の点で再生する）
-export const ENGINE_VERSION = '0.7.0';
+// 0.8.0：数式系の役 正負対称・補角対・等差三連を追加（ruleset 1・2。0.7.0 以前の牌譜は追加前の点で再生する）
+export const ENGINE_VERSION = '0.8.0';
 // 門前ツモ・一発を数えない最後のエンジンの版（牌譜の再生用）
 export const PRE_TSUMO_IPPATSU_ENGINE = '0.6.0';
+// 0.8.0 の役（正負対称・補角対・等差三連）を数えない最後のエンジンの版（牌譜の再生用）
+export const PRE_ROUND2_YAKU_ENGINE = '0.7.0';
+// 牌譜を読めるエンジンの版と、その版の点の数え方（Game に渡す）。古い版の牌譜は読む・振り返るだけ（書き足しは今の版だけ）
+export const PAIFU_ENGINE_FEATURES = Object.freeze({
+  '0.6.0': Object.freeze({ tsumoIppatsu: false, round2Yaku: false }),
+  '0.7.0': Object.freeze({ tsumoIppatsu: true, round2Yaku: false }),
+  '0.8.0': Object.freeze({ tsumoIppatsu: true, round2Yaku: true }),
+});
 
 // Ver.0.1〜0.2.1 の規則（刻子・ポンなし、数式面子のみ、関数牌各16枚・0°〜360°）。
 // 互換テストと tools/simulate.mjs --legacy で使う（Ver.0.1 と同じ結果になることを確認する）。
@@ -117,6 +126,14 @@ const KOUTSU_YAKU = [
   { id: 'tanIsshoku', name: '正接一色', points: 16, yakuman: true, closedOnly: false, enabled: true, category: 'koutsu', fn: 'tan', provisional: true },
 ];
 
+// ---- エンジン 0.8.0 の新役（数式系・チーした手でも成立）。点数はオーナーが頻度測定を見て確定（正負対称2・補角対2・等差三連3。docs/86） ----
+// round2: true の役は ruleset 1・2 の Game だけが評価する（rules.evaluateMelds の round2）。従来ルール（0）・legacy には入れない
+const ROUND2_YAKU = [
+  { id: 'seifu', name: '正負対称', points: 2, closedOnly: false, enabled: true, round2: true },
+  { id: 'hokaku', name: '補角対', points: 2, closedOnly: false, enabled: true, round2: true },
+  { id: 'tousa', name: '等差三連', points: 3, closedOnly: false, enabled: true, round2: true }, // 象限三角が成立する手には付けない（rules.js）
+];
+
 // 数学Ⅰでは 0°〜180° しかないため、3つの象限を使う三象限巡は成立しない（象限一色は第1・第2象限で成立する）（tests/modes.test.js で全組合せを確認）
 const MATH1_IMPOSSIBLE = ['sanshougen'];
 
@@ -154,6 +171,8 @@ export function modeConfig(mode = DEFAULT_MODE) {
     y.category = 'formula';
     if (mode === 'math1' && MATH1_IMPOSSIBLE.includes(y.id)) { y.enabled = false; y.disabledReason = '数学Ⅰ（0°〜180°）では成立しない'; }
   }
+  // 数式系の新役（0.8.0）は数式系の役の後ろ（刻子系の前）に置く
+  c.yaku.push(...clone(ROUND2_YAKU).map((y) => ({ ...y, formulaOnly: true, category: 'formula' })));
   c.yaku.push(...clone(KOUTSU_YAKU));
   // 役候補ヒント：刻子系の役は「あと何枚」に1枚分を足した順位で並べる（数式系を優先。表示する枚数は正確な値）
   c.hint = { koutsuPenalty: 1 };

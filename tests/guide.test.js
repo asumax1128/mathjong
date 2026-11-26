@@ -35,7 +35,8 @@ test('通常役・役満の数式例：そのモードの判定で役が成立�
         return m;
       });
       assert.equal(ex.length, 3);
-      const ev = r.evaluateMelds(ex.map((m) => m.idx), true);
+      // round2：エンジン 0.8.0 の役（正負対称・補角対・等差三連）も評価する（ruleset 1・2 の Game と同じ）
+      const ev = r.evaluateMelds(ex.map((m) => m.idx), true, { round2: true });
       assert.ok(ev.yaku.some((z) => z.id === y.id), `${label} ${y.name}: 数式例で役が成立しない（${ev.yaku.map((z) => z.name)}）`);
       const counts = r.countsOf(ex.flatMap((m) => m.tiles));
       assert.ok(counts.every((c, t) => c <= r.types[t].copies), `${label} ${y.name}: 牌の枚数を超える`);

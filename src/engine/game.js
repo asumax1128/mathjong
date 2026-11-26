@@ -12,7 +12,9 @@ export class Game {
   // 2＝現行の新ルール（1 に加えてフリテン・関数牌のポン禁止）。newRules: true は ruleset 1（従来の呼び出し・再現 URL newrules=1）。
   // 過去の局（従来・初版）を同じ seed で同じ進行に再現できるよう、版ごとに規則を切り替える。
   // tsumoIppatsu：門前ツモ・一発を数えるか（ruleset 1・2 で既定は数える）。false はエンジン 0.6.0 までの牌譜の再生用（追加前の点）
-  constructor({ rules, seed = 1, dealer = 0, players, round = 1, presetWall = null, newRules = false, ruleset = newRules ? 1 : 0, tsumoIppatsu = true }) {
+  // round2Yaku：エンジン 0.8.0 の数式系の役（正負対称・補角対・等差三連）を数えるか（ruleset 1・2 で既定は数える）。
+  //   false はエンジン 0.7.0 までの牌譜の再生用（追加前の点）。和了の判定・待ち（waitsOf）・点の評価に同じ値を使う
+  constructor({ rules, seed = 1, dealer = 0, players, round = 1, presetWall = null, newRules = false, ruleset = newRules ? 1 : 0, tsumoIppatsu = true, round2Yaku = true }) {
     this.rules = rules;
     this.ruleset = ruleset;
     this.newRules = ruleset >= 1;
@@ -23,6 +25,7 @@ export class Game {
     this.fourRiichiRule = ruleset >= 2;
     // ruleset 1・2：門前ツモ（+1）・一発（+1）。従来ルール（0）の局は従来の点のまま（過去の再現 URL を変えない）
     this.tsumoIppatsuRule = ruleset >= 1 && tsumoIppatsu !== false;
+    this.round2YakuRule = ruleset >= 1 && round2Yaku !== false;
     this.seed = seed;
     this.dealer = dealer;
     this.round = round;
@@ -171,11 +174,11 @@ export class Game {
 
   tsumoAnalysis(seat) {
     if (this.phase !== 'turn' || seat !== this.current || !this.justDrew) return null;
-    return this.rules.analyzeWin(this.countsOf(this.hands[seat]), this.exposedMelds(seat), {closed:this.isClosed(seat)});
+    return this.rules.analyzeWin(this.countsOf(this.hands[seat]), this.exposedMelds(seat), {closed:this.isClosed(seat), round2: !!this.round2YakuRule});
   }
 
   ronAnalysis(seat, tileId) {
-    return this.rules.analyzeWin(this.countsOf([...this.hands[seat], tileId]), this.exposedMelds(seat), { ron: true,closed:this.isClosed(seat) });
+    return this.rules.analyzeWin(this.countsOf([...this.hands[seat], tileId]), this.exposedMelds(seat), { ron: true,closed:this.isClosed(seat), round2: !!this.round2YakuRule });
   }
 
   get riichiEnabled() {
@@ -190,7 +193,7 @@ export class Game {
     for (let t = 0; t < counts.length; t++) {
       if (counts[t] >= this.rules.types[t].copies) continue;
       counts[t]++;
-      const ok = !!this.rules.analyzeWin(counts, exposed, {closed});
+      const ok = !!this.rules.analyzeWin(counts, exposed, {closed, round2: !!this.round2YakuRule});
       counts[t]--;
       if (ok) out.push(t);
     }

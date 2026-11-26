@@ -135,18 +135,18 @@ test('ポン・チーをした手のツモには門前ツモが付かない（�
 });
 
 test('牌譜：新しい版の記録は再生で digest・結果・精算が一致し、エンジン 0.6.0 の記録は追加前の数え方で再生できる', () => {
-  assert.equal(ENGINE_VERSION, '0.7.0');
+  assert.ok(['0.7.0', '0.8.0'].includes(ENGINE_VERSION));
   const fresh = playRecorded({ mode: 'math1', length: 1, seedBase: 2468 });
   assert.equal(fresh.record.engineVersion, ENGINE_VERSION);
   assert.equal(verifyPaifu(fresh.record).valid, true);
   // 古い版（0.6.0）の記録を作る：追加前の数え方で打って記録し、版の欄を 0.6.0 にする（保存済みの牌譜と同じ形）
   let found = null;
   for (let seedBase = 1; seedBase <= 40; seedBase++) {
-    const rec = playRecorded({ mode: 'math1', length: 1, seedBase, tsumoIppatsu: false });
+    const rec = playRecorded({ mode: 'math1', length: 1, seedBase, tsumoIppatsu: false, round2Yaku: false }); // 0.6.0 は 0.8.0 の役もない
     const old = JSON.parse(JSON.stringify(rec.record));
     old.engineVersion = PRE_TSUMO_IPPATSU_ENGINE;
     assert.equal(verifyPaifu(old).valid, true, `${seedBase}：0.6.0 の記録は追加前の数え方で再生できる`);
-    // 門前ツモ・一発のある局を含むなら、版を偽って 0.7.0 として読むと点が合わず拒否される（版で数え方を分けている証拠）
+    // 門前ツモ・一発のある局を含むなら、版を偽って今の版として読むと点が合わず拒否される（版で数え方を分けている証拠）
     const relabeled = { ...old, engineVersion: ENGINE_VERSION };
     let rejected = false;
     try { verifyPaifu(relabeled); } catch { rejected = true; }

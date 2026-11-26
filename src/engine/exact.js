@@ -24,6 +24,11 @@ export const neg = (x) => normalize(-x.p, x.q, x.r);
 export const key = (x) => `${x.p}/${x.q}r${x.r}`;
 export const equals = (x, y) => key(x) === key(y);
 export const toNumber = (x) => (x.p / x.q) * Math.sqrt(x.r);
+// x + y = 0 か（厳密）。正規化済みの (p/q)√r は、r（平方因子なし）が違えば和が 0 にならない（どちらも 0 のときを除く）
+export function sumIsZero(x, y) {
+  if (x.p === 0 || y.p === 0) return x.p === 0 && y.p === 0;
+  return x.r === y.r && x.p * y.q + y.p * x.q === 0;
+}
 
 // x / y を厳密に計算。y=0 のときは null（定義なし）。
 export function divide(x, y) {
