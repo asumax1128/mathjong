@@ -741,7 +741,7 @@ function riichiFlashScan() {
   const now = performance.now();
   for (let i = from; i < g.events.length; i++) {
     const e = g.events[i];
-    if (e && e.type === 'riichi') { st.list = st.list.filter((x) => x.seat !== e.seat); st.list.push({ seat: e.seat, at: now }); }
+    if (e && e.type === 'riichi') { st.list = st.list.filter((x) => x.seat !== e.seat); st.list.push({ seat: e.seat, at: now, still: isLiteEffect(S.fx.mode, fxReduced()) }); } // 静止かどうかは光り始めに1回だけ決める（宣言の演出と同じ考え方）
   }
   st.seen = g.events.length;
 }
@@ -755,12 +755,11 @@ function riichiFlashApply() {
   const now = performance.now();
   st.list = st.list.filter((x) => now - x.at < RF_MS);
   if (!st.list.length) return;
-  const still = fxLite();
   for (const x of st.list) {
     const el = app.querySelector(`.seat-tag.seat-${x.seat}`);
     if (!el) continue;
     el.classList.add('riichi-flash');
-    if (still) el.classList.add('riichi-flash-still');
+    if (x.still) el.classList.add('riichi-flash-still');
     else el.style.animationDelay = `-${Math.round(now - x.at)}ms`;
   }
   const end = Math.min(...st.list.map((x) => x.at + RF_MS));
