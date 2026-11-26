@@ -9,7 +9,7 @@
 // AI に再判断させない・ゲーム本体や AI の乱数を消費しない（検証用の Game は独立したインスタンス）。
 //
 // 注意：この記録（visibility: 'private-full'）から全員の手牌・山を再現できる。画面への表示・共有・AI への受け渡しはしない。
-import { ENGINE_VERSION, PRE_TSUMO_IPPATSU_ENGINE, makeConfig } from './config.js';
+import { ENGINE_VERSION, PAIFU_ENGINE_FEATURES, makeConfig } from './config.js';
 import { createRules } from './rules.js';
 import { Game } from './game.js';
 import { applyRoundResult, dealerOf, ranks, potTotal, START_POINTS } from './match.js';
@@ -134,8 +134,8 @@ export function createPaifu({ id, createdAt, appVersion, mode, length, seedBase,
 
 const header = (p) => {
   requireThat(p && p.format === PAIFU_FORMAT && p.schemaVersion === PAIFU_SCHEMA_VERSION && p.kind === PAIFU_KIND, 'schemaVersion', 'unsupported format/version');
-  // エンジン 0.6.0 の牌譜（門前ツモ・一発の追加前）も読む：その点の数え方で再生する（newRoundGame）
-  requireThat(p.engineVersion === ENGINE_VERSION || p.engineVersion === PRE_TSUMO_IPPATSU_ENGINE, 'engineVersion', 'unsupported engine version');
+  // 古い版（0.6.0・0.7.0）の牌譜も読む：その版の点の数え方（PAIFU_ENGINE_FEATURES）で再生する（newRoundGame）
+  requireThat(Object.hasOwn(PAIFU_ENGINE_FEATURES, p.engineVersion), 'engineVersion', 'unsupported engine version');
   requireThat(p.visibility === 'private-full', 'visibility', 'private full record required');
 };
 const lastMatch = (p) => (p.rounds.length ? p.rounds.at(-1).settlement.matchAfter : p.initialMatch);
@@ -154,7 +154,7 @@ function active(p) {
 export function newRoundGame(p, round, dealer) {
   const seed = p.settings.seedBase + round * ROUND_SEED_STEP;
   return new Game({ rules: paifuRules(p.settings.mode), seed, dealer, players: copy(p.settings.players), round, ruleset: p.settings.ruleset,
-    tsumoIppatsu: p.engineVersion !== PRE_TSUMO_IPPATSU_ENGINE });
+    ...PAIFU_ENGINE_FEATURES[p.engineVersion] });
 }
 
 // 局の開始：game はその局の開始直後（親の最初のツモの後）。標準の配牌（seed・親・局番号）と一致しなければ記録しない

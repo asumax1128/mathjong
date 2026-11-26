@@ -21,14 +21,14 @@ import { tenpaiWaitsView } from './waits-view.js';
 //   ・others：聴牌にならない場合だけ、ほかの捨てられる牌（種類）で聴牌になるものがあるか（どの牌かは返さない）
 export function discardPreview(rules, view, {
   selected = null, myTurn = false, inRiichi = false, legalIds = null,
-  furitenRule = false, discardedTypes = null, tempFuriten = false,
+  furitenRule = false, discardedTypes = null, tempFuriten = false, round2 = false,
 } = {}) {
   if (!myTurn || inRiichi || selected === null || selected === undefined) return null;
   const sel = view.hand.find((h) => h.id === selected);
   if (!sel) return null;
   const legal = legalIds ? new Set(legalIds) : new Set(view.hand.map((h) => h.id));
   if (!legal.has(selected)) return null;
-  const tw = tenpaiWaitsView(rules, view, { selected, myTurn: true });
+  const tw = tenpaiWaitsView(rules, view, { selected, myTurn: true, round2 });
   const waits = tw ? tw.waits : [];
   const tenpai = waits.length > 0;
   let yaku = null;

@@ -14,7 +14,8 @@ export const PLAYERS = [{ kind: 'human', name: 'あなた' }, { kind: 'ai', name
 // opts：mode, length, seedBase, stopAfterSteps（途中退出）, humanPolicy（席0の代わりに打つキャラクター）, autoPassChance
 // leaveOpen：stopAfterSteps で止めたとき、中断にせず記録中のまま返す（保存の上限・自動削除のテスト用）
 // tsumoIppatsu：false でエンジン 0.6.0（門前ツモ・一発の追加前）の点の数え方で打つ（古い版の牌譜を作る試験用）
-export function playRecorded({ mode = 'math1', length = 4, seedBase = 12345, stopAfterSteps = null, humanAs = 'yujin', id = 'test-record', autoPass = true, leaveOpen = false, tsumoIppatsu = true } = {}) {
+// round2Yaku：false でエンジン 0.7.0（正負対称・補角対・等差三連の追加前）の数え方
+export function playRecorded({ mode = 'math1', length = 4, seedBase = 12345, stopAfterSteps = null, humanAs = 'yujin', id = 'test-record', autoPass = true, leaveOpen = false, tsumoIppatsu = true, round2Yaku = true } = {}) {
   const rules = paifuRules(mode);
   let match = createMatch({ length, riichiDeposit: RIICHI_DEPOSIT, agariYame: true });
   let p = createPaifu({ id, createdAt: '2026-11-01T00:00:00.000Z', appVersion: '0.7.0', mode, length, seedBase, players: PLAYERS, match });
@@ -23,7 +24,7 @@ export function playRecorded({ mode = 'math1', length = 4, seedBase = 12345, sto
   let steps = 0, round = 1;
   const counts = { human: 0, 'auto-pass': 0, 'auto-tsumogiri': 0, ai: 0, riichi: 0, chi: 0, pon: 0, ron: 0, tsumo: 0, ankan: 0 };
   while (!match.over) {
-    const g = new Game({ rules, seed: seedBase + round * ROUND_SEED_STEP, dealer: dealerOf(match), players: PLAYERS, round, ruleset: 2, tsumoIppatsu });
+    const g = new Game({ rules, seed: seedBase + round * ROUND_SEED_STEP, dealer: dealerOf(match), players: PLAYERS, round, ruleset: 2, tsumoIppatsu, round2Yaku });
     p = beginRound(p, g);
     while (g.pending()) {
       const q = g.pending();

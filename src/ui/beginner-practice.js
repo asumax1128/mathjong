@@ -487,7 +487,7 @@ function waitsLineHTML(p) {
   if (!lessonOf(p).showWaits || !g.furitenRule) return '';
   const pd = g.pending();
   const myTurn = !!(pd && pd.seat === HUMAN && pd.type === 'turn');
-  const tw = tenpaiWaitsView(g.rules, g.viewFor(HUMAN), { selected: myTurn ? p.selected : null, riichiWaits: g.riichiWaits[HUMAN], myTurn });
+  const tw = tenpaiWaitsView(g.rules, g.viewFor(HUMAN), { selected: myTurn ? p.selected : null, riichiWaits: g.riichiWaits[HUMAN], myTurn, round2: !!g.round2YakuRule });
   const f = g.furitenOf(HUMAN);
   let html = '';
   if (tw) {

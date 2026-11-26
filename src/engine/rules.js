@@ -1,6 +1,6 @@
 // 牌の種類・面子・和了・役の判定。画面や手番進行から独立した純粋ロジック。
 import { DEFAULT_CONFIG } from './config.js';
-import { exact, key as exactKey, trigExact, quadrantOf } from './exact.js';
+import { exact, key as exactKey, trigExact, quadrantOf, sumIsZero } from './exact.js';
 
 const QUADRANT_ANGLES = { 1: [30, 45, 60], 2: [120, 135, 150], 3: [210, 225, 240], 4: [300, 315, 330] };
 
@@ -46,7 +46,7 @@ export function createRules(config = DEFAULT_CONFIG) {
       if (v === null) continue; // tan90°, tan270° は定義なし
       const val = valueByExact.get(exactKey(v));
       if (!val) throw new Error(`no value tile for ${fn.fn}${ang.deg}`);
-      melds.push({ kind: 'formula', fn: fn.fn, deg: ang.deg, value: val.value, quadrant: ang.quadrant, tiles: [fn.idx, ang.idx, val.idx] });
+      melds.push({ kind: 'formula', fn: fn.fn, deg: ang.deg, value: val.value, exact: val.exact, quadrant: ang.quadrant, tiles: [fn.idx, ang.idx, val.idx] });
     }
   }
   melds.forEach((m, i) => { m.idx = i; m.key = `${m.fn}${m.deg}=${m.value}`; });
@@ -120,6 +120,16 @@ export function createRules(config = DEFAULT_CONFIG) {
       return Object.values(QUADRANT_ANGLES).some((q) => q.join(',') === degs);
     },
     douchi: (ms) => new Set(ms.map((m) => m.value)).size === 1,
+    // ---- エンジン 0.8.0 の数式系の役（round2：ruleset 1・2 の Game だけが評価する。docs/86） ----
+    // 正負対称：異なる2面子の値が +v と −v（v ≠ 0）。厳密値で「和が 0 かつ 0 でない」と判定する
+    seifu: (ms) => ms.some((a, i) => ms.some((b, j) => i < j && a.exact.p !== 0 && sumIsZero(a.exact, b.exact))),
+    // 補角対：異なる2面子の角度の和が 180°（同じ角度どうし（90°と90°）は除く）。関数・値の条件はない
+    hokaku: (ms) => ms.some((a, i) => ms.some((b, j) => i < j && a.deg !== b.deg && a.deg + b.deg === 180)),
+    // 等差三連：3面子の角度を小さい順に並べた差がすべて等しく、公差が正（360°をまたぐ回り込みは数えない）
+    tousa: (ms) => {
+      const d = ms.map((m) => m.deg).sort((a, b) => a - b);
+      return d[1] - d[0] > 0 && d[1] - d[0] === d[2] - d[1];
+    },
     doukaku: (ms) => new Set(ms.map((m) => m.deg)).size === 1 && new Set(ms.map((m) => m.fn)).size === 3,
     sanjuu: (ms) => new Set(ms.map((m) => m.key)).size === 1,
     // ---- 刻子系（Ver.0.3） ----
@@ -148,12 +158,15 @@ export function createRules(config = DEFAULT_CONFIG) {
 
   // meldIdxs: 3面子の index。closed: チー・ポンなしか。ron: ロン和了か（三暗刻の暫定規則で使う）。
   // 数式系の役（formulaOnly）は3組とも数式面子のときだけ評価する（刻子を含む混合形には付かない）。
-  function evaluateMelds(meldIdxs, closed, { ron = false } = {}) {
+  // round2：エンジン 0.8.0 の役（設定の round2: true：正負対称・補角対・等差三連）も評価するか。既定は評価しない
+  // （AI の期待値・役の見込みは従来どおり。Game は ruleset 1・2 のとき true を渡す）
+  function evaluateMelds(meldIdxs, closed, { ron = false, round2 = false } = {}) {
     const ms = meldIdxs.map((i) => melds[i]);
     const allFormula = ms.every((m) => m.kind === 'formula');
     const ctx = { closed, ron };
     const found = [];
     for (const y of yakuDefs) {
+      if (y.round2 && !round2) continue;
       if (y.closedOnly && !closed) continue;
       if (y.formulaOnly && !allFormula) continue;
       const det = detectors[y.id];
@@ -187,12 +200,12 @@ export function createRules(config = DEFAULT_CONFIG) {
   // counts: 手の内の牌（和了牌を含む） / exposed: 公開面子 index 配列
   // 合法な全和了形を評価し、最高得点の形を返す。和了不可なら null。
   // opts.ron: ロン和了の判定か（三暗刻の暫定規則）。
-  function analyzeWin(counts, exposed = [], { ron = false, closed = exposed.length === 0 } = {}) {
+  function analyzeWin(counts, exposed = [], { ron = false, closed = exposed.length === 0, round2 = false } = {}) {
     const k = 3 - exposed.length;
     const candidates = [];
     for (const d of decompose(counts, k)) {
       const all = [...exposed, ...d];
-      const ev = evaluateMelds(all, closed, { ron });
+      const ev = evaluateMelds(all, closed, { ron, round2 });
       if (!closed && config.rules.calledHandNeedsYaku && !ev.hasYaku) continue;
       candidates.push({ kind: 'normal', melds: all, concealedMelds: d, exposedMelds: exposed.slice(), ...ev });
     }

@@ -31,7 +31,7 @@ import { VOICE_KEY, parseVoiceSetting, createVoicePlayer } from './voice.js';
 
 // 画面（UI）の版。エンジン（判定・AI）の版 ENGINE_VERSION とは別に管理する。
 // ヘッダー・ページタイトル・タイトル画面の版表示はすべてこの値から表示する（index.html の title は tests/autopass.test.js で照合）。
-const APP_VERSION = '0.7.2';
+const APP_VERSION = '0.7.3';
 document.title = `数雀（MATHJONG）Ver.${APP_VERSION}`;
 const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -472,7 +472,7 @@ function startRound() {
   S.game = new Game({ rules, seed, dealer: S.dealer, players: PLAYERS, round: S.round, presetWall, ruleset });
   paifu.roundStarted(S.game, { presetWall: !!presetWall }); // 牌譜：標準の配牌の局だけ記録（テスト用の山は記録をやめる）
   S.aiRng = createRng(seed ^ 0x5bd1e995);
-  warmUp(rules); // 役候補ヒント用の評価を少しずつ事前計算（判定・進行には影響しない）
+  warmUp(rules, [], { round2: !!S.game.round2YakuRule }); // 役候補ヒント用の評価を少しずつ事前計算（判定・進行には影響しない）
   S.selected = null;
   // ヒントは局ごとに閉じた状態から始める（使用回数も局ごと）
   // 回数：発見（第1段階）・確認（第2段階）は「同じ手牌の状態」では1回だけ。値表は従来どおり開くたび。
@@ -1064,7 +1064,7 @@ function selfInfoHTML() {
   const p = g.pending();
   // 待ち（docs/65）：リーチ中は確定した待ち、リーチ前は聴牌なら待ち・自分の番は捨てる候補を選ぶとその牌を捨てた後の待ち。
   // 公開情報（自分の view）とその席の riichiWaits だけで計算する（src/ui/waits-view.js）
-  const tw = tenpaiWaitsView(rules, g.viewFor(HUMAN), { selected: S.selected, riichiWaits: g.riichiWaits[HUMAN], myTurn: !!(p && p.seat === HUMAN && p.type === 'turn') });
+  const tw = tenpaiWaitsView(rules, g.viewFor(HUMAN), { selected: S.selected, riichiWaits: g.riichiWaits[HUMAN], myTurn: !!(p && p.seat === HUMAN && p.type === 'turn'), round2: !!g.round2YakuRule });
   const blk = recentRonBlock();
   if (!tw && !f.furiten && !blk) return '';
   let html = '';
@@ -1096,7 +1096,7 @@ function discardPreviewData() {
   const allowed = humanDiscardFilter();
   return discardPreview(rules, g.viewFor(HUMAN), {
     selected: S.selected, myTurn, inRiichi: !!g.riichi[HUMAN], legalIds: g.hands[HUMAN].filter((id) => allowed(id)),
-    furitenRule: !!g.furitenRule, discardedTypes: g.furitenRule ? g.discarded[HUMAN] : null, tempFuriten: !!(g.furitenRule && g.tempFuriten[HUMAN]),
+    furitenRule: !!g.furitenRule, discardedTypes: g.furitenRule ? g.discarded[HUMAN] : null, tempFuriten: !!(g.furitenRule && g.tempFuriten[HUMAN]), round2: !!g.round2YakuRule,
   });
 }
 function discardPreviewHTML() {
@@ -1851,7 +1851,7 @@ function computeHint(view, claim) {
   const g = S.game;
   S.hintComputations = (S.hintComputations || 0) + 1;
   // 役候補（公開情報のみ。必要な牌の種類や捨て牌は表示しない）
-  const cands = yakuCandidates(rules, view, { claim });
+  const cands = yakuCandidates(rules, view, { claim, round2: !!g.round2YakuRule });
   const candHTML = cands.length
     ? `<ol class="yaku-cands">${cands.map((c) => `<li><b>${c.name}</b><span class="yc-pts">${c.yakuman ? '役満' : `+${c.yakuPoints}`}</span>${c.closedOnly ? '<span class="tag closed">門前限定</span>' : ''}<span class="yc-miss">${c.missing === 0 ? '完成！' : `あと${c.missing}枚`}</span></li>`).join('')}</ol>`
     : '<p class="yc-none">いま狙える役は見つかりません</p>';
